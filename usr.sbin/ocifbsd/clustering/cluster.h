@@ -1,0 +1,232 @@
+/*-
+ * Copyright (c) 2024 The FreeBSD Foundation
+ *
+ * This software was developed by Klara, Inc. under sponsorship
+ * from the FreeBSD Foundation.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+ * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
+ *
+ * $FreeBSD$
+ *
+ * Clustering and gossip protocol header
+ */
+
+#ifndef _OCIFBSD_CLUSTER_H
+#define _OCIFBSD_CLUSTER_H
+
+#include <sys/tree.h>
+#include <sys/socket.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <time.h>
+
+/* Cluster node states */
+#define NODE_STATE_LEFT      0
+#define NODE_STATE_JOINING   1
+#define NODE_STATE_ACTIVE    2
+#define NODE_STATE_SUSPECTED 3
+#define NODE_STATE_DEAD      4
+
+/* Cluster roles */
+#define NODE_ROLE_WORKER     0
+#define NODE_ROLE_MANAGER    1
+#define NODE_ROLE_STORAGE    2
+
+/* Message types for gossip protocol */
+#define GOSSIP_MSG_JOIN          0
+#define GOSSIP_MSG_ALIVE         1
+#define GOSSIP_MSG_DEAD          2
+#define GOSSIP_MSG_STATE         3
+#define GOSSIP_MSG_REQUEST       4
+#define GOSSIP_MSG_RESPONSE      5
+#define GOSSIP_MSG_USER_DATA     6
+#define GOSSIP_MSG_HEARTBEAT    7
+
+/* Cluster configuration */
+struct cluster_config {
+    char cluster_name[256];
+    uint16_t cluster_port;         /* UDP port for gossip */
+    uint16_t api_port;             /* TCP port for API */
+    int gossip_interval;           /* ms between gossip rounds */
+    int gossip_fanout;            /* number of peers to contact */
+    int suspicion_timeout;         /* ms before suspecting node */
+    int node_timeout;             /* ms before marking node dead */
+    int max_payload_size;         /* max gossip message size */
+    bool enable_encryption;       /* encrypt gossip traffic */
+    char *cluster_key;            /* encryption key if enabled */
+};
+
+/* Cluster node information */
+struct cluster_node {
+    char node_id[256];            /* unique node identifier */
+    char hostname[256];           /* node hostname */
+    char ip[64];                  /* node IP address */
+    uint16_t port;                /* gossip port */
+    uint16_t api_port;            /* API port */
+    int role;                     /* NODE_ROLE_* */
+    int state;                    /* NODE_STATE_* */
+    time_t last_seen;             /* timestamp of last message */
+    time_t joined_at;             /* when node joined cluster */
+    uint64_t incarnation;        /* incarnation number for anti-entropy */
+    double weight;                 /* scheduling weight */
+    uint64_t capacity_cpu;       /* CPU capacity units */
+    uint64_t capacity_memory;     /* memory capacity */
+    uint64_t capacity_storage;    /* storage capacity */
+    uint64_t used_cpu;            /* used CPU */
+    uint64_t used_memory;         /* used memory */
+    uint64_t used_storage;        /* used storage */
+    char **labels;                /* node labels for scheduling */
+    int nlabels;
+    
+    /* Gossip state */
+    uint32_t suspicion_count;     /* number of suspicion rounds */
+    time_t suspicion_started;
+    
+    /* Tree entry */
+    RB_ENTRY(cluster_node) entry;
+    pthread_mutex_t lock;
+};
+
+/* Node RB tree */
+RB_HEAD(node_tree, cluster_node);
+RB_PROTOTYPE(node_tree, cluster_node, entry, node_compare);
+
+/* Gossip message */
+struct gossip_message {
+    uint8_t type;                 /* GOSSIP_MSG_* */
+    uint8_t version;              /* protocol version */
+    uint16_t length;             /* payload length */
+    char source_id[256];         /* source node ID */
+    uint64_t source_incarnation; /* source incarnation */
+    uint64_t timestamp;          /* message timestamp */
+    uint8_t payload[];           /* variable length payload */
+};
+
+/* SWIM failure detector state */
+struct swim_state {
+    uint32_t proto_version;
+    uint32_t ack_version;
+    uint32_t suspect_version;
+    uint32_t coordinator_version;
+};
+
+/* Cluster event */
+struct cluster_event {
+    char node_id[256];
+    int event_type;              /* JOIN, LEAVE, FAILURE, RECOVERY */
+    time_t timestamp;
+    char details[512];
+};
+
+/* Raft consensus state */
+struct raft_state {
+    enum {
+        RAFT_FOLLOWER,
+        RAFT_CANDIDATE,
+        RAFT_LEADER
+    } state;
+    
+    uint64_t current_term;
+    char voted_for[256];
+    uint64_t commit_index;
+    uint64_t last_applied;
+    
+    /* Leader info */
+    char leader_id[256];
+    time_t last_heartbeat;
+    
+    /* Log */
+    struct raft_log_entry {
+        uint64_t term;
+        uint64_t index;
+        char command[256];
+        time_t timestamp;
+    } *log;
+    int log_size;
+    int log_capacity;
+};
+
+/* Cluster management functions */
+int cluster_init(struct cluster_config *config);
+int cluster_shutdown(void);
+int cluster_join(const char *manager_address);
+int cluster_leave(const char *reason);
+
+/* Node management */
+struct cluster_node *cluster_node_add(const char *node_id, const char *ip, uint16_t port);
+int cluster_node_remove(const char *node_id);
+struct cluster_node *cluster_node_get(const char *node_id);
+struct cluster_node **cluster_nodes_list(int *count);
+struct cluster_node **cluster_nodes_by_role(int role, int *count);
+
+/* Gossip protocol */
+int gossip_start(void);
+int gossip_stop(void);
+int gossip_send_message(const char *target_id, uint8_t type, const void *payload, size_t len);
+int gossip_broadcast(uint8_t type, const void *payload, size_t len);
+
+/* Failure detection */
+int swim_init(void);
+int swim_process_heartbeat(const char *node_id, uint64_t incarnation);
+int swim_mark_suspected(const char *node_id);
+int swim_mark_dead(const char *node_id);
+int swim_mark_alive(const char *node_id);
+
+/* Raft consensus */
+int raft_init(void);
+int raft_become_leader(void);
+int raft_become_follower(const char *leader_id);
+int raft_become_candidate(void);
+int raft_append_entry(const char *command, size_t len);
+int raft_replicate_log(const char *target_id);
+int raft_commit_log(uint64_t index);
+int raft_get_leader(char *leader_id, size_t len);
+
+/* Cluster events */
+typedef void (*cluster_event_cb)(struct cluster_event *event);
+int cluster_set_event_callback(cluster_event_cb callback);
+int cluster_emit_event(int event_type, const char *node_id, const char *details);
+
+/* Cluster status */
+int cluster_status_json(char **json_out, size_t *json_len);
+int cluster_nodes_json(char **json_out, size_t *json_len);
+int cluster_health_json(char **json_out, size_t *json_len);
+
+/* Service discovery */
+struct service_endpoint {
+    char service_name[256];
+    char namespace[256];
+    char node_id[256];
+    char ip[64];
+    uint16_t port;
+    char protocol[16];             /* tcp, udp, http, https */
+    int replicas;
+    time_t last_updated;
+};
+
+int cluster_register_service(const char *name, const char *ns, const char *ip, uint16_t port, const char *protocol);
+int cluster_unregister_service(const char *name, const char *ns);
+struct service_endpoint **cluster_find_services(const char *name, const char *ns, int *count);
+int cluster_services_json(char **json_out, size_t *json_len);
+
+#endif /* _OCIFBSD_CLUSTER_H */
