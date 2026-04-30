@@ -2,11 +2,8 @@
 # $FreeBSD$
 # SPDX-License-Identifier: BSD-2-Clause
 
-PACKAGE=	tests
+# Test suite for ocifbsd
 
-ATF_TESTS_SH=	ocifbsd_test
-
-SYSCFG_JAIL_ROOT?=	.
-BINDINGS=	${SYSCFG_JAIL_ROOT}/ocifbsd_test.sh
+ATF_TESTS=	ocifbsd_test
 
 .include <bsd.test.mk>

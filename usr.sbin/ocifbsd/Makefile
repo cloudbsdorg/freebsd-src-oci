@@ -8,25 +8,32 @@ MAN=	ocifbsd.8
 
 SRCS=	\
 	ocifbsd.c \
-	container.c \
-	oci2jail.c \
-	state.c \
-	hooks.c \
-	utils.c
+	src/container.c \
+	src/oci2jail.c \
+	src/state.c \
+	src/hooks.c \
+	src/utils.c
 
-# Orchestration module
-SUBDIR+=	orchestration
-
-# Image management module
+# Module subdirectories
+SUBDIR+=	api
+SUBDIR+=	cert
+SUBDIR+=	clustering
+SUBDIR+=	convert
+SUBDIR+=	export
+SUBDIR+=	gc
 SUBDIR+=	image
-
-# Network module
+SUBDIR+=	logd
+SUBDIR+=	metrics
+SUBDIR+=	namespace
 SUBDIR+=	network
-
-# Security module
+SUBDIR+=	orchestration
+SUBDIR+=	pam
 SUBDIR+=	security
+SUBDIR+=	security-daemon
+SUBDIR+=	tpm
 
 CFLAGS+=	-I${.CURDIR}/include
+CFLAGS+=	-I${.CURDIR}
 CFLAGS+=	-Wall -Wextra -Werror
 CFLAGS+=	-D_XOPEN_SOURCE=700
 
@@ -34,7 +41,10 @@ LIBADD=	\
 	jail \
 	util \
 	zfs \
-	m
+	m \
+	pthread \
+	crypto \
+	json-c
 
 # Enable test suite
 HAS_TESTS=
