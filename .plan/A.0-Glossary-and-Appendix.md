@@ -53,6 +53,10 @@
     - [A.8.3 Quorum](#a83-quorum)
     - [A.8.4 Backpressure](#a84-backpressure)
     - [A.8.5 Connection Draining](#a85-connection-draining)
+    - [A.8.6 ACME](#a86-acme)
+    - [A.8.7 SCEP](#a87-scep)
+    - [A.8.8 EST](#a88-est)
+    - [A.8.9 .feb](#a89-feb)
 
 ---
 
@@ -1202,3 +1206,92 @@ Existing pods continue running
 ```
 
 **In our system:** Connection draining is used during live migration and rolling updates.
+
+---
+
+### A.8.6 ACME (Automated Certificate Management Environment)
+
+**ACME (Automated Certificate Management Environment)** is a protocol for automating certificate issuance and management, most famously used by Let's Encrypt.
+
+**Why it matters:** Manually managing TLS certificates is error-prone and often neglected. ACME automates the entire lifecycle.
+
+**How it works:**
+```
+1. Client generates key pair
+2. Client requests certificate from ACME server
+3. ACME server issues challenge (HTTP-01, DNS-01, or TLS-ALPN-01)
+4. Client proves control over domain
+5. ACME server issues signed certificate
+6. Client automatically renews before expiry
+```
+
+**ACME Challenges:**
+- **HTTP-01:** Place a file on port 80 of the domain
+- **DNS-01:** Create a TXT record in DNS
+- **TLS-ALPN-01:** Respond to TLS ALPN request (ALPN challenge)
+
+**In our system:** The `ocifbsd cert acme` commands support automatic certificate issuance and renewal via Let's Encrypt and other ACME-compatible CAs.
+
+---
+
+### A.8.7 SCEP (Simple Certificate Enrollment Protocol)
+
+**SCEP** is a protocol for automating certificate enrollment, primarily used in enterprise environments and by Microsoft AD CS.
+
+**Why it matters:** Enterprises with existing PKI infrastructure need a way to integrate new services without manual certificate requests.
+
+**How it works:**
+```
+1. Client generates CSR
+2. Client sends CSR to SCEP endpoint
+3. SCEP server authenticates request (password, certificate, or HMAC)
+4. SCEP server issues certificate
+5. Client polls for certificate ready status
+6. Client retrieves certificate
+```
+
+**In our system:** The `ocifbsd cert scep enroll` command allows integration with Microsoft AD CS and other SCEP-enabled CAs.
+
+---
+
+### A.8.8 EST (Enrollment over Secure Transport)
+
+**EST** is a modern replacement for SCEP, using TLS client certificates and HTTP-based enrollment.
+
+**Why it matters:** SCEP was designed for environments with limited PKI knowledge. EST provides a cleaner, more secure protocol.
+
+**Advantages over SCEP:**
+- Uses TLS client certificates for authentication
+- No shared secrets or challenge passwords
+- Built on modern HTTPS infrastructure
+- Supports CSR signing for CA certificate renewal
+
+**In our system:** The `ocifbsd cert est enroll` command provides EST-based enrollment for enterprise PKI integration.
+
+---
+
+### A.8.9 .feb (Flat Export Bundle)
+
+**.feb (Flat Export Bundle)** is our container export format designed for portability across cloud providers.
+
+**Why it matters:** Moving containers between environments (on-prem to cloud, cloud to cloud) requires a standard, portable format.
+
+**Structure:**
+```
+container.feb/
+├── metadata.json          # Container config, entrypoint, env vars
+├── rootfs.tar.gz          # Container filesystem (compressed)
+├── volumes/               # Volume data (if included)
+│   ├── volume1.tar.gz
+│   └── volume2.tar.gz
+├── config.json            # OCI runtime config
+└── manifest.json          # Export manifest (version, platform info)
+```
+
+**Benefits:**
+- Self-contained: All data in one directory/tree
+- Compressed: Efficient storage and transfer
+- Platform-agnostic: Works across AWS, GCP, Azure
+- Incremental: Can export only changed volumes
+
+**In our system:** The `ocifbsd export` and `ocifbsd import` commands work with .feb bundles for cloud migration and backup.
