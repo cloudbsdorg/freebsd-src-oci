@@ -1,0 +1,181 @@
+#!/bin/sh
+# $FreeBSD$
+#
+# ocifbsd        FreeBSD Native OCI Runtime
+#
+# PROVIDE: ocifbsd
+# REQUIRE: NETWORKING FILESYSTEMS zfs
+# KEYWORD: shutdown
+#
+
+. /etc/rc.subr
+
+name="ocifbsd"
+rcvar=ocifbsd_enable
+command="/usr/sbin/ocifbsd"
+command_args="daemon"
+pidfile="/var/run/ocifbsd/ocifbsd.pid"
+
+# Source configuration
+if [ -f /etc/ocifbsd/ocifbsd.conf ]; then
+	. /etc/ocifbsd/ocifbsd.conf
+fi
+
+# Default settings
+ocifbsd_enable="${ocifbsd_enable:-NO}"
+ocifbsd_flags="${ocifbsd_flags:-}"
+
+# Create required directories
+ocifbsd_prestart()
+{
+	local dirs="/var/run/ocifbsd /var/lib/ocifbsd /var/log/ocifbsd"
+
+	for dir in $dirs; do
+		if [ ! -d "$dir" ]; then
+			mkdir -p "$dir"
+			chmod 755 "$dir"
+		fi
+	done
+
+	# Initialize ZFS datasets
+	if [ "${ocifbsd_zfs_pool:-zroot}" != "" ]; then
+		zfs create -p "${ocifbsd_zfs_pool}/ocifbsd/images" 2>/dev/null
+		zfs create -p "${ocifbsd_zfs_pool}/ocifbsd/layers" 2>/dev/null
+		zfs create -p "${ocifbsd_zfs_pool}/ocifbsd/volumes" 2>/dev/null
+	fi
+
+	return 0
+}
+
+# Start the daemon
+ocifbsd_start()
+{
+	ocifbsd_prestart
+
+	if [ ! -x "$command" ]; then
+		warn "ocifbsd not installed"
+		return 1
+	fi
+
+	check_startupjd
+	umask 077
+
+	# Start the daemon
+	${command} ${ocifbsd_flags} daemon &
+	daemon_pid=$!
+
+	# Wait a moment for startup
+	sleep 1
+
+	# Check if daemon started
+	if kill -0 $daemon_pid 2>/dev/null; then
+		echo "Starting ocifbsd daemon (PID: $daemon_pid)"
+		echo $daemon_pid > $pidfile
+		return 0
+	else
+		warn "ocifbsd daemon failed to start"
+		return 1
+	fi
+}
+
+# Stop the daemon
+ocifbsd_stop()
+{
+	if [ ! -f "$pidfile" ]; then
+		if ! ps -ax | grep -q "[o]cifbsd daemon"; then
+			return 0
+		fi
+		_pid=$(ps -ax | grep "[o]cifbsd daemon" | awk '{print $1}')
+	else
+		_pid=$(cat $pidfile)
+	fi
+
+	if [ -n "$_pid" ]; then
+		echo "Stopping ocifbsd daemon (PID: $_pid)"
+		kill $_pid 2>/dev/null
+
+		# Wait for graceful shutdown
+		_wait=10
+		while [ $_wait -gt 0 ]; do
+			if ! kill -0 $_pid 2>/dev/null; then
+				break
+			fi
+			sleep 1
+			_wait=$((_wait - 1))
+		done
+
+		# Force kill if still running
+		if kill -0 $_pid 2>/dev/null; then
+			kill -9 $_pid 2>/dev/null
+		fi
+
+		rm -f $pidfile
+	fi
+
+	return 0
+}
+
+# Reload configuration (restart containers with updated config)
+ocifbsd_reload()
+{
+	if [ ! -f "$pidfile" ]; then
+		err 1 "ocifbsd not running"
+	fi
+
+	_pid=$(cat $pidfile)
+	echo "Reloading ocifbsd configuration (PID: $_pid)"
+	kill -HUP $_pid
+
+	return 0
+}
+
+# Status check
+ocifbsd_status()
+{
+	if [ -f "$pidfile" ]; then
+		_pid=$(cat $pidfile)
+		if kill -0 $_pid 2>/dev/null; then
+			echo "ocifbsd is running as PID $_pid"
+			return 0
+		fi
+	fi
+
+	if ps -ax | grep -q "[o]cifbsd daemon"; then
+		echo "ocifbsd is running"
+		return 0
+	fi
+
+	echo "ocifbsd is not running"
+	return 1
+}
+
+# Run compose up
+ocifbsd_up()
+{
+	shift
+	${command} compose up "$@"
+}
+
+# Run compose down
+ocifbsd_down()
+{
+	shift
+	${command} compose down "$@"
+}
+
+# Run compose logs
+ocifbsd_logs()
+{
+	shift
+	${command} compose logs "$@"
+}
+
+# Command aliases
+extra_commands="reload up down logs"
+reload_cmd="ocifbsd_reload"
+up_cmd="ocifbsd_up"
+down_cmd="ocifbsd_down"
+logs_cmd="ocifbsd_logs"
+
+load_rc_config $name
+run_rc_command "$1"

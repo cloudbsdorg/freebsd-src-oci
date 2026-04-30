@@ -1,0 +1,183 @@
+.\" $FreeBSD$
+.\" Man page for ocifbsd.conf
+.\"
+.Dd April 30, 2026
+.Dt OCIFBSD.CONF 5
+.Os FreeBSD
+.Sh NAME
+.Nm ocifbsd.conf
+.Nd configuration file for FreeBSD Native OCI Runtime
+.Sh DESCRIPTION
+.Nm
+is the configuration file for the FreeBSD Native OCI Runtime
+.Pq Nm ocifbsd .
+The file format is that of
+.Xr rc.conf 5 .
+.Pp
+The following variables can be set:
+.Bl -tag -width indent
+.It Va ocifbsd_enable
+.Bd -literal
+Type: boolean
+Default: NO
+Description: Set to YES to enable the ocifbsd daemon at boot.
+.Ed
+.It Va ocifbsd_flags
+.Bd -literal
+Type: string
+Default: (none)
+Description: Additional flags to pass to the ocifbsd daemon.
+.Ed
+.It Va ocifbsd_zfs_pool
+.Bd -literal
+Type: string
+Default: zroot
+Description: ZFS pool name for storing images, layers, and volumes.
+.Ed
+.It Va ocifbsd_data_dir
+.Bd -literal
+Type: path
+Default: /var/lib/ocifbsd
+Description: Base directory for image and volume data.
+.Ed
+.It Va ocifbsd_state_dir
+.Bd -literal
+Type: path
+Default: /var/run/ocifbsd
+Description: Directory for runtime state files.
+.Ed
+.It Va ocifbsd_network_driver
+.Bd -literal
+Type: string
+Default: bridge
+Options: bridge, routed, overlay, host, none
+Description: Default network driver for containers.
+.Ed
+.It Va ocifbsd_bridge_name
+.Bd -literal
+Type: string
+Default: ocifbsd0
+Description: Bridge interface name for container networking.
+.Ed
+.It Va ocifbsd_default_subnet
+.Bd -literal
+Type: CIDR
+Default: 10.0.0.0/24
+Description: Default subnet for container networks.
+.Ed
+.It Va ocifbsd_default_gateway
+.Bd -literal
+Type: IP address
+Default: 10.0.0.1
+Description: Default gateway for container networks.
+.Ed
+.It Va ocifbsd_default_registry
+.Bd -literal
+Type: string
+Default: docker.io
+Description: Default registry to pull images from.
+.Ed
+.It Va ocifbsd_log_dir
+.Bd -literal
+Type: path
+Default: /var/log/ocifbsd
+Description: Directory for log files.
+.Ed
+.It Va ocifbsd_log_level
+.Bd -literal
+Type: string
+Default: info
+Options: debug, info, warn, error
+Description: Logging verbosity level.
+.Ed
+.It Va ocifbsd_log_to_syslog
+.Bd -literal
+Type: boolean
+Default: YES
+Description: Send logs to syslog.
+.Ed
+.It Va ocifbsd_default_memory_limit
+.Bd -literal
+Type: size
+Default: 512M
+Description: Default memory limit for containers.
+.Ed
+.It Va ocifbsd_default_cpu_shares
+.Bd -literal
+Type: number
+Default: 1024
+Description: Default CPU shares (relative weight).
+.Ed
+.It Va ocifbsd_default_proc_limit
+.Bd -literal
+Type: number
+Default: 1024
+Description: Default maximum number of processes per container.
+.Ed
+.It Va ocifbsd_default_security
+.Bd -literal
+Type: string
+Default: default
+Options: default, biba-low, biba-equal, mls-low, partition
+Description: Default MAC security policy.
+.Ed
+.It Va ocifbsd_default_network
+.Bd -literal
+Type: string
+Default: bridge
+Description: Default network mode for containers.
+.Ed
+.It Va ocifbsd_default_dns
+.Bd -literal
+Type: IP address
+Default: 8.8.8.8
+Description: Default DNS server for containers.
+.Ed
+.It Va ocifbsd_pull_timeout
+.Bd -literal
+Type: seconds
+Default: 300
+Description: Timeout for image pulls in seconds.
+.Ed
+.It Va ocifbsd_cluster_enable
+.Bd -literal
+Type: boolean
+Default: NO
+Description: Enable clustering support.
+.Ed
+.It Va ocifbsd_cluster_interface
+.Bd -literal
+Type: string
+Default: vtnet0
+Description: Network interface for cluster communication.
+.Ed
+.It Va ocifbsd_cluster_port
+.Bd -literal
+Type: number
+Default: 2377
+Description: Port for cluster control plane.
+.Ed
+.El
+.Sh FILES
+.Bl -tag -width /etc/ocifbsd/ocifbsd.conf
+.It Pa /etc/ocifbsd/ocifbsd.conf
+The configuration file.
+.It Pa /var/run/ocifbsd/
+Runtime state directory.
+.It Pa /var/lib/ocifbsd/
+Image and volume data directory.
+.It Pa /var/log/ocifbsd/
+Log directory.
+.El
+.Sh SEE ALSO
+.Xr ocifbsd 8 ,
+.Xr jail 8 ,
+.Xr rc.conf 5
+.Sh HISTORY
+The
+.Nm
+file format first appeared in FreeBSD 15.0.
+.Sh AUTHORS
+The
+.Nm ocifbsd
+project was developed by Klara, Inc. under sponsorship from the FreeBSD Foundation.
