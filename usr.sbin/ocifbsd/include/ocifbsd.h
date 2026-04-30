@@ -203,4 +203,46 @@ void	ocifbsd_set_verbose(bool verbose);
 const char *ocifbsd_state_to_string(ocifbsd_state_t state);
 const char *ocifbsd_strerror(int error);
 
+/*
+ * Container state type for orchestration compatibility
+ */
+typedef enum {
+	CONTAINER_STATE_UNKNOWN = 0,
+	CONTAINER_STATE_CREATED,
+	CONTAINER_STATE_RUNNING,
+	CONTAINER_STATE_STOPPED,
+	CONTAINER_STATE_PAUSED,
+	CONTAINER_STATE_RESTARTING,
+	CONTAINER_STATE_REMOVING,
+	CONTAINER_STATE_DEAD
+} container_state_t;
+
+/*
+ * Orchestration interface functions
+ * These provide a simpler interface for the orchestration layer
+ */
+int	ocifbsd_create_container(const char *name, const char *image,
+	    const char *command, const char *args, const char *pod_id,
+	    char **container_id);
+int	ocifbsd_start_container(const char *container_id);
+int	ocifbsd_stop_container(const char *container_id, int sig);
+int	ocifbsd_delete_container(const char *container_id, bool force);
+int	ocifbsd_get_container_state(const char *container_id,
+	    container_state_t *state, int *exit_code);
+int	ocifbsd_logs(const char *container_id, int tail, bool follow);
+int	ocifbsd_pause_container(const char *container_id);
+int	ocifbsd_resume_container(const char *container_id);
+char	*ocifbsd_get_container_info(const char *container_id);
+
+/*
+ * Scheduler initialization for orchestration
+ */
+int	ocifbsd_scheduler_init(void);
+
+/*
+ * Event functions for orchestration
+ */
+int	ocifbsd_event_subscribe(void (*callback)(const char *, void *), void *arg);
+int	ocifbsd_event_publish(const char *event_type, const char *message);
+
 #endif /* _OCIFBSD_H */

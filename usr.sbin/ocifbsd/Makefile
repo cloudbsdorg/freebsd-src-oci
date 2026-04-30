@@ -14,6 +14,18 @@ SRCS=	\
 	hooks.c \
 	utils.c
 
+# Orchestration module
+SUBDIR+=	orchestration
+
+# Image management module
+SUBDIR+=	image
+
+# Network module
+SUBDIR+=	network
+
+# Security module
+SUBDIR+=	security
+
 CFLAGS+=	-I${.CURDIR}/include
 CFLAGS+=	-Wall -Wextra -Werror
 CFLAGS+=	-D_XOPEN_SOURCE=700
