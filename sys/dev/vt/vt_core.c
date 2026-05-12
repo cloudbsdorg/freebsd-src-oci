@@ -804,11 +804,11 @@ vt_machine_kbdevent(struct vt_device *vd, int c)
 		return (1);
 	case SPCLKEY | STBY: /* XXX Not present in kbdcontrol parser. */
 		/* Put machine into Stand-By mode. */
-		power_pm_suspend(POWER_SSTATE_TRANSITION_STANDBY);
+		power_pm_suspend(POWER_TRANSITION_STANDBY);
 		return (1);
 	case SPCLKEY | SUSP: /* kbdmap(5) keyword `susp`. */
 		/* Suspend machine. */
-		power_pm_suspend(POWER_SSTATE_TRANSITION_SUSPEND);
+		power_pm_suspend(POWER_TRANSITION_SUSPEND);
 		return (1);
 	}
 
@@ -1683,6 +1683,9 @@ vtterm_splash(struct vt_device *vd)
 	struct splash_info *si;
 	uintptr_t image;
 	vt_axis_t top, left;
+
+	if (KERNEL_PANICKED())
+		return;
 
 	if ((vd->vd_flags & VDF_TEXTMODE) != 0 || (boothowto & RB_MUTE) == 0)
 		return;
