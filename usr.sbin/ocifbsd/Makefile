@@ -510,6 +510,53 @@ verify: check-deps
 	@echo "FIXME: $$(grep -rE 'FIXME' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
 	@echo "HACK:  $$(grep -rE 'HACK' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
 
+# Show diff stats against main (or specified branch)
+diff-main:
+	@echo "=== Diff vs main ==="
+	@BRANCH=$${DIFF_BRANCH:-main}; \
+	echo "Comparing feature/oci-bootstrap to $$BRANCH"; \
+	echo ""; \
+	echo "--- Commits ahead ---"; \
+	git rev-list --count $$BRANCH..HEAD 2>/dev/null | xargs echo "  Count:"; \
+	echo ""; \
+	echo "--- Files changed ---"; \
+	git diff --stat $$BRANCH..HEAD 2>/dev/null | tail -1; \
+	echo ""; \
+	echo "--- Lines added/removed ---"; \
+	git diff --shortstat $$BRANCH..HEAD 2>/dev/null; \
+	echo ""; \
+	echo "--- New files in usr.sbin/ocifbsd ---"; \
+	git diff --name-status $$BRANCH..HEAD 2>/dev/null | grep "^A.*usr.sbin/ocifbsd" | head -20; \
+	echo ""; \
+	echo "--- New files in .plan ---"; \
+	git diff --name-status $$BRANCH..HEAD 2>/dev/null | grep "^A.*\.plan/" | head -20; \
+	echo ""; \
+	echo "--- New files in .omo ---"; \
+	git diff --name-status $$BRANCH..HEAD 2>/dev/null | grep "^A.*\.omo/" | head -20; \
+	echo ""; \
+	echo "--- New files in .github ---"; \
+	git diff --name-status $$BRANCH..HEAD 2>/dev/null | grep "^A.*\.github/" | head -20; \
+	echo ""; \
+	echo "--- Modified files ---"; \
+	git diff --name-status $$BRANCH..HEAD 2>/dev/null | grep "^M" | head -20
+
+# Show file additions/modifications against main
+diff-files:
+	@echo "=== Files changed vs main ==="
+	@BRANCH=$${DIFF_BRANCH:-main}; \
+	git diff --name-status $$BRANCH..HEAD 2>/dev/null | awk '{print $$1, $$2}' | sort | uniq -c | sort -rn
+
+# Show commit log against main
+diff-log:
+	@echo "=== Commits ahead of main ==="
+	@BRANCH=$${DIFF_BRANCH:-main}; \
+	git log --oneline $$BRANCH..HEAD 2>/dev/null
+
+# Run all meta targets (all-checks + diff-main + diff-files + diff-log)
+all-meta: all-checks diff-main diff-files diff-log
+	@echo ""
+	@echo "=== All meta targets complete ==="
+
 .if exists(src.opts.mk)
 .include <src.opts.mk>
 .endif
