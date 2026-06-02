@@ -103,6 +103,7 @@ darwin-test: darwin-build
 # without requiring a full build or VM. They run on the host (macOS or Linux)
 # and operate on the source tree directly.
 OCIFBSD_ROOT := ${.CURDIR}
+REPO_ROOT != cd ${.CURDIR}/../.. 2>/dev/null && pwd
 
 # Show all available targets with descriptions
 help:
@@ -635,7 +636,87 @@ review:
 	FREE=`grep -rE 'free[(]' ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null | wc -l | tr -d ' '`; \
 	echo "  malloc: $$MALLOC, free: $$FREE"
 	@echo ""
+	@echo "--- 8. Dead code patterns (AI slop) ---"
+	@DEAD=$$(grep -rE 'strlcpy\(\(char\[\]\)\{0\}' ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null | wc -l | tr -d ' '); \
+	echo "  Compound-literal HACKs: $$DEAD (should be 0)"
+	@echo ""
 	@echo "Self-review complete. Run 'bmake audit' for AI slop markers."
+
+# Print version information
+version:
+	@echo "=== ocifbsd Version Info ==="
+	@echo "Source version: $$(grep '^VERSION=' ${OCIFBSD_ROOT}/Makefile | head -1 | cut -d= -f2 | tr -d ' \t')"
+	@echo "Git branch:     $$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
+	@echo "Git commit:     $$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+	@echo "Git describe:   $$(git describe --always --dirty 2>/dev/null || echo 'unknown')"
+	@echo "Build date:     $$(date +%Y-%m-%d)"
+	@echo "Source files:   $$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "Source lines:   $$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $$1}')"
+
+# Print one-line summary of codebase state
+summary:
+	@TODO=$$(grep -rE 'TODO' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' '); \
+	FIXME=$$(grep -rE 'FIXME' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' '); \
+	HACK=$$(grep -rE 'HACK' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' '); \
+	FILES=$$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | wc -l | tr -d ' '); \
+	LINES=$$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $$1}'); \
+	echo "ocifbsd $$(grep '^VERSION=' ${OCIFBSD_ROOT}/Makefile | head -1 | cut -d= -f2 | tr -d ' \t') | $$(git rev-parse --abbrev-ref HEAD 2>/dev/null)@$$(git rev-parse --short HEAD 2>/dev/null) | $$FILES files, $$LINES lines | TODO=$$TODO FIXME=$$FIXME HACK=$$HACK"
+
+# Check that all documentation files are valid markdown
+doc-check:
+	@echo "=== Documentation Check ==="
+	@echo ""
+	@echo "Repo root: ${REPO_ROOT}"; \
+	echo ""; \
+	echo "--- .omo/drafts/*.md ---"; \
+	for f in ${REPO_ROOT}/.omo/drafts/*.md; do \
+		if [ -f "$$f" ]; then \
+			LINES=$$(wc -l < "$$f" | tr -d ' '); \
+			HEADERS=$$(grep -c '^#' "$$f" 2>/dev/null); \
+			CODEBLOCKS=$$(grep -c '^```' "$$f" 2>/dev/null); \
+			REL=$$(echo "$$f" | sed "s|${REPO_ROOT}/||"); \
+			printf "  %-50s %5s lines  %3s headers  %3s code blocks\n" "$$REL" "$$LINES" "$$HEADERS" $$((CODEBLOCKS / 2)); \
+		fi; \
+	done; \
+	echo ""; \
+	echo "--- .plan/*.md ---"; \
+	for f in ${REPO_ROOT}/.plan/*.md; do \
+		if [ -f "$$f" ]; then \
+			LINES=$$(wc -l < "$$f" | tr -d ' '); \
+			HEADERS=$$(grep -c '^#' "$$f" 2>/dev/null); \
+			REL=$$(echo "$$f" | sed "s|${REPO_ROOT}/||"); \
+			printf "  %-50s %5s lines  %3s headers\n" "$$REL" "$$LINES" "$$HEADERS"; \
+		fi; \
+	done; \
+	echo ""; \
+	echo "--- Cross-references between docs ---"; \
+	for doc in TROUBLESHOOTING CONTRIBUTING FAQ SECURITY MIGRATION CHANGELOG; do \
+		REF_FILE=${REPO_ROOT}/.omo/drafts/$$doc.md; \
+		if [ -f "$$REF_FILE" ]; then \
+			REFS=$$(grep -oE '`?\.omo/drafts/[a-zA-Z-]+\.md`?' "$$REF_FILE" 2>/dev/null | sort -u | wc -l | tr -d ' '); \
+			printf "  %-50s %s cross-references\n" ".omo/drafts/$$doc.md" "$$REFS"; \
+		fi; \
+	done
+
+# Create a release archive (tarball)
+archive:
+	@echo "=== Creating release archive ==="
+	@VER=`grep '^VERSION=' ${OCIFBSD_ROOT}/Makefile | head -1 | cut -d= -f2 | tr -d ' \t'`; \
+	DATE=`date +%Y%m%d`; \
+	ARCHIVE="ocifbsd-$$VER-$$DATE.tar.gz"; \
+	SRC_DIR=`dirname ${OCIFBSD_ROOT}`; \
+	SRC_BASE=`basename ${OCIFBSD_ROOT}`; \
+	echo "Archive: $$ARCHIVE"; \
+	echo "Source:  $$SRC_DIR/$$SRC_BASE"; \
+	tar czf /tmp/$$ARCHIVE -C "$$SRC_DIR" "$$SRC_BASE" 2>/dev/null && { \
+		echo "Created: /tmp/$$ARCHIVE"; \
+		ls -lh /tmp/$$ARCHIVE; \
+		echo ""; \
+		echo "Contents (top 20):"; \
+		tar tzf /tmp/$$ARCHIVE | head -20; \
+		echo ""; \
+		echo "Total files: `tar tzf /tmp/$$ARCHIVE | wc -l | tr -d ' '`"; \
+	} || { echo "tar failed"; exit 1; }
 
 .if exists(src.opts.mk)
 .include <src.opts.mk>
