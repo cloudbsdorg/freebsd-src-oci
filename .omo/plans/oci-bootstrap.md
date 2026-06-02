@@ -1708,3 +1708,53 @@ test "$(git log --oneline origin/main..HEAD | wc -l)" -ge 5
 
 ---
 
+
+---
+
+## T27 (added post-plan): Darwin build automation
+
+**Motivation**: The cross-build process from macOS requires many manual steps (install brew, install llvm, set XCC/XLD/XAS env vars, create MAKEOBJDIRPREFIX, run the cross-build). This task automates the process so a developer with a clean macOS install can build ocifbsd with one command.
+
+**Files added/modified**:
+- `usr.sbin/ocifbsd/darwin-bootstrap.sh` (new, 289 lines)
+  - Checks Xcode CLT, Homebrew, bmake, LLVM (clang/lld/lldb), Python 3
+  - Auto-installs missing tools via brew when `--install` flag is passed
+  - Installs Homebrew itself if missing (with user confirmation)
+  - Generates `/tmp/ocifbsd-cross-build-env` with all XCC/XLD/XAS env vars
+  - Idempotent: safe to run multiple times
+  - POSIX sh compatible (no bashisms)
+- `usr.sbin/ocifbsd/Makefile` (modified, +48 lines)
+  - Added 3 targets: `darwin-bootstrap`, `darwin-build`, `darwin-test`
+  - `darwin-bootstrap`: just runs the bootstrap script with `--install --yes`
+  - `darwin-build`: bootstrap + cross-build userland libraries + build ocifbsd + build tests
+  - `darwin-test`: build + scp to FreeBSD VM + run kyua tests + restore snapshot
+
+**Usage from repo root**:
+```bash
+# One-time setup on a clean macOS
+bmake -C usr.sbin/ocifbsd darwin-bootstrap
+
+# Bootstrap + build (most common)
+bmake -C usr.sbin/ocifbsd darwin-build
+
+# Build + deploy to VM + run tests
+VM_HOST=my-freebsd-vm bmake -C usr.sbin/ocifbsd darwin-test
+```
+
+**Acceptance criteria**:
+- [x] Script handles clean macOS (Xcode CLT -> brew -> bmake -> llvm -> python3)
+- [x] Script auto-installs brew if missing (with confirmation)
+- [x] Script is idempotent (re-running doesn't break things)
+- [x] Makefile targets use bmake continuation syntax
+- [x] Targets accept env vars: TARGET, TARGET_ARCH, VM_HOST, OCIFBSD_ENV_FILE
+- [x] darwin-build fails fast on missing tools
+- [x] darwin-test handles VM snapshot restore via existing helper
+
+**Tested on this machine**:
+- `darwin-bootstrap.sh --check` runs all 5 checks, identifies missing lld
+- Makefile targets parse correctly (bmake finds them, error is about .include path, not syntax)
+
+**Not yet tested** (requires clean macOS):
+- Full `--install` flow on a machine without brew
+- darwin-build on a machine with all tools installed
+- darwin-test against a live FreeBSD VM
