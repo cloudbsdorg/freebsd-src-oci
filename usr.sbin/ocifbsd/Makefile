@@ -557,6 +557,86 @@ all-meta: all-checks diff-main diff-files diff-log
 	@echo ""
 	@echo "=== All meta targets complete ==="
 
+# Prepare for opening a PR: verify state, run all checks, show summary
+prepare-pr: check-deps verify diff-main diff-files diff-log
+	@echo ""
+	@echo "=== PR Preparation Complete ==="
+	@echo ""
+	@echo "Pre-PR checklist:"
+	@echo "  [ ] All inspection targets passed (see all-checks report)"
+	@echo "  [ ] Diff vs main looks correct (see diff-main output)"
+	@echo "  [ ] No new TODO/FIXME/HACK markers added (see audit)"
+	@echo "  [ ] No new seccomp/json-c references (see lint)"
+	@echo "  [ ] All files have license headers (see smoke)"
+	@echo "  [ ] Branch is up to date with main: git pull --rebase origin main"
+	@echo "  [ ] Commit messages are clear and descriptive"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  git push origin feature/oci-bootstrap"
+	@echo "  gh pr create --base main --title '...' --body '...'"
+	@echo ""
+	@echo "Or use: make push-pr TITLE='...' BODY='...'"
+
+# Push to origin and open a PR (requires gh CLI)
+push-pr:
+	@echo "=== Pushing to origin and opening PR ==="
+	@TITLE="$${TITLE:-ocifbsd: updates}"; \
+	BODY="$${BODY:-See commits for details.}"; \
+	if ! command -v gh >/dev/null 2>&1; then \
+		echo "gh CLI not found. Install with: brew install gh"; \
+		exit 1; \
+	fi; \
+	echo "Title: $$TITLE"; \
+	echo "Body:  $$BODY"; \
+	echo ""; \
+	git push -u origin feature/oci-bootstrap && \
+	gh pr create --base main --title "$$TITLE" --body "$$BODY" && \
+	echo "" && \
+	echo "PR opened. View at: $$(gh pr view --web --json url -q .url 2>/dev/null || echo 'use: gh pr view')"
+
+# Self-review: check for common mistakes before committing
+review:
+	@echo "=== Self-Review ==="
+	@echo ""
+	@echo "--- 1. No debug code ---"
+	@if grep -rn "printf.*DEBUG\|fprintf.*stderr.*DEBUG" ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null; then \
+		echo "  [WARN] Debug printfs found"; \
+	else \
+		echo "  [OK] No debug printfs"; \
+	fi
+	@echo ""
+	@echo "--- 2. No commented-out code ---"
+	@COMMENTED=$$(grep -rE "^\s*//" ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null | wc -l | tr -d ' '); \
+	echo "  $$COMMENTED single-line comments (review for commented-out code)"
+	@echo ""
+	@echo "--- 3. No hardcoded paths ---"
+	@if grep -rn "/usr/local\|/home/" ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null; then \
+		echo "  [WARN] Hardcoded paths found"; \
+	else \
+		echo "  [OK] No hardcoded /usr/local or /home/ paths"; \
+	fi
+	@echo ""
+	@echo "--- 4. No magic numbers (basic check) ---"
+	@echo "  (manual review recommended)"
+	@echo ""
+	@echo "--- 5. Function length ---"
+	@echo "  Longest functions (top 5):"
+	@for f in $$(find ${OCIFBSD_ROOT} -name "*.c" 2>/dev/null); do \
+		awk '/^[a-zA-Z_].*\(.*\).*\{/ {start=NR; name=$$0} /^\}/ {if (start) print NR-start+1, name; start=0}' "$$f"; \
+	done | sort -rn | head -5
+	@echo ""
+	@echo "--- 6. Consistent error handling ---"
+	@echo "  Functions returning -1 on error (top 5 files):"
+	@grep -rc 'return -1' ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null | grep -v ':0$$' | sort -t: -k2 -rn | head -5
+	@echo ""
+	@echo "--- 7. Memory safety ---"
+	@echo "  malloc/free pairs:"
+	@MALLOC=`grep -rE 'malloc[(]' ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null | wc -l | tr -d ' '`; \
+	FREE=`grep -rE 'free[(]' ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null | wc -l | tr -d ' '`; \
+	echo "  malloc: $$MALLOC, free: $$FREE"
+	@echo ""
+	@echo "Self-review complete. Run 'bmake audit' for AI slop markers."
+
 .if exists(src.opts.mk)
 .include <src.opts.mk>
 .endif
