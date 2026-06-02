@@ -6,14 +6,18 @@ This guide documents known issues, workarounds, and the state of the
 ## Quick Diagnostics
 
 ```bash
-# Run all inspection targets
-cd usr.sbin/ocifbsd
-bmake info       # Build environment
-bmake smoke      # Syntax + license check
-bmake audit      # AI slop markers
-bmake lint       # Code quality issues
-bmake sources    # File inventory
-bmake size       # Tree size
+# One-command developer setup
+bmake -C usr.sbin/ocifbsd dev
+
+# Or step by step:
+bmake -C usr.sbin/ocifbsd check-deps   # verify required tools
+bmake -C usr.sbin/ocifbsd info        # build environment
+bmake -C usr.sbin/ocifbsd smoke       # syntax + license check
+bmake -C usr.sbin/ocifbsd audit       # AI slop markers
+bmake -C usr.sbin/ocifbsd lint        # code quality issues
+bmake -C usr.sbin/ocifbsd sources     # file inventory
+bmake -C usr.sbin/ocifbsd size        # tree size
+bmake -C usr.sbin/ocifbsd all-checks  # run all inspection targets
 ```
 
 ## Cross-Build from macOS
