@@ -1,0 +1,1077 @@
+/*-
+ * Copyright (c) 2024 The FreeBSD Foundation
+ *
+ * This software was developed by Klara, Inc. under sponsorship
+ * from the FreeBSD Foundation.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+ * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
+ *
+ * $FreeBSD$
+ *
+ * Certificate management implementation
+ * Phase 16: Certificate Management
+ */
+
+#include <sys/param.h>
+#include <sys/stat.h>
+#include <sys/mount.h>
+#include <sys/json.h>
+
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <openssl/evp.h>
+#include <openssl/ec.h>
+#include <openssl/err.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <fts.h>
+#include <libutil.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <syslog.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "cert.h"
+#include "../include/ocifbsd.h"
+
+/* Global state */
+static struct cert_tree cert_registry;
+static struct rotation_config rot_config;
+static struct cert_stats stats;
+static pthread_mutex_t cert_lock = PTHREAD_MUTEX_INITIALIZER;
+static int initialized = 0;
+static char cert_dir[PATH_MAX];
+static char backup_dir[PATH_MAX];
+
+/*
+ * Initialize certificate management
+ */
+int
+cert_init(void)
+{
+    if (initialized)
+        return (0);
+
+    /* Initialize registry */
+    RB_INIT(&cert_registry);
+
+    /* Set up directories */
+    snprintf(cert_dir, sizeof(cert_dir), "%s/certs", OCIFBSD_CONFIG_DIR);
+    snprintf(backup_dir, sizeof(backup_dir), "%s/certs/backups", OCIFBSD_VAR_DIR);
+    mkdirp(cert_dir, 0700);
+    mkdirp(backup_dir, 0700);
+
+    /* Load existing certificates */
+    cert_load_registry();
+
+    /* Initialize rotation config */
+    memset(&rot_config, 0, sizeof(rot_config));
+    rot_config.ca_rotation_years = 10;
+    rot_config.node_rotation_days = 365;
+    rot_config.api_rotation_days = 90;
+    rot_config.service_rotation_days = 365;
+    rot_config.warning_days = 30;
+    rot_config.critical_days = 7;
+    rot_config.auto_rotate = true;
+
+    /* Initialize stats */
+    memset(&stats, 0, sizeof(stats));
+
+    /* Open syslog */
+    openlog("ocifbsd-cert", LOG_PID, LOG_DAEMON);
+
+    syslog(LOG_INFO, "Certificate management initialized");
+
+    initialized = 1;
+    return (0);
+}
+
+/*
+ * Shutdown certificate management
+ */
+void
+cert_shutdown(void)
+{
+    struct cert_info *cert;
+
+    if (!initialized)
+        return;
+
+    pthread_mutex_lock(&cert_lock);
+
+    RB_FOREACH(cert, cert_tree, &cert_registry) {
+        RB_REMOVE(cert_tree, &cert_registry, cert);
+        free(cert);
+    }
+
+    pthread_mutex_unlock(&cert_lock);
+    closelog();
+
+    initialized = 0;
+}
+
+/*
+ * Load certificate registry from disk
+ */
+static void
+cert_load_registry(void)
+{
+    char path[PATH_MAX];
+    DIR *dir;
+    struct dirent *dp;
+    FILE *fp;
+    char buf[1024];
+
+    snprintf(path, sizeof(path), "%s/registry.json", cert_dir);
+    fp = fopen(path, "r");
+    if (fp == NULL)
+        return;
+
+    /* Parse JSON registry */
+    while (fgets(buf, sizeof(buf), fp) != NULL) {
+        struct cert_info *cert = cert_parse_json(buf);
+        if (cert) {
+            RB_INSERT(cert_tree, &cert_registry, cert);
+            stats.total_certs++;
+        }
+    }
+
+    fclose(fp);
+}
+
+/*
+ * Parse certificate info from JSON
+ */
+static struct cert_info *
+cert_parse_json(const char *json)
+{
+    struct cert_info *cert;
+    char name[256], cn[256], key_path[PATH_MAX], cert_path[PATH_MAX];
+    int type, status;
+    long created, expires, last_rotated;
+
+    cert = calloc(1, sizeof(*cert));
+    if (cert == NULL)
+        return (NULL);
+
+    if (sscanf(json,
+        "{\"name\":\"%255[^\"]\",\"type\":%d,\"cn\":\"%255[^\"]\","
+        "\"status\":%d,\"created\":%ld,\"expires\":%ld,\"last_rotated\":%ld,"
+        "\"key_path\":\"%1023[^\"]\",\"cert_path\":\"%1023[^\"]\"}",
+        name, &type, cn, &status, &created, &expires, &last_rotated,
+        key_path, cert_path) == 9) {
+
+        strlcpy(cert->name, name, sizeof(cert->name));
+        strlcpy(cert->cn, cn, sizeof(cert->cn));
+        strlcpy(cert->key_path, key_path, sizeof(cert->key_path));
+        strlcpy(cert->cert_path, cert_path, sizeof(cert->cert_path));
+        cert->type = type;
+        cert->status = status;
+        cert->created = created;
+        cert->expires = expires;
+        cert->last_rotated = last_rotated;
+    } else {
+        free(cert);
+        cert = NULL;
+    }
+
+    return (cert);
+}
+
+/*
+ * Create CA certificate
+ */
+int
+cert_create_ca(const char *name, int validity_days)
+{
+    EVP_PKEY *pkey;
+    X509 *cert;
+    FILE *fp;
+    char key_path[PATH_MAX], cert_path[PATH_MAX];
+    struct cert_info *info;
+
+    if (name == NULL || validity_days <= 0)
+        return (-1);
+
+    /* Generate key */
+    pkey = EVP_PKEY_new();
+    if (pkey == NULL)
+        return (-1);
+
+    /* Generate EC P-256 key */
+    EC_KEY *eckey = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    if (eckey == NULL) {
+        EVP_PKEY_free(pkey);
+        return (-1);
+    }
+
+    EC_KEY_generate_key(eckey);
+    EVP_PKEY_assign_EC_KEY(pkey, eckey);
+
+    /* Create self-signed CA certificate */
+    cert = X509_new();
+    if (cert == NULL) {
+        EVP_PKEY_free(pkey);
+        return (-1);
+    }
+
+    X509_set_version(cert, 2);  /* v3 */
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+    X509_gmtime_adj(X509_get_notBefore(cert), 0);
+    X509_gmtime_adj(X509_get_notAfter(cert), validity_days * 86400L);
+    X509_set_pubkey(cert, pkey);
+
+    X509_NAME *name_obj = X509_get_subject_name(cert);
+    X509_NAME_add_entry_by_txt(name_obj, "CN", MBSTRING_ASC,
+        (unsigned char *)name, -1, -1, 0);
+    X509_set_issuer_name(cert, name_obj);
+
+    /* CA extensions */
+    X509V3_CTX ctx;
+    X509V3_set_ctx_nodb(&ctx);
+    X509V3_set_ctx(&ctx, cert, cert, NULL, NULL, 0);
+
+    X509_EXTENSION *ext = X509V3_EXT_conf_nid(NULL, &ctx,
+        NID_basic_constraints, "CA:TRUE");
+    if (ext) {
+        X509_add_ext(cert, ext, -1);
+        X509_EXTENSION_free(ext);
+    }
+
+    ext = X509V3_EXT_conf_nid(NULL, &ctx, NID_key_usage,
+        "keyCertSign,cRLSign,digitalSignature");
+    if (ext) {
+        X509_add_ext(cert, ext, -1);
+        X509_EXTENSION_free(ext);
+    }
+
+    /* Sign with CA key */
+    X509_sign(cert, pkey, EVP_sha256());
+
+    /* Save files */
+    snprintf(key_path, sizeof(key_path), "%s/%s.key", cert_dir, name);
+    snprintf(cert_path, sizeof(cert_path), "%s/%s.crt", cert_dir, name);
+
+    fp = fopen(key_path, "w");
+    if (fp) {
+        PEM_write_PrivateKey(fp, pkey, NULL, NULL, 0, NULL, NULL);
+        fclose(fp);
+        chmod(key_path, 0600);
+    }
+
+    fp = fopen(cert_path, "w");
+    if (fp) {
+        PEM_write_X509(fp, cert);
+        fclose(fp);
+    }
+
+    /* Add to registry */
+    info = calloc(1, sizeof(*info));
+    if (info) {
+        strlcpy(info->name, name, sizeof(info->name));
+        strlcpy(info->cn, name, sizeof(info->cn));
+        info->type = CERT_TYPE_CA;
+        info->status = CERT_STATUS_VALID;
+        info->created = time(NULL);
+        info->expires = info->created + (validity_days * 86400L);
+        info->last_rotated = info->created;
+        strlcpy(info->key_path, key_path, sizeof(info->key_path));
+        strlcpy(info->cert_path, cert_path, sizeof(info->cert_path));
+
+        pthread_mutex_lock(&cert_lock);
+        RB_INSERT(cert_tree, &cert_registry, info);
+        stats.total_certs++;
+        stats.valid_certs++;
+        pthread_mutex_unlock(&cert_lock);
+
+        cert_save_registry();
+    }
+
+    EVP_PKEY_free(pkey);
+    X509_free(cert);
+
+    syslog(LOG_INFO, "Created CA certificate: %s", name);
+
+    return (0);
+}
+
+/*
+ * Create node certificate
+ */
+int
+cert_create_node(const char *name, const char *cn, const char *sans)
+{
+    /* Similar to CA but signed by CA, not self-signed */
+    char *key_pem, *cert_pem;
+    int ret;
+
+    if (name == NULL || cn == NULL)
+        return (-1);
+
+    /* Generate key and CSR */
+    EVP_PKEY *pkey = EVP_PKEY_new();
+    if (pkey == NULL)
+        return (-1);
+
+    EC_KEY *eckey = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    EC_KEY_generate_key(eckey);
+    EVP_PKEY_assign_EC_KEY(pkey, eckey);
+
+    /* Convert key to PEM */
+    BIO *bio = BIO_new(BIO_s_mem());
+    PEM_write_bio_PrivateKey(bio, pkey, NULL, NULL, 0, NULL, NULL);
+    char *key_buf;
+    long key_len = BIO_get_mem_data(bio, &key_buf);
+    key_pem = strndup(key_buf, key_len);
+    BIO_free(bio);
+
+    /* Create and sign certificate */
+    X509 *cert = cert_create_signed(pkey, cn, sans, rot_config.node_rotation_days);
+    if (cert == NULL) {
+        EVP_PKEY_free(pkey);
+        free(key_pem);
+        return (-1);
+    }
+
+    bio = BIO_new(BIO_s_mem());
+    PEM_write_bio_X509(bio, cert);
+    char *cert_buf;
+    long cert_len = BIO_get_mem_data(bio, &cert_buf);
+    cert_pem = strndup(cert_buf, cert_len);
+    BIO_free(bio);
+
+    /* Save */
+    ret = cert_save(name, key_pem, cert_pem);
+
+    free(key_pem);
+    free(cert_pem);
+    EVP_PKEY_free(pkey);
+    X509_free(cert);
+
+    return (ret);
+}
+
+/*
+ * Create signed certificate (internal helper)
+ */
+static X509 *
+cert_create_signed(EVP_PKEY *pkey, const char *cn, const char *sans, int days)
+{
+    EVP_PKEY *ca_key;
+    X509 *ca_cert, *cert;
+
+    /* Load CA key and cert */
+    char ca_key_path[PATH_MAX], ca_cert_path[PATH_MAX];
+    snprintf(ca_key_path, sizeof(ca_key_path), "%s/ca.key", cert_dir);
+    snprintf(ca_cert_path, sizeof(ca_cert_path), "%s/ca.crt", cert_dir);
+
+    FILE *fp = fopen(ca_key_path, "r");
+    if (fp == NULL)
+        return (NULL);
+    ca_key = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
+    fclose(fp);
+
+    fp = fopen(ca_cert_path, "r");
+    if (fp == NULL) {
+        EVP_PKEY_free(ca_key);
+        return (NULL);
+    }
+    ca_cert = PEM_read_X509(fp, NULL, NULL, NULL);
+    fclose(fp);
+
+    if (ca_key == NULL || ca_cert == NULL) {
+        if (ca_key) EVP_PKEY_free(ca_key);
+        if (ca_cert) X509_free(ca_cert);
+        return (NULL);
+    }
+
+    /* Create certificate */
+    cert = X509_new();
+    if (cert == NULL) {
+        EVP_PKEY_free(ca_key);
+        X509_free(ca_cert);
+        return (NULL);
+    }
+
+    X509_set_version(cert, 2);
+    ASN1_INTEGER_set(X509_get_serialNumber(cert), (long)time(NULL));
+    X509_gmtime_adj(X509_get_notBefore(cert), 0);
+    X509_gmtime_adj(X509_get_notAfter(cert), days * 86400L);
+    X509_set_pubkey(cert, pkey);
+
+    X509_NAME *name_obj = X509_get_subject_name(cert);
+    X509_NAME_add_entry_by_txt(name_obj, "CN", MBSTRING_ASC,
+        (unsigned char *)cn, -1, -1, 0);
+    X509_set_issuer_name(cert, X509_get_subject_name(ca_cert));
+
+    /* Sign with CA */
+    X509_sign(cert, ca_key, EVP_sha256());
+
+    EVP_PKEY_free(ca_key);
+    X509_free(ca_cert);
+
+    return (cert);
+}
+
+/*
+ * Create API server certificate
+ */
+int
+cert_create_api(const char *name, const char *cn, const char *sans)
+{
+    return (cert_create_node(name, cn, sans));
+}
+
+/*
+ * Create service account certificate
+ */
+int
+cert_create_service_account(const char *name, const char *namespace)
+{
+    char cn[512];
+    snprintf(cn, sizeof(cn), "system:serviceaccount:%s:%s",
+        namespace ? namespace : "default", name);
+    return (cert_create_node(name, cn, NULL));
+}
+
+/*
+ * Get certificate info
+ */
+struct cert_info *
+cert_get(const char *name)
+{
+    struct cert_info key, *cert;
+
+    if (name == NULL)
+        return (NULL);
+
+    pthread_mutex_lock(&cert_lock);
+    strlcpy(key.name, name, sizeof(key.name));
+    cert = RB_FIND(cert_tree, &cert_registry, &key);
+    pthread_mutex_unlock(&cert_lock);
+
+    return (cert);
+}
+
+/*
+ * List all certificates
+ */
+struct cert_info **
+cert_list(int *count)
+{
+    struct cert_info **list = NULL;
+    struct cert_info *cert;
+    int n = 0;
+
+    if (count == NULL)
+        return (NULL);
+
+    pthread_mutex_lock(&cert_lock);
+
+    RB_FOREACH(cert, cert_tree, &cert_registry) {
+        list = realloc(list, (n + 1) * sizeof(*list));
+        if (list == NULL)
+            break;
+        list[n++] = cert;
+    }
+
+    pthread_mutex_unlock(&cert_lock);
+
+    *count = n;
+    return (list);
+}
+
+/*
+ * Delete certificate
+ */
+int
+cert_delete(const char *name)
+{
+    struct cert_info *cert;
+
+    if (name == NULL)
+        return (-1);
+
+    pthread_mutex_lock(&cert_lock);
+
+    strlcpy((char[]){0}, name, 256);  /* HACK to avoid unused warning */
+    cert = cert_get(name);
+    if (cert == NULL) {
+        pthread_mutex_unlock(&cert_lock);
+        return (-1);
+    }
+
+    /* Remove files */
+    unlink(cert->key_path);
+    unlink(cert->cert_path);
+
+    RB_REMOVE(cert_tree, &cert_registry, cert);
+    stats.total_certs--;
+    if (cert->status == CERT_STATUS_VALID)
+        stats.valid_certs--;
+
+    free(cert);
+
+    pthread_mutex_unlock(&cert_lock);
+
+    cert_save_registry();
+
+    return (0);
+}
+
+/*
+ * Renew certificate
+ */
+int
+cert_renew(const char *name)
+{
+    struct cert_info *cert;
+
+    cert = cert_get(name);
+    if (cert == NULL)
+        return (-1);
+
+    /* Re-create the certificate */
+    switch (cert->type) {
+    case CERT_TYPE_NODE:
+        cert_create_node(name, cert->cn, cert->sans);
+        break;
+    case CERT_TYPE_API_SERVER:
+        cert_create_api(name, cert->cn, cert->sans);
+        break;
+    default:
+        return (-1);
+    }
+
+    cert->last_rotated = time(NULL);
+    cert_save_registry();
+
+    return (0);
+}
+
+/*
+ * Revoke certificate
+ */
+int
+cert_revoke(const char *name, const char *reason)
+{
+    struct cert_info *cert;
+
+    cert = cert_get(name);
+    if (cert == NULL)
+        return (-1);
+
+    pthread_mutex_lock(&cert_lock);
+    cert->status = CERT_STATUS_REVOKED;
+    stats.revoked_certs++;
+    pthread_mutex_unlock(&cert_lock);
+
+    cert_save_registry();
+    cert_history_add(name, "revoked");
+
+    syslog(LOG_WARNING, "Certificate revoked: %s reason: %s", name, reason);
+
+    return (0);
+}
+
+/*
+ * Verify certificate
+ */
+int
+cert_verify(const char *name)
+{
+    struct cert_info *cert;
+    X509 *cert_x509;
+    FILE *fp;
+    int ret = -1;
+
+    cert = cert_get(name);
+    if (cert == NULL)
+        return (-1);
+
+    fp = fopen(cert->cert_path, "r");
+    if (fp == NULL)
+        return (-1);
+
+    cert_x509 = PEM_read_X509(fp, NULL, NULL, NULL);
+    fclose(fp);
+
+    if (cert_x509 == NULL)
+        return (-1);
+
+    /* Check expiry */
+    if (X509_cmp_current_time(X509_get_notAfter(cert_x509)) < 0) {
+        pthread_mutex_lock(&cert_lock);
+        cert->status = CERT_STATUS_EXPIRED;
+        stats.expired_certs++;
+        pthread_mutex_unlock(&cert_lock);
+        ret = 0;
+    } else {
+        ret = 0;
+    }
+
+    X509_free(cert_x509);
+    return (ret);
+}
+
+/*
+ * Get certificate fingerprint
+ */
+char *
+cert_get_fingerprint(const char *name)
+{
+    struct cert_info *cert;
+    X509 *cert_x509;
+    FILE *fp;
+    static char fingerprint[EVP_MAX_MD_SIZE * 3 + 1];
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int n;
+    char *ret = NULL;
+
+    cert = cert_get(name);
+    if (cert == NULL)
+        return (NULL);
+
+    fp = fopen(cert->cert_path, "r");
+    if (fp == NULL)
+        return (NULL);
+
+    cert_x509 = PEM_read_X509(fp, NULL, NULL, NULL);
+    fclose(fp);
+
+    if (cert_x509 == NULL)
+        return (NULL);
+
+    if (X509_digest(cert_x509, EVP_sha256(), md, &n)) {
+        for (unsigned int i = 0; i < n; i++) {
+            sprintf(fingerprint + (i * 3), "%02X:", md[i]);
+        }
+        fingerprint[n * 3 - 1] = '\0';
+        ret = fingerprint;
+    }
+
+    X509_free(cert_x509);
+    return (ret);
+}
+
+/*
+ * Save certificate
+ */
+int
+cert_save(const char *name, const char *key_pem, const char *cert_pem)
+{
+    char key_path[PATH_MAX], cert_path[PATH_MAX];
+    FILE *fp;
+
+    if (name == NULL || key_pem == NULL || cert_pem == NULL)
+        return (-1);
+
+    snprintf(key_path, sizeof(key_path), "%s/%s.key", cert_dir, name);
+    snprintf(cert_path, sizeof(cert_path), "%s/%s.crt", cert_dir, name);
+
+    fp = fopen(key_path, "w");
+    if (fp == NULL)
+        return (-1);
+    fputs(key_pem, fp);
+    fclose(fp);
+    chmod(key_path, 0600);
+
+    fp = fopen(cert_path, "w");
+    if (fp == NULL)
+        return (-1);
+    fputs(cert_pem, fp);
+    fclose(fp);
+
+    /* Add to registry */
+    struct cert_info *info = calloc(1, sizeof(*info));
+    if (info) {
+        strlcpy(info->name, name, sizeof(info->name));
+        info->type = CERT_TYPE_NODE;
+        info->status = CERT_STATUS_VALID;
+        info->created = time(NULL);
+        info->expires = info->created + (rot_config.node_rotation_days * 86400L);
+        info->last_rotated = info->created;
+        strlcpy(info->key_path, key_path, sizeof(info->key_path));
+        strlcpy(info->cert_path, cert_path, sizeof(info->cert_path));
+
+        pthread_mutex_lock(&cert_lock);
+        RB_INSERT(cert_tree, &cert_registry, info);
+        stats.total_certs++;
+        stats.valid_certs++;
+        pthread_mutex_unlock(&cert_lock);
+
+        cert_save_registry();
+    }
+
+    return (0);
+}
+
+/*
+ * Load certificate
+ */
+int
+cert_load(const char *name, char **key_pem, char **cert_pem)
+{
+    struct cert_info *cert;
+    FILE *fp;
+    long size;
+
+    cert = cert_get(name);
+    if (cert == NULL)
+        return (-1);
+
+    if (key_pem) {
+        fp = fopen(cert->key_path, "r");
+        if (fp == NULL)
+            return (-1);
+        fseek(fp, 0, SEEK_END);
+        size = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        *key_pem = malloc(size + 1);
+        if (*key_pem) {
+            fread(*key_pem, 1, size, fp);
+            (*key_pem)[size] = '\0';
+        }
+        fclose(fp);
+    }
+
+    if (cert_pem) {
+        fp = fopen(cert->cert_path, "r");
+        if (fp == NULL)
+            return (-1);
+        fseek(fp, 0, SEEK_END);
+        size = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        *cert_pem = malloc(size + 1);
+        if (*cert_pem) {
+            fread(*cert_pem, 1, size, fp);
+            (*cert_pem)[size] = '\0';
+        }
+        fclose(fp);
+    }
+
+    return (0);
+}
+
+/*
+ * Save registry to disk
+ */
+static int
+cert_save_registry(void)
+{
+    FILE *fp;
+    struct cert_info *cert;
+    char path[PATH_MAX];
+
+    snprintf(path, sizeof(path), "%s/registry.json", cert_dir);
+
+    fp = fopen(path, "w");
+    if (fp == NULL)
+        return (-1);
+
+    RB_FOREACH(cert, cert_tree, &cert_registry) {
+        fprintf(fp,
+            "{\"name\":\"%s\",\"type\":%d,\"cn\":\"%s\","
+            "\"status\":%d,\"created\":%ld,\"expires\":%ld,\"last_rotated\":%ld,"
+            "\"key_path\":\"%s\",\"cert_path\":\"%s\"}\n",
+            cert->name, cert->type, cert->cn,
+            cert->status, (long)cert->created, (long)cert->expires,
+            (long)cert->last_rotated,
+            cert->key_path, cert->cert_path);
+    }
+
+    fclose(fp);
+    return (0);
+}
+
+/*
+ * Create certificate backup
+ */
+int
+cert_backup_create(const char *name)
+{
+    struct cert_info *cert;
+    char backup_path[PATH_MAX];
+    char cmd[PATH_MAX * 2];
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    char timestamp[64];
+
+    strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", tm);
+
+    cert = cert_get(name);
+    if (cert == NULL)
+        return (-1);
+
+    /* Create backup directory */
+    snprintf(backup_path, sizeof(backup_path), "%s/%s-%s",
+        backup_dir, name, timestamp);
+    mkdirp(backup_path, 0700);
+
+    /* Copy files */
+    snprintf(cmd, sizeof(cmd), "cp %s %s/ && cp %s %s/",
+        cert->key_path, backup_path,
+        cert->cert_path, backup_path);
+    if (system(cmd) != 0)
+        return (-1);
+
+    /* Create backup manifest */
+    FILE *fp = fopen(backup_path, "w");
+    if (fp) {
+        fprintf(fp, "cert_name=%s\n", name);
+        fprintf(fp, "backed_up=%ld\n", (long)now);
+        fprintf(fp, "expires=%ld\n", (long)cert->expires);
+        fclose(fp);
+    }
+
+    syslog(LOG_INFO, "Certificate backed up: %s to %s", name, backup_path);
+
+    return (0);
+}
+
+/*
+ * Certificate tree comparison
+ */
+int
+cert_compare(struct cert_info *a, struct cert_info *b)
+{
+    return (strcmp(a->name, b->name));
+}
+
+/*
+ * Get statistics
+ */
+int
+cert_stats_get(struct cert_stats *out)
+{
+    if (out == NULL)
+        return (-1);
+
+    pthread_mutex_lock(&cert_lock);
+    *out = stats;
+    pthread_mutex_unlock(&cert_lock);
+
+    return (0);
+}
+
+/*
+ * Statistics as JSON
+ */
+int
+cert_stats_json(char **json_out)
+{
+    struct cert_stats s;
+    char *json;
+
+    if (json_out == NULL)
+        return (-1);
+
+    cert_stats_get(&s);
+
+    if (asprintf(&json,
+        "{\"total\":%u,\"valid\":%u,\"expiring\":%u,"
+        "\"expired\":%u,\"revoked\":%u,\"rotations\":%u,"
+        "\"failed_rotations\":%u,\"last_rotation\":%ld}",
+        s.total_certs, s.valid_certs, s.expiring_certs,
+        s.expired_certs, s.revoked_certs, s.rotations_performed,
+        s.rotations_failed, (long)s.last_rotation) == -1) {
+        return (-1);
+    }
+
+    *json_out = json;
+    return (0);
+}
+
+/*
+ * Add to history
+ */
+int
+cert_history_add(const char *name, const char *action)
+{
+    char path[PATH_MAX];
+    FILE *fp;
+
+    snprintf(path, sizeof(path), "%s/history.log", cert_dir);
+    fp = fopen(path, "a");
+    if (fp == NULL)
+        return (-1);
+
+    fprintf(fp, "%ld %s %s\n", (long)time(NULL), name, action);
+    fclose(fp);
+
+    return (0);
+}
+
+/*
+ * Rotate all certificates
+ */
+int
+cert_rotate_all(void)
+{
+    struct cert_info **certs;
+    int count, ret = 0;
+
+    certs = cert_list(&count);
+    if (certs == NULL)
+        return (-1);
+
+    for (int i = 0; i < count; i++) {
+        if (cert_renew(certs[i]->name) != 0)
+            ret++;
+    }
+
+    free(certs);
+
+    if (ret == 0)
+        stats.rotations_performed++;
+
+    return (ret);
+}
+
+/*
+ * Check certificate expiry
+ */
+int
+cert_check_expiry(const char *name, int warning_days, int critical_days)
+{
+    struct cert_info *cert;
+    int days_until;
+
+    cert = cert_get(name);
+    if (cert == NULL)
+        return (-1);
+
+    days_until = (cert->expires - time(NULL)) / 86400;
+
+    if (days_until <= critical_days) {
+        syslog(LOG_CRIT, "Certificate CRITICAL: %s expires in %d days",
+            name, days_until);
+    } else if (days_until <= warning_days) {
+        syslog(LOG_WARNING, "Certificate warning: %s expires in %d days",
+            name, days_until);
+    }
+
+    return (0);
+}
+
+/*
+ * Check all certificates
+ */
+int
+cert_check_all(void)
+{
+    struct cert_info **certs;
+    int count;
+
+    certs = cert_list(&count);
+    if (certs == NULL)
+        return (-1);
+
+    for (int i = 0; i < count; i++) {
+        cert_verify(certs[i]->name);
+        cert_check_expiry(certs[i]->name,
+            rot_config.warning_days, rot_config.critical_days);
+    }
+
+    free(certs);
+    return (0);
+}
+
+/*
+ * Status as JSON
+ */
+int
+cert_status_json(char **json_out)
+{
+    struct cert_info **certs;
+    int count;
+    char *json = NULL, *tmp;
+    int len = 0;
+
+    if (json_out == NULL)
+        return (-1);
+
+    certs = cert_list(&count);
+    if (certs == NULL) {
+        *json_out = strdup("[]");
+        return (0);
+    }
+
+    json = strdup("[");
+    len = 1;
+
+    for (int i = 0; i < count; i++) {
+        asprintf(&tmp, "%s%s{\"name\":\"%s\",\"type\":%d,\"cn\":\"%s\","
+            "\"status\":%d,\"expires\":%ld}",
+            json, i > 0 ? "," : "",
+            certs[i]->name, certs[i]->type, certs[i]->cn,
+            certs[i]->status, (long)certs[i]->expires);
+        free(json);
+        json = tmp;
+    }
+
+    json = realloc(json, strlen(json) + 2);
+    strcat(json, "]");
+
+    free(certs);
+    *json_out = json;
+
+    return (0);
+}
+
+/*
+ * Main function
+ */
+int
+main(int argc, char *argv[])
+{
+    int ch;
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <command> [args]\n", argv[0]);
+        fprintf(stderr, "Commands: list, create, rotate, backup, status\n");
+        return (1);
+    }
+
+    cert_init();
+
+    if (strcmp(argv[1], "list") == 0) {
+        char *json;
+        cert_status_json(&json);
+        printf("%s\n", json);
+        free(json);
+    } else if (strcmp(argv[1], "rotate") == 0) {
+        cert_rotate_all();
+    } else if (strcmp(argv[1], "check") == 0) {
+        cert_check_all();
+    } else if (strcmp(argv[1], "backup") == 0 && argc > 2) {
+        cert_backup_create(argv[2]);
+    }
+
+    cert_shutdown();
+    return (0);
+}

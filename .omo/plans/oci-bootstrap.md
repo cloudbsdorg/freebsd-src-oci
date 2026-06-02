@@ -311,7 +311,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (tooling, not source)
 
-- [ ] 2. Create feature branch and merge `origin/devel`'s OCI commits
+- [x] 2. Create feature branch and merge `origin/devel`'s OCI commits
 
   **What to do**:
   - `git fetch origin devel`
@@ -381,7 +381,7 @@ Max Concurrent: 8 (Wave 1)
   - Files: `usr.sbin/ocifbsd/`, `tests/usr.sbin/ocifbsd/`, `AGENTS_START_HERE.md`, `.plan/019.0-Package-Release.md`, `release/release-oci.conf`
   - Pre-commit: `git status`, `git diff --stat`
 
-- [ ] 3. Verify FreeBSD `tools/build/make.py` cross-build driver on macOS
+- [x] 3. Verify FreeBSD `tools/build/make.py` cross-build driver on macOS
 
   **What to do**:
   - Read `tools/build/make.py` first 50 lines to understand the entry point
@@ -439,7 +439,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (investigation only)
 
-- [ ] 4. Reconcile `AGENTS_START_HERE.md` and `release/release-oci.conf` on the new branch
+- [x] 4. Reconcile `AGENTS_START_HERE.md` and `release/release-oci.conf` on the new branch
 
   **What to do**:
   - Verify the files brought in by T2 exist on the new branch
@@ -483,7 +483,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (already part of T2's commit)
 
-- [ ] 5. Update `.plan/005.0-Risks-TODO.md` to reflect actual state
+- [x] 5. Update `.plan/005.0-Risks-TODO.md` to reflect actual state
 
   **What to do**:
   - Read the current `.plan/005.0-Risks-TODO.md` (which still says NOT STARTED for all)
@@ -537,7 +537,7 @@ Max Concurrent: 8 (Wave 1)
   - Files: `.plan/005.0-Risks-TODO.md`
   - Pre-commit: `git diff .plan/005.0-Risks-TODO.md | head -50`
 
-- [ ] 6. Update `.plan/000.0-OCI-Jail-TOC.md` line counts and add `ocifbsd` entry
+- [x] 6. Update `.plan/000.0-OCI-Jail-TOC.md` line counts and add `ocifbsd` entry
 
   **What to do**:
   - Read the current TOC; note that line counts for some docs may be stale (the orphan commits updated them)
@@ -583,7 +583,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `docs(plan): refresh TOC line counts and add 020.0 entry`
   - Files: `.plan/000.0-OCI-Jail-TOC.md`
 
-- [ ] 7. Create `.plan/020.0-Developer-Setup.md` (CLion + bmake + cross-build guide)
+- [x] 7. Create `.plan/020.0-Developer-Setup.md` (CLion + bmake + cross-build guide)
 
   **What to do**:
   - Write a new developer onboarding doc at `.plan/020.0-Developer-Setup.md`
@@ -635,7 +635,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `docs(plan): add 020.0-Developer-Setup.md (CLion+bmake+cross-build)`
   - Files: `.plan/020.0-Developer-Setup.md`
 
-- [ ] 26. Provision FreeBSD VM with clean-state snapshot for reproducible testing
+- [x] 26. Provision FreeBSD VM with clean-state snapshot for reproducible testing
 
   **What to do**:
   - **Choose VM technology** (macOS-native): UTM (recommended for Apple Silicon; GUI-based; supports snapshots), or QEMU + virt-manager (CLI; cross-platform), or VirtualBox (UI; slower but stable)

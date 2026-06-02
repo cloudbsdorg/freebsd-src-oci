@@ -1,0 +1,645 @@
+/*-
+ * Copyright (c) 2024 The FreeBSD Foundation
+ *
+ * This software was developed by Klara, Inc. under sponsorship
+ * from the FreeBSD Foundation.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+ * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
+ *
+ * $FreeBSD$
+ *
+ * OCI Runtime Specification to FreeBSD Jail Parameter Translation
+ */
+
+#include <sys/param.h>
+#include <sys/jail.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/syslimits.h>
+
+#include <ctype.h>
+#include <errno.h>
+#include <jail.h>
+#include <json.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "ocifbsd.h"
+
+/*
+ * JSON parsing helpers
+ */
+
+static char *
+json_get_string(struct json_value *val, const char *key)
+{
+	struct json_object *obj;
+	struct json_string *s;
+
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (NULL);
+
+	obj = json_value_object(val);
+	if (obj == NULL)
+		return (NULL);
+
+	val = json_object_property_value(obj, key);
+	if (val == NULL || val->type != JSON_TYPE_STRING)
+		return (NULL);
+
+	s = json_value_string(val);
+	return (strdup(s->string));
+}
+
+static int
+json_get_bool(struct json_value *val, const char *key, bool defval)
+{
+	struct json_object *obj;
+	struct json_bool *b;
+
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (defval);
+
+	obj = json_value_object(val);
+	if (obj == NULL)
+		return (defval);
+
+	val = json_object_property_value(obj, key);
+	if (val == NULL || val->type != JSON_TYPE_BOOL)
+		return (defval);
+
+	b = json_value_bool(val);
+	return (b->bool_value ? 1 : 0);
+}
+
+static int
+json_get_int(struct json_value *val, const char *key, int defval)
+{
+	struct json_object *obj;
+	struct json_number *n;
+
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (defval);
+
+	obj = json_value_object(val);
+	if (obj == NULL)
+		return (defval);
+
+	val = json_object_property_value(obj, key);
+	if (val == NULL || val->type != JSON_TYPE_NUMBER)
+		return (defval);
+
+	n = json_value_number(val);
+	return ((int)n->number);
+}
+
+static char **
+json_get_string_array(struct json_value *val, const char *key, int *nitems)
+{
+	struct json_object *obj;
+	struct json_array *arr;
+	struct json_value *elem;
+	struct json_string *s;
+	char **result;
+	size_t i;
+
+	*nitems = 0;
+
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (NULL);
+
+	obj = json_value_object(val);
+	if (obj == NULL)
+		return (NULL);
+
+	val = json_object_property_value(obj, key);
+	if (val == NULL || val->type != JSON_TYPE_ARRAY)
+		return (NULL);
+
+	arr = json_value_array(val);
+	result = malloc((arr->length + 1) * sizeof(char *));
+	if (result == NULL)
+		return (NULL);
+
+	for (i = 0; i < arr->length; i++) {
+		elem = arr->values[i];
+		if (elem->type == JSON_TYPE_STRING) {
+			s = json_value_string(elem);
+			result[i] = strdup(s->string);
+		} else {
+			result[i] = NULL;
+		}
+	}
+	result[arr->length] = NULL;
+	*nitems = (int)arr->length;
+
+	return (result);
+}
+
+/*
+ * Parse FreeBSD-specific extension from OCI config
+ */
+static struct oci_freebsd *
+parse_freebsd_ext(struct json_value *val)
+{
+	struct oci_freebsd *fbsd;
+	struct json_object *obj;
+
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (NULL);
+
+	obj = json_value_object(val);
+	if (obj == NULL)
+		return (NULL);
+
+	fbsd = calloc(1, sizeof(*fbsd));
+	if (fbsd == NULL)
+		return (NULL);
+
+	fbsd->vnet = json_get_bool(val, "vnet", 0);
+	fbsd->hostname = json_get_string(val, "hostname");
+	fbsd->domainname = json_get_string(val, "domainname");
+	fbsd->mac_label = json_get_string(val, "macLabel");
+	fbsd->ip4 = json_get_string_array(val, "ip4", &fbsd->n_ip4);
+	fbsd->ip6 = json_get_string_array(val, "ip6", &fbsd->n_ip6);
+	fbsd->dns = json_get_string_array(val, "dns", &fbsd->n_dns);
+
+	return (fbsd);
+}
+
+/*
+ * Parse OCI mounts array
+ */
+static struct oci_mount *
+parse_mounts(struct json_value *val, int *n_mounts)
+{
+	struct json_object *obj;
+	struct json_array *arr;
+	struct json_value *elem, *dest_val;
+	struct json_string *s;
+	struct oci_mount *mounts;
+	struct oci_mount *m;
+	size_t i;
+
+	*n_mounts = 0;
+
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (NULL);
+
+	obj = json_value_object(val);
+	if (obj == NULL)
+		return (NULL);
+
+	val = json_object_property_value(obj, "mounts");
+	if (val == NULL || val->type != JSON_TYPE_ARRAY)
+		return (NULL);
+
+	arr = json_value_array(val);
+	mounts = calloc(arr->length + 1, sizeof(*mounts));
+	if (mounts == NULL)
+		return (NULL);
+
+	for (i = 0; i < arr->length; i++) {
+		m = &mounts[i];
+		elem = arr->values[i];
+		if (elem->type != JSON_TYPE_OBJECT)
+			continue;
+
+		obj = json_value_object(elem);
+		m->source = json_get_string(elem, "source");
+		m->destination = json_get_string(elem, "destination");
+		m->type = json_get_string(elem, "type");
+		m->options = json_get_string(elem, "options");
+		m->readonly = json_get_bool(elem, "readonly", false);
+	}
+	*n_mounts = (int)arr->length;
+
+	return (mounts);
+}
+
+/*
+ * Parse OCI hooks
+ */
+static struct oci_hooks *
+parse_hooks(struct json_value *val)
+{
+	struct oci_hooks *hooks;
+	struct json_object *obj;
+	struct json_array *arr;
+	struct json_value *elem;
+	struct oci_hook **h;
+	size_t i;
+
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (NULL);
+
+	obj = json_value_object(val);
+	if (obj == NULL)
+		return (NULL);
+
+	val = json_object_property_value(obj, "hooks");
+	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+		return (NULL);
+
+	hooks = calloc(1, sizeof(*hooks));
+	if (hooks == NULL)
+		return (NULL);
+
+#define PARSE_HOOK_ARRAY(hook_type, field, count_field) do {			\
+	val = json_object_property_value(val, hook_type);			\
+	if (val != NULL && val->type == JSON_TYPE_ARRAY) {			\
+		arr = json_value_array(val);					\
+		hooks->count_field = (int)arr->length;			\
+		hooks->field = calloc(arr->length + 1, sizeof(*h));	\
+		if (hooks->field == NULL)					\
+			goto cleanup;						\
+		for (i = 0; i < arr->length; i++) {				\
+			elem = arr->values[i];					\
+			if (elem->type != JSON_TYPE_OBJECT)			\
+				continue;					\
+			h = &hooks->field[i];					\
+			*h = calloc(1, sizeof(**h));				\
+			if (*h == NULL)						\
+				continue;					\
+			(*h)->path = json_get_string(elem, "path");		\
+			(*h)->args = json_get_string_array(elem, "args",	\
+			    &(int){0});					\
+			(*h)->env = json_get_string_array(elem, "env",	\
+			    &(int){0});					\
+			(*h)->timeout = json_get_string(elem, "timeout");	\
+		}								\
+	}									\
+} while (0)
+
+	PARSE_HOOK_ARRAY("prestart", prestart, n_prestart);
+	PARSE_HOOK_ARRAY("poststart", poststart, n_poststart);
+	PARSE_HOOK_ARRAY("poststop", poststop, n_poststop);
+
+#undef PARSE_HOOK_ARRAY
+
+	return (hooks);
+
+cleanup:
+	if (hooks->prestart)
+		free(hooks->prestart);
+	if (hooks->poststart)
+		free(hooks->poststart);
+	if (hooks->poststop)
+		free(hooks->poststop);
+	free(hooks);
+	return (NULL);
+}
+
+/*
+ * Parse OCI Runtime Specification from config.json
+ */
+struct oci_runtime_spec *
+oci_parse_config(const char *config_path)
+{
+	struct oci_runtime_spec *spec;
+	struct json_value *root;
+	struct json_object *obj;
+	char *json_str;
+	size_t json_len;
+	FILE *f;
+	struct stat sb;
+
+	if (config_path == NULL) {
+		errno = EINVAL;
+		return (NULL);
+	}
+
+	/* Read file */
+	f = fopen(config_path, "r");
+	if (f == NULL)
+		return (NULL);
+
+	if (fstat(fileno(f), &sb) != 0) {
+		fclose(f);
+		return (NULL);
+	}
+
+	json_str = malloc(sb.st_size + 1);
+	if (json_str == NULL) {
+		fclose(f);
+		return (NULL);
+	}
+
+	if (fread(json_str, 1, sb.st_size, f) != (size_t)sb.st_size) {
+		free(json_str);
+		fclose(f);
+		return (NULL);
+	}
+	json_str[sb.st_size] = '\0';
+	fclose(f);
+
+	/* Parse JSON */
+	root = json_parse_string(json_str);
+	free(json_str);
+
+	if (root == NULL || root->type != JSON_TYPE_OBJECT) {
+		if (root)
+			json_value_free(root);
+		errno = EINVAL;
+		return (NULL);
+	}
+
+	obj = json_value_object(root);
+
+	/* Allocate spec */
+	spec = calloc(1, sizeof(*spec));
+	if (spec == NULL) {
+		json_value_free(root);
+		return (NULL);
+	}
+
+	/* Parse root */
+	struct json_value *root_val = json_object_property_value(obj, "root");
+	if (root_val != NULL && root_val->type == JSON_TYPE_OBJECT) {
+		struct json_object *root_obj = json_value_object(root_val);
+		spec->root.path = json_get_string(root_val, "path");
+		spec->root.readonly = json_get_bool(root_val, "readonly", false);
+	} else {
+		/* Default root to "rootfs" relative to bundle */
+		char *dir = strdup(config_path);
+		char *p = strrchr(dir, '/');
+		if (p) {
+			*p = '\0';
+			/* Go up from config.json */
+			p = strrchr(dir, '/');
+			if (p) {
+				*p = '\0';
+				asprintf(&spec->root.path, "%s/rootfs", p + 1);
+			} else {
+				spec->root.path = strdup("rootfs");
+			}
+		} else {
+			spec->root.path = strdup("rootfs");
+		}
+		free(dir);
+	}
+
+	/* Parse process */
+	struct json_value *proc_val = json_object_property_value(obj, "process");
+	if (proc_val != NULL && proc_val->type == JSON_TYPE_OBJECT) {
+		spec->process.cwd = json_get_string(proc_val, "cwd");
+		spec->process.tty = json_get_bool(proc_val, "tty", 0);
+		spec->process.terminal = json_get_bool(proc_val, "terminal", 0);
+		spec->process.args = json_get_string_array(proc_val, "args",
+		    &(int){0});
+		spec->process.env = json_get_string_array(proc_val, "env",
+		    &(int){0});
+		spec->process.uid = json_get_int(proc_val, "user", 0) & 0xFFFFFFFF;
+		spec->process.gid = (json_get_int(proc_val, "user", 0) >> 32) & 0xFFFFFFFF;
+	}
+
+	/* Parse hostname */
+	spec->hostname = json_get_string(root, "hostname");
+	spec->domainname = json_get_string(root, "domainname");
+
+	/* Parse mounts */
+	spec->mounts = parse_mounts(root, &spec->n_mounts);
+
+	/* Parse hooks */
+	spec->hooks = parse_hooks(root);
+
+	/* Parse FreeBSD extensions */
+	struct json_value *fbsd_val = json_object_property_value(obj, "freebsd");
+	spec->freebsd = parse_freebsd_ext(fbsd_val);
+
+	json_value_free(root);
+
+	return (spec);
+}
+
+/*
+ * Free OCI spec
+ */
+void
+oci_free_spec(struct oci_runtime_spec *spec)
+{
+	int i;
+	struct oci_hook **hooks;
+
+	if (spec == NULL)
+		return;
+
+	free(spec->root.path);
+	free(spec->process.cwd);
+
+	if (spec->process.args) {
+		for (i = 0; spec->process.args[i]; i++)
+			free(spec->process.args[i]);
+		free(spec->process.args);
+	}
+
+	if (spec->process.env) {
+		for (i = 0; spec->process.env[i]; i++)
+			free(spec->process.env[i]);
+		free(spec->process.env);
+	}
+
+	if (spec->mounts) {
+		for (i = 0; i < spec->n_mounts; i++) {
+			free(spec->mounts[i].source);
+			free(spec->mounts[i].destination);
+			free(spec->mounts[i].type);
+			free(spec->mounts[i].options);
+		}
+		free(spec->mounts);
+	}
+
+#define FREE_HOOKS(arr, count) do {						\
+	if (arr) {								\
+		for (i = 0; i < count && arr[i]; i++) {			\
+			free(arr[i]->path);					\
+			if (arr[i]->args) {					\
+				for (j = 0; arr[i]->args[j]; j++)		\
+					free(arr[i]->args[j]);			\
+				free(arr[i]->args);				\
+			}							\
+			if (arr[i]->env) {					\
+				for (j = 0; arr[i]->env[j]; j++)		\
+					free(arr[i]->env[j]);			\
+				free(arr[i]->env);				\
+			}							\
+			free(arr[i]->timeout);				\
+			free(arr[i]);					\
+		}								\
+		free(arr);							\
+	}									\
+} while (0)
+
+	if (spec->hooks) {
+		int j;
+		FREE_HOOKS(spec->hooks->prestart, spec->hooks->n_prestart);
+		FREE_HOOKS(spec->hooks->poststart, spec->hooks->n_poststart);
+		FREE_HOOKS(spec->hooks->poststop, spec->hooks->n_poststop);
+		free(spec->hooks);
+	}
+
+	if (spec->freebsd) {
+		free(spec->freebsd->hostname);
+		free(spec->freebsd->domainname);
+		free(spec->freebsd->mac_label);
+		if (spec->freebsd->ip4) {
+			for (i = 0; spec->freebsd->ip4[i]; i++)
+				free(spec->freebsd->ip4[i]);
+			free(spec->freebsd->ip4);
+		}
+		if (spec->freebsd->ip6) {
+			for (i = 0; spec->freebsd->ip6[i]; i++)
+				free(spec->freebsd->ip6[i]);
+			free(spec->freebsd->ip6);
+		}
+		if (spec->freebsd->dns) {
+			for (i = 0; spec->freebsd->dns[i]; i++)
+				free(spec->freebsd->dns[i]);
+			free(spec->freebsd->dns);
+		}
+		free(spec->freebsd);
+	}
+
+	free(spec->hostname);
+	free(spec->domainname);
+	free(spec);
+}
+
+/*
+ * Translate OCI Runtime Spec to FreeBSD jail parameters
+ */
+struct jailparam *
+oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
+{
+	struct jailparam *params;
+	size_t n, capacity;
+
+	if (spec == NULL || nparams == NULL)
+		return (NULL);
+
+	/* Initial capacity - will grow as needed */
+	capacity = 32;
+	params = calloc(capacity, sizeof(*params));
+	if (params == NULL)
+		return (NULL);
+	n = 0;
+
+#define ADD_PARAM(name, value) do {						\
+	if (n >= capacity) {							\
+		capacity *= 2;							\
+		params = realloc(params, capacity * sizeof(*params));		\
+		if (params == NULL)						\
+			return (NULL);						\
+	}									\
+	jailparam_init(&params[n], name);					\
+	jailparam_import_raw(&params[n], value);				\
+	n++;									\
+} while (0)
+
+	/* Root filesystem - required */
+	if (spec->root.path) {
+		ADD_PARAM("path", spec->root.path);
+	}
+
+	/* Hostname */
+	if (spec->hostname) {
+		ADD_PARAM("host.hostname", spec->hostname);
+	} else if (spec->freebsd && spec->freebsd->hostname) {
+		ADD_PARAM("host.hostname", spec->freebsd->hostname);
+	}
+
+	/* Domainname */
+	if (spec->domainname) {
+		ADD_PARAM("host.domainname", spec->domainname);
+	} else if (spec->freebsd && spec->freebsd->domainname) {
+		ADD_PARAM("host.domainname", spec->freebsd->domainname);
+	}
+
+	/* VNET - network isolation */
+	if (spec->freebsd && spec->freebsd->vnet) {
+		ADD_PARAM("vnet", "new");
+	}
+
+	/* IP addresses */
+	if (spec->freebsd) {
+		int i;
+		for (i = 0; i < spec->freebsd->n_ip4 && spec->freebsd->ip4[i]; i++) {
+			ADD_PARAM("ip4.addr", spec->freebsd->ip4[i]);
+		}
+		for (i = 0; i < spec->freebsd->n_ip6 && spec->freebsd->ip6[i]; i++) {
+			ADD_PARAM("ip6.addr", spec->freebsd->ip6[i]);
+		}
+	}
+
+	/* MAC label */
+	if (spec->freebsd && spec->freebsd->mac_label) {
+		ADD_PARAM("security.mac.label", spec->freebsd->mac_label);
+		ADD_PARAM("allow.chflags", "1");
+	}
+
+	/* Name parameter (used by jail(8)) */
+	ADD_PARAM("name", "ocifbsd-container");
+
+#undef ADD_PARAM
+
+	*nparams = n;
+	return (params);
+}
+
+/*
+ * Validate OCI spec for basic requirements
+ */
+int
+oci_validate_spec(const struct oci_runtime_spec *spec)
+{
+	if (spec == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	/* Must have root path */
+	if (spec->root.path == NULL || spec->root.path[0] == '\0') {
+		fprintf(stderr, "error: missing root path in OCI config\n");
+		errno = EINVAL;
+		return (-1);
+	}
+
+	/* Validate root path exists */
+	struct stat sb;
+	if (stat(spec->root.path, &sb) != 0) {
+		fprintf(stderr, "error: root path does not exist: %s\n",
+		    spec->root.path);
+		return (-1);
+	}
+
+	/* Validate process has command */
+	if (spec->process.args == NULL || spec->process.args[0] == NULL) {
+		fprintf(stderr, "error: missing command in OCI config\n");
+		errno = EINVAL;
+		return (-1);
+	}
+
+	return (0);
+}
