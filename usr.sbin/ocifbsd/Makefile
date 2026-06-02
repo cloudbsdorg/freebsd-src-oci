@@ -327,6 +327,115 @@ clean-all:
 	@rm -rf /tmp/obj-oci /tmp/obj-oci-test /tmp/obj-oci-test2 2>/dev/null || true
 	@echo "Cleaned: *.o, *.a, ocifbsd, obj/, /tmp/obj-oci*"
 
+# Run all inspection targets and save report
+all-checks:
+	@echo "=== Running all inspection targets ==="
+	@REPORT=$${REPORT_FILE:-/tmp/ocifbsd-inspection-report.txt}; \
+	echo "ocifbsd Inspection Report" > $$REPORT; \
+	echo "Generated: $$(date)" >> $$REPORT; \
+	echo "Branch:    $$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" >> $$REPORT; \
+	echo "Commit:    $$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" >> $$REPORT; \
+	echo "" >> $$REPORT; \
+	for t in info smoke audit lint sources size docs vm-status; do \
+		echo "" >> $$REPORT; \
+		echo "========================================" >> $$REPORT; \
+		echo "  Target: $$t" >> $$REPORT; \
+		echo "========================================" >> $$REPORT; \
+		echo "" >> $$REPORT; \
+		$(MAKE) -C ${OCIFBSD_ROOT} $$t >> $$REPORT 2>&1 || echo "  [WARN] $$t failed" >> $$REPORT; \
+	done; \
+	echo ""; \
+	echo "Report saved to: $$REPORT"; \
+	echo "Lines: $$(wc -l < $$REPORT | tr -d ' ')"; \
+	echo ""; \
+	echo "=== Quick summary ==="; \
+	grep -E "Count:|Source files:|Total:|Files:" $$REPORT | head -20
+
+# Find the HACK marker and show context
+find-hack:
+	@echo "=== HACK markers ==="
+	@grep -rn "HACK" ${OCIFBSD_ROOT} --include="*.c" --include="*.h" 2>/dev/null
+	@echo ""
+	@echo "=== With context (3 lines) ==="
+	@grep -rn -B1 -A2 "HACK" ${OCIFBSD_ROOT} --include="*.c" --include="*.h" 2>/dev/null
+
+# Find files with TODO markers, sorted by count
+find-todos:
+	@echo "=== TODO markers by file ==="
+	@grep -rE "TODO|FIXME|XXX" ${OCIFBSD_ROOT} --include="*.c" --include="*.h" 2>/dev/null | cut -d: -f1 | sort | uniq -c | sort -rn
+	@echo ""
+	@echo "=== Total count ==="
+	@echo "TODO:  $$(grep -rE 'TODO' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "FIXME: $$(grep -rE 'FIXME' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "XXX:   $$(grep -rE 'XXX' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+
+# Test cross-build and report blockers (does not attempt full build)
+test-cross-build:
+	@echo "=== Cross-Build Diagnostic ==="
+	@echo ""
+	@echo "--- Required tools ---"
+	@for tool in bmake clang lld python3; do \
+		if command -v $$tool >/dev/null 2>&1; then \
+			echo "  [OK]   $$tool: $$(which $$tool)"; \
+		else \
+			echo "  [FAIL] $$tool: NOT FOUND"; \
+		fi; \
+	done
+	@echo ""
+	@echo "--- FreeBSD source tree ---"
+	@SRC="$${FREEBSD_SRC:-/usr/src}"; \
+	if [ -d "$$SRC" ]; then \
+		echo "  [OK]   FREEBSD_SRC=$$SRC"; \
+		echo "         $$($${FREEBSD_SRC}/tools/build/make.py --help 2>&1 | head -1)"; \
+	else \
+		echo "  [WARN] FREEBSD_SRC not set or $$SRC does not exist"; \
+		echo "         Cross-build expects: \$$FREEBSD_SRC or /usr/src"; \
+	fi
+	@echo ""
+	@echo "--- Cross-build env (if sourced) ---"
+	@echo "  XCC:  $${XCC:-not set}"
+	@echo "  XLD:  $${XLD:-not set}"
+	@echo "  XAS:  $${XAS:-not set}"
+	@if [ -n "$$XCC" ] && [ -n "$$XLD" ]; then \
+		echo ""; \
+		echo "  [OK] Env is set. Run: bmake -C usr.sbin/ocifbsd darwin-build"; \
+	else \
+		echo ""; \
+		echo "  [WARN] Env not set. Run: bmake -C usr.sbin/ocifbsd darwin-bootstrap"; \
+		echo "         Or:  . /tmp/ocifbsd-cross-build-env"; \
+	fi
+	@echo ""
+	@echo "--- Known blockers ---"
+	@echo "  1. macOS SDK header leak in lib/libgcc_eh (needs FreeBSD sysroot or VM)"
+	@echo "  2. json-c dependency (not in FreeBSD base)"
+	@echo "  3. seccomp → capsicum translation (3 files)"
+	@echo ""
+	@echo "See TROUBLESHOOTING.md for full details."
+
+# Generate a release manifest (what would go in a release tarball)
+release-manifest:
+	@echo "=== ocifbsd Release Manifest ==="
+	@echo "Version: $$(grep '^VERSION=' ${OCIFBSD_ROOT}/Makefile | head -1 | cut -d= -f2)"
+	@echo ""
+	@echo "--- Source files ---"
+	@find ${OCIFBSD_ROOT} -name "*.c" -o -name "*.h" 2>/dev/null | sort
+	@echo ""
+	@echo "--- Build files ---"
+	@find ${OCIFBSD_ROOT} -name "Makefile*" -o -name "*.mk" 2>/dev/null | sort
+	@echo ""
+	@echo "--- Documentation ---"
+	@ls -la ${OCIFBSD_ROOT}/README.md 2>/dev/null
+	@ls -la ${OCIFBSD_ROOT}/CHANGELOG.md 2>/dev/null || echo "  No CHANGELOG.md"
+	@ls -la ${OCIFBSD_ROOT}/LICENSE 2>/dev/null || echo "  No LICENSE file (BSD-2-Clause in headers)"
+	@echo ""
+	@echo "--- Scripts ---"
+	@find ${OCIFBSD_ROOT} -name "*.sh" 2>/dev/null
+	@echo ""
+	@echo "--- Total size ---"
+	@echo "  Files: $$(find ${OCIFBSD_ROOT} -type f 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Bytes: $$(du -sb ${OCIFBSD_ROOT} 2>/dev/null | awk '{print $$1}')"
+	@echo "  Human: $$(du -sh ${OCIFBSD_ROOT} 2>/dev/null | awk '{print $$1}')"
+
 .if exists(src.opts.mk)
 .include <src.opts.mk>
 .endif
