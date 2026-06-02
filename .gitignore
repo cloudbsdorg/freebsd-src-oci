@@ -40,3 +40,8 @@ tags
 .ccls-cache
 sys/*/compile
 /src.conf
+
+# OpenCode / Prometheus working files
+.omo/run-continuation/
+.omo/evidence/
+.omo/worktrees/
