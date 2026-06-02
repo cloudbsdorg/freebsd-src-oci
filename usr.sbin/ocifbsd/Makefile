@@ -436,6 +436,80 @@ release-manifest:
 	@echo "  Bytes: $$(du -sb ${OCIFBSD_ROOT} 2>/dev/null | awk '{print $$1}')"
 	@echo "  Human: $$(du -sh ${OCIFBSD_ROOT} 2>/dev/null | awk '{print $$1}')"
 
+# Check all required dependencies for development
+check-deps:
+	@echo "=== Dependency Check ==="
+	@MISSING=0; \
+	for tool in bmake clang lld python3 git; do \
+		if command -v $$tool >/dev/null 2>&1; then \
+			VER=$$($$tool --version 2>&1 | head -1 | sed 's/^[^0-9]*//'); \
+			printf "  [OK]   %-10s %s\n" "$$tool" "$$VER"; \
+		else \
+			printf "  [FAIL] %-10s NOT FOUND\n" "$$tool"; \
+			MISSING=$$((MISSING + 1)); \
+		fi; \
+	done; \
+	echo ""; \
+	echo "  For macOS:"; \
+	echo "    brew install bmake llvm lld"; \
+	echo ""; \
+	echo "  For Linux:"; \
+	echo "    sudo apt install bmake clang lld python3"; \
+	echo ""; \
+	if [ $$MISSING -gt 0 ]; then \
+		echo "  $$MISSING tools missing. Install them and re-run."; \
+		exit 1; \
+	else \
+		echo "  All required tools present."; \
+	fi
+
+# One-command developer setup: check deps + bootstrap + smoke test
+dev: check-deps
+	@echo ""
+	@echo "=== Developer Setup ==="
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		echo "Detected macOS host. Running darwin-bootstrap..."; \
+		${MAKE} -C ${OCIFBSD_ROOT} darwin-bootstrap; \
+	else \
+		echo "Non-macOS host. Skipping darwin-bootstrap."; \
+		echo "For FreeBSD build, run: bmake -C usr.sbin/ocifbsd"; \
+	fi
+	@echo ""
+	@echo "=== Running smoke test ==="
+	@${MAKE} -C ${OCIFBSD_ROOT} smoke
+	@echo ""
+	@echo "=== Developer setup complete ==="
+	@echo ""
+	@echo "Next steps:"
+	@echo "  bmake -C usr.sbin/ocifbsd help       # see all targets"
+	@echo "  bmake -C usr.sbin/ocifbsd audit      # see AI slop markers"
+	@echo "  bmake -C usr.sbin/ocifbsd info       # see build env"
+	@echo ""
+	@echo "For FreeBSD build:"
+	@echo "  bmake -C usr.sbin/ocifbsd"
+	@echo ""
+	@echo "For VM testing:"
+	@echo "  See .omo/drafts/vm-provisioning.md"
+
+# Verify a clean state: nothing to commit, all checks pass
+verify: check-deps
+	@echo ""
+	@echo "=== Verification ==="
+	@echo ""
+	@echo "--- Git status ---"
+	@git status --short
+	@echo ""
+	@echo "--- Branch ---"
+	@git rev-parse --abbrev-ref HEAD
+	@echo ""
+	@echo "--- Smoke test ---"
+	@${MAKE} -C ${OCIFBSD_ROOT} smoke 2>&1 | tail -10
+	@echo ""
+	@echo "--- Audit summary ---"
+	@echo "TODO:  $$(grep -rE 'TODO' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "FIXME: $$(grep -rE 'FIXME' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "HACK:  $$(grep -rE 'HACK' ${OCIFBSD_ROOT} --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+
 .if exists(src.opts.mk)
 .include <src.opts.mk>
 .endif
