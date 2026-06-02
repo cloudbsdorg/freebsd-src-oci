@@ -518,7 +518,6 @@ cert_delete(const char *name)
 
     pthread_mutex_lock(&cert_lock);
 
-    strlcpy((char[]){0}, name, 256);  /* HACK to avoid unused warning */
     cert = cert_get(name);
     if (cert == NULL) {
         pthread_mutex_unlock(&cert_lock);
