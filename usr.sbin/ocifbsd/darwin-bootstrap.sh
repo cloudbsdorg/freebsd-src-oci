@@ -182,8 +182,10 @@ fi
 
 # === Step 4: LLVM toolchain ===
 hdr "Step 4/5: LLVM toolchain (clang, lld, lldb)"
+# In LLVM 19+, lld was split into a separate brew package.
+# So we need to check both $LLVM_PREFIX/bin/ and $BREW_PREFIX/bin/ for lld.
 LLVM_OK=true
-for tool in clang clang++ lld lldb; do
+for tool in clang clang++ lldb; do
     if [ -x "$LLVM_PREFIX/bin/$tool" ]; then
         log "$tool: $("$LLVM_PREFIX/bin/$tool" --version 2>&1 | head -1)"
     else
@@ -191,31 +193,53 @@ for tool in clang clang++ lld lldb; do
         LLVM_OK=false
     fi
 done
+# lld: check both locations
+if [ -x "$LLVM_PREFIX/bin/lld" ]; then
+    log "lld: $("$LLVM_PREFIX/bin/lld" --version 2>&1 | head -1) (in llvm prefix)"
+elif [ -x "$BREW_PREFIX/bin/lld" ]; then
+    log "lld: $("$BREW_PREFIX/bin/lld" --version 2>&1 | head -1) (in brew prefix, separate package)"
+else
+    warn "lld: NOT found at $LLVM_PREFIX/bin/lld or $BREW_PREFIX/bin/lld"
+    LLVM_OK=false
+fi
 
 if $LLVM_OK; then
     ok
 else
     warn "LLVM toolchain incomplete"
     if [ "$MODE" = "install" ]; then
-        log "Installing llvm via brew (this may take 5-10 minutes)..."
-        brew install llvm
-        log "llvm: installed"
-        # Re-check
+        # Install llvm (provides clang, clang++, lldb)
+        if ! [ -x "$LLVM_PREFIX/bin/clang" ]; then
+            log "Installing llvm via brew (provides clang, lldb; this may take 5-10 minutes)..."
+            brew install llvm
+            log "llvm: installed"
+        fi
+        # Install lld (separate package since LLVM 19+)
+        if ! [ -x "$BREW_PREFIX/bin/lld" ] && ! [ -x "$LLVM_PREFIX/bin/lld" ]; then
+            log "Installing lld via brew (separate package since LLVM 19+)..."
+            brew install lld
+            log "lld: installed"
+        fi
+        # Re-verify
         MISSING=false
-        for tool in clang clang++ lld lldb; do
+        for tool in clang clang++ lldb; do
             if [ ! -x "$LLVM_PREFIX/bin/$tool" ]; then
                 err "$tool still not found at $LLVM_PREFIX/bin/$tool after install"
                 MISSING=true
             fi
         done
+        if ! [ -x "$BREW_PREFIX/bin/lld" ] && ! [ -x "$LLVM_PREFIX/bin/lld" ]; then
+            err "lld still not found after install"
+            MISSING=true
+        fi
         if $MISSING; then
-            err "Try: export PATH=\"$LLVM_PREFIX/bin:\$PATH\""
+            err "Try: export PATH=\"$LLVM_PREFIX/bin:$BREW_PREFIX/bin:\$PATH\""
             exit 1
         fi
         log "All LLVM tools verified"
         ok
     else
-        err "LLVM toolchain required. Install with: brew install llvm"
+        err "LLVM toolchain required. Install with: brew install llvm && brew install lld"
         exit 1
     fi
 fi
@@ -247,7 +271,14 @@ cat > "$ENV_FILE" << EOF
 export PATH="$LLVM_PREFIX/bin:$BREW_PREFIX/bin:\$PATH"
 export XCC="$LLVM_PREFIX/bin/clang"
 export XCXX="$LLVM_PREFIX/bin/clang++"
-export XLD="$LLVM_PREFIX/bin/lld"
+# lld is in a separate package since LLVM 19+; check both locations
+if [ -x "$BREW_PREFIX/bin/lld" ]; then
+    export XLD="$BREW_PREFIX/bin/lld"
+elif [ -x "$LLVM_PREFIX/bin/lld" ]; then
+    export XLD="$LLVM_PREFIX/bin/lld"
+else
+    export XLD="$BREW_PREFIX/bin/lld"  # best guess
+fi
 export XAS="$LLVM_PREFIX/bin/clang"
 export XAR="$LLVM_PREFIX/bin/llvm-ar"
 export XNM="$LLVM_PREFIX/bin/llvm-nm"
