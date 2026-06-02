@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Run ocifbsd start" type="ShConfigurationType">
+    <option name="SCRIPT_TEXT" value="CONTAINER_ID=${1:-test-container} &amp;&amp; ssh freebsd-oci 'cd /root &amp;&amp; ./ocifbsd start $CONTAINER_ID'" />
+    <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+    <option name="SCRIPT_OPTIONS" value="" />
+    <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="$ProjectFileDir$" />
+    <option name="INDEPENDENT_SCRIPT_NAME" value="Run ocifbsd start &lt;container_id&gt;" />
+    <envs>
+      <env name="SSH_USER" value="root" />
+      <env name="SSH_HOST" value="freebsd-oci" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ExternalStorageConfigurationManager" enabled="true" />
+  <component name="MakefileSettings">
+    <option name="linkedExternalProjectsSettings">
+      <MakefileProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+          </set>
+        </option>
+        <option name="version" value="2" />
+      </MakefileProjectSettings>
+    </option>
+  </component>
+  <component name="MakefileWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
+
+  <!--
+    Custom Build Targets for ocifbsd.
+    Use from CLion: Build → Custom Build Targets → <target>
+    Each target wraps bmake for a specific subdir of usr.sbin/ocifbsd/.
+  -->
+  <component name="CLionCustomBuildTargets">
+    <custom-target name="ocifbsd-core">
+      <build-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd
+      </build-command>
+      <clean-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd clean
+      </clean-command>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </custom-target>
+
+    <custom-target name="ocifbsd-image">
+      <build-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd/image
+      </build-command>
+      <clean-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd/image clean
+      </clean-command>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </custom-target>
+
+    <custom-target name="ocifbsd-network">
+      <build-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd/network
+      </build-command>
+      <clean-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd/network clean
+      </clean-command>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </custom-target>
+
+    <custom-target name="ocifbsd-security">
+      <build-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd/security
+      </build-command>
+      <clean-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/usr.sbin/ocifbsd/security clean
+      </clean-command>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </custom-target>
+
+    <custom-target name="ocifbsd-tests">
+      <build-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/tests/usr.sbin/ocifbsd
+      </build-command>
+      <clean-command>
+        /opt/homebrew/bin/bmake TARGET=amd64 TARGET_ARCH=amd64 -C $ProjectFileDir$/tests/usr.sbin/ocifbsd clean
+      </clean-command>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </custom-target>
+
+    <custom-target name="ocifbsd-cross-build">
+      <build-command>
+        python3 $ProjectFileDir$/tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 -j$(sysctl -n hw.ncpu) libraries
+      </build-command>
+      <clean-command>
+        rm -rf /tmp/obj-oci
+      </clean-command>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </custom-target>
+  </component>
+</project>

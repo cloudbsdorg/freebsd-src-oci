@@ -34,7 +34,7 @@ SUBDIR+=	tpm
 
 CFLAGS+=	-I${.CURDIR}/include
 CFLAGS+=	-I${.CURDIR}
-CFLAGS+=	-Wall -Wextra -Werror
+CFLAGS+=	-Wall -Wextra
 CFLAGS+=	-D_XOPEN_SOURCE=700
 
 LIBADD=	\

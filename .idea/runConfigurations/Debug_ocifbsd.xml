@@ -1,0 +1,20 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Debug ocifbsd" type="Remote">
+    <option name="DEPLOY" value="true" />
+    <option name="DEPLOY_TARGET_NAME" value="freebsd-oci" />
+    <option name="DEPLOY_HOST" value="freebsd-oci" />
+    <option name="DEPLOY_USER" value="root" />
+    <option name="DEPLOY_REMOTE_PROJECT_DIR" value="/root/ocifbsd-debug" />
+    <option name="RUN_ON_TARGET" value="true" />
+    <option name="TARGET_NAME" value="freebsd-oci" />
+    <option name="TARGET_HOST" value="freebsd-oci" />
+    <option name="TARGET_USER" value="root" />
+    <option name="TARGET_PORT" value="22" />
+    <option name="EXECUTABLE_PATH" value="/root/ocifbsd-debug/ocifbsd" />
+    <option name="WORKING_DIRECTORY" value="/root" />
+    <option name="PARAMETERS" value="--version" />
+    <option name="DEBUGGER_TYPE" value="LLDB" />
+    <option name="ENV_VARS" value="" />
+    <method v="2" />
+  </configuration>
+</component>

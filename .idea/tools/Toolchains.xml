@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<toolchains>
+  <!--
+    FreeBSD-CrossBuild-macOS: toolchain for building ocifbsd from macOS host.
+    - bmake (FreeBSD make) from Homebrew, NOT GNU make
+    - Homebrew LLVM clang (provides clang, clang++, lld, lldb)
+    - macOS lldb as fallback debugger (full Homebrew lldb preferred)
+    - Use this toolchain with the Custom Build Targets in .idea/misc.xml
+  -->
+  <toolchain name="FreeBSD-CrossBuild-macOS" type="System">
+    <option name="C_COMPILER" value="/opt/homebrew/opt/llvm/bin/clang" />
+    <option name="CXX_COMPILER" value="/opt/homebrew/opt/llvm/bin/clang++" />
+    <option name="MAKE" value="/opt/homebrew/bin/bmake" />
+    <option name="DEBUGGER" value="/opt/homebrew/opt/llvm/bin/lldb" />
+    <option name="C_LINKER" value="/opt/homebrew/opt/llvm/bin/lld" />
+  </toolchain>
+
+  <!--
+    FreeBSD-Native-macOS: fallback toolchain using macOS system clang
+    and lldb. Use this if Homebrew LLVM is not installed.
+    Note: this will FAIL for cross-builds (no lld), but works for syntax
+    checking and IDE navigation of ocifbsd source.
+  -->
+  <toolchain name="FreeBSD-Native-macOS" type="System">
+    <option name="C_COMPILER" value="/usr/bin/clang" />
+    <option name="CXX_COMPILER" value="/usr/bin/clang++" />
+    <option name="MAKE" value="/opt/homebrew/bin/bmake" />
+    <option name="DEBUGGER" value="/usr/bin/lldb" />
+  </toolchain>
+</toolchains>
