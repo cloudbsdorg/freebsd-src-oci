@@ -693,7 +693,7 @@ doc-check:
 	for doc in TROUBLESHOOTING CONTRIBUTING FAQ SECURITY MIGRATION CHANGELOG; do \
 		REF_FILE=${REPO_ROOT}/.omo/drafts/$$doc.md; \
 		if [ -f "$$REF_FILE" ]; then \
-			REFS=$$(grep -oE '`?\.omo/drafts/[a-zA-Z-]+\.md`?' "$$REF_FILE" 2>/dev/null | sort -u | wc -l | tr -d ' '); \
+			REFS=$$(grep -oE '`?\.omo/drafts/[a-zA-Z-]+\.md`?|\[[a-zA-Z-]+\.md\]\([a-zA-Z-]+\.md\)' "$$REF_FILE" 2>/dev/null | sort -u | wc -l | tr -d ' '); \
 			printf "  %-50s %s cross-references\n" ".omo/drafts/$$doc.md" "$$REFS"; \
 		fi; \
 	done
