@@ -3,6 +3,13 @@
 This document tracks planned migrations from non-FreeBSD-native
 dependencies to FreeBSD-native equivalents.
 
+**Related documents:**
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — Known issues and workarounds
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Developer workflow and conventions
+- [SECURITY.md](SECURITY.md) — Security policy and hardening guide
+- [CHANGELOG.md](CHANGELOG.md) — What changed in each release
+- [FAQ.md](FAQ.md) — Frequently asked questions
+
 ## Overview
 
 | From | To | Effort | Status | Files affected |

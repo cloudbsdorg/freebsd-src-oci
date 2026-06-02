@@ -718,6 +718,27 @@ archive:
 		echo "Total files: `tar tzf /tmp/$$ARCHIVE | wc -l | tr -d ' '`"; \
 	} || { echo "tar failed"; exit 1; }
 
+# Show a banner with project info
+banner:
+	@echo ""
+	@echo "  ┌─────────────────────────────────────────────────────────────┐"
+	@echo "  │                                                             │"
+	@echo "  │   ocifbsd - FreeBSD Native OCI Runtime                      │"
+	@echo "  │   Version $$(printf '%-5s' $$(grep '^VERSION=' ${OCIFBSD_ROOT}/Makefile | head -1 | cut -d= -f2 | tr -d ' \t'))                                            │"
+	@echo "  │   Branch $$(printf '%-30s' $$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown))                  │"
+	@echo "  │   Commit $$(printf '%-30s' $$(git rev-parse --short HEAD 2>/dev/null || echo unknown))                  │"
+	@echo "  │                                                             │"
+	@echo "  │   $$(printf '%-59s' "$$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | wc -l | tr -d ' ') .c/.h files") │"
+	@echo "  │   $$(printf '%-59s' "$$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $$1}') lines") │"
+	@echo "  │                                                             │"
+	@echo "  │   Quick start:                                              │"
+	@echo "  │     bmake -C usr.sbin/ocifbsd help                          │"
+	@echo "  │     bmake -C usr.sbin/ocifbsd dev                           │"
+	@echo "  │     bmake -C usr.sbin/ocifbsd all-meta                      │"
+	@echo "  │                                                             │"
+	@echo "  └─────────────────────────────────────────────────────────────┘"
+	@echo ""
+
 .if exists(src.opts.mk)
 .include <src.opts.mk>
 .endif
