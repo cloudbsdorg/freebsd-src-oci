@@ -55,6 +55,7 @@ SUBDIR=	adduser \
 	nfsuserd \
 	nmtree \
 	nologin \
+	ocifbsd \
 	pciconf \
 	periodic \
 	pnfsdscopymr \

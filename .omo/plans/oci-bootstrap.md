@@ -722,7 +722,7 @@ Max Concurrent: 8 (Wave 1)
 
 ### Wave 2 — Code Audit & Smoke Build (5 parallel)
 
-- [ ] 8. Audit `usr.sbin/ocifbsd/` source quality for AI slop and stubs
+- [x] 8. Audit `usr.sbin/ocifbsd/` source quality for AI slop and stubs
 
   **What to do**:
   - For each `.c` file under `usr.sbin/ocifbsd/`, count: total lines, comment lines, blank lines, function bodies
@@ -769,7 +769,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (audit only)
 
-- [ ] 9. Verify `usr.sbin/ocifbsd/Makefile` includes all subdirs
+- [x] 9. Verify `usr.sbin/ocifbsd/Makefile` includes all subdirs
 
   **What to do**:
   - Read `usr.sbin/ocifbsd/Makefile`
@@ -815,7 +815,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES (only if changes made) - `chore(ocifbsd): add missing SUBDIR entries`
   - Files: `usr.sbin/ocifbsd/Makefile`
 
-- [ ] 10. Verify `usr.sbin/Makefile` on the new branch adds `ocifbsd` subdir
+- [x] 10. Verify `usr.sbin/Makefile` on the new branch adds `ocifbsd` subdir
 
   **What to do**:
   - Read `usr.sbin/Makefile` (top-level)
@@ -857,7 +857,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES (only if changes made) - `chore(usr.sbin): add ocifbsd to SUBDIR`
   - Files: `usr.sbin/Makefile`
 
-- [ ] 11. Compile a single `ocifbsd` module with bmake (smoke test)
+- [x] 11. Compile a single `ocifbsd` module with bmake (smoke test)
 
   **What to do**:
   - Pick the smallest module: `usr.sbin/ocifbsd/src/` (Phase 1 core files: container.c, utils.c, hooks.c, state.c, oci2jail.c)
