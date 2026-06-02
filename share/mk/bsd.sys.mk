@@ -92,8 +92,6 @@ CWARNFLAGS.clang+=	-Wno-error=unused-but-set-parameter
 .if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 190000
 # Similar to gcc >= 8.1 -Wno-error=cast-function-type below
 CWARNFLAGS.clang+=	-Wno-error=cast-function-type-mismatch
-.endif
-.if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 210000
 CXXWARNFLAGS.clang+=	-Wno-c++20-extensions
 CXXWARNFLAGS.clang+=	-Wno-c++23-lambda-attributes
 CXXWARNFLAGS.clang+=	-Wno-nullability-completeness
@@ -321,12 +319,9 @@ SSP_CFLAGS?=	-fstack-protector-strong
 .endif
 CFLAGS+=	${SSP_CFLAGS}
 .endif # SSP
-
-.if empty(CFLAGS:M-D_FORTIFY_SOURCE*)
-CFLAGS+=	-D_FORTIFY_SOURCE=${FORTIFY_SOURCE.${.IMPSRC:T}:U${FORTIFY_SOURCE}}
-.endif
-.if empty(CXXFLAGS:M-D_FORTIFY_SOURCE*)
-CXXFLAGS+=	-D_FORTIFY_SOURCE=${FORTIFY_SOURCE.${.IMPSRC:T}:U${FORTIFY_SOURCE}}
+.if ${FORTIFY_SOURCE} > 0
+CFLAGS+=	-D_FORTIFY_SOURCE=${FORTIFY_SOURCE}
+CXXFLAGS+=	-D_FORTIFY_SOURCE=${FORTIFY_SOURCE}
 .endif
 
 # Additional flags passed in CFLAGS and CXXFLAGS when MK_DEBUG_FILES is

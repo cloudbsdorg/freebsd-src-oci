@@ -448,6 +448,7 @@ do_execve(struct thread *td, struct image_args *args, struct mac *mac_p,
 	 */
 	bzero(imgp, sizeof(*imgp));
 	imgp->proc = p;
+	imgp->td = td;
 	imgp->attr = &attr;
 	imgp->args = args;
 	oldcred = p->p_ucred;
@@ -1435,7 +1436,8 @@ exec_prealloc_args_kva(void *arg __unused)
 	mtx_init(&exec_args_kva_mtx, "exec args kva", NULL, MTX_DEF);
 	for (i = 0; i < exec_map_entries; i++) {
 		argkva = malloc(sizeof(*argkva), M_PARGS, M_WAITOK);
-		argkva->addr = kmap_alloc_wait(exec_map, exec_map_entry_size);
+		argkva->addr = kmap_alloc_wait(exec_map, exec_map_entry_size,
+		    ptoa(exec_map_guard_pages));
 		argkva->gen = exec_args_gen;
 		SLIST_INSERT_HEAD(&exec_args_kva_freelist, argkva, next);
 	}
