@@ -45,3 +45,29 @@ sys/*/compile
 .omo/run-continuation/
 .omo/evidence/
 .omo/worktrees/
+
+# === oci-bootstrap cross-build artifacts (T24) ===
+# Cross-compiled object files and libraries
+obj/
+obj.*/
+*.o
+*.a
+*.so
+*.so.*
+
+# Cross-build output directories
+/tmp/obj-oci/
+/tmp/libs-build.log
+/freebsd-cross-build-env
+
+# ocifbsd build outputs
+usr.sbin/ocifbsd/ocifbsd
+usr.sbin/ocifbsd/ocifbsd-*
+usr.sbin/ocifbsd/*/ocifbsd-*
+tests/usr.sbin/ocifbsd/ocifbsd_test
+tests/usr.sbin/ocifbsd/ocifbsd_test.o
+tests/usr.sbin/ocifbsd/*.core
+
+# AI slop audit / tmp analysis
+.omo/slops/
+*.slop.txt

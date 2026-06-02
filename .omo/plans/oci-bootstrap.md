@@ -907,7 +907,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (investigation only)
 
-- [ ] 12. Identify AI-generated code smells for cleanup (deferred, not blocking)
+- [x] 12. Identify AI-generated code smells for cleanup (deferred, not blocking)
 
   **What to do**:
   - From the T8 audit, identify the top 10 most egregious AI slop patterns
@@ -950,7 +950,7 @@ Max Concurrent: 8 (Wave 1)
 
 ### Wave 3 — Cross-Build the World (3 sequential, long-running)
 
-- [ ] 13. Cross-build FreeBSD userland base libraries (libc, libthr, libjail)
+- [x] 13. Cross-build FreeBSD userland base libraries (libc, libthr, libjail)
 
   **What to do**:
   - Run: `python3 tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 -j$(sysctl -n hw.ncpu) libraries` (this is the libraries-only step, much smaller than full `buildworld`)
@@ -1000,7 +1000,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (build artifacts not committed)
 
-- [ ] 14. Build `usr.sbin/ocifbsd/` and all its subdirs
+- [x] 14. Build `usr.sbin/ocifbsd/` and all its subdirs
 
   **What to do**:
   - After T13: `cd usr.sbin/ocifbsd && bmake TARGET=amd64 TARGET_ARCH=amd64 -j$(sysctl -n hw.ncpu)`
@@ -1050,7 +1050,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (build output not committed; only source fixes if any)
 
-- [ ] 15. Build `tests/usr.sbin/ocifbsd/` test harness
+- [x] 15. Build `tests/usr.sbin/ocifbsd/` test harness
 
   **What to do**:
   - After T14: `cd tests/usr.sbin/ocifbsd && bmake TARGET=amd64 TARGET_ARCH=amd64`
@@ -1099,7 +1099,7 @@ Max Concurrent: 8 (Wave 1)
 
 ### Wave 4 — CLion IDE Integration (5 parallel)
 
-- [ ] 16. Configure CLion bmake toolchain (`.idea/tools/Toolchains.xml`)
+- [x] 16. Configure CLion bmake toolchain (`.idea/tools/Toolchains.xml`)
 
   **What to do**:
   - Create `.idea/tools/Toolchains.xml` (if not present)
@@ -1149,7 +1149,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `chore(ide): add FreeBSD cross-build toolchain config`
   - Files: `.idea/tools/Toolchains.xml`
 
-- [ ] 17. Create Custom Build Targets for ocifbsd subdirs (`.idea/misc.xml`)
+- [x] 17. Create Custom Build Targets for ocifbsd subdirs (`.idea/misc.xml`)
 
   **What to do**:
   - Modify `.idea/misc.xml` to add Custom Build Targets under the existing `MakefileSettings` block
@@ -1199,7 +1199,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `chore(ide): add ocifbsd custom build targets`
   - Files: `.idea/misc.xml`
 
-- [ ] 18. Create Run/Debug Configurations (`.idea/workspace.xml`)
+- [x] 18. Create Run/Debug Configurations (`.idea/workspace.xml`)
 
   **What to do**:
   - Modify `.idea/workspace.xml` to add `<RunConfiguration>` entries under `<configurations>`
@@ -1247,7 +1247,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `chore(ide): add ocifbsd run/debug configurations`
   - Files: `.idea/workspace.xml`
 
-- [ ] 19. Configure ATF test framework integration
+- [x] 19. Configure ATF test framework integration
 
   **What to do**:
   - Research CLion's ATF/kyua test framework integration
@@ -1290,7 +1290,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `chore(ide): add ATF test run config and dev doc cross-ref`
   - Files: `.idea/workspace.xml`, `.plan/020.0-Developer-Setup.md`
 
-- [ ] 20. Test full IDE workflow (build, run, debug from CLion)
+- [x] 20. Test full IDE workflow (build, run, debug from CLion)
 
   **What to do**:
   - Manually verify (via headless command-line, since we're agents): use the CLion CLI to trigger builds if available
@@ -1336,7 +1336,7 @@ Max Concurrent: 8 (Wave 1)
 
 ### Wave 5 — Verification, Task Doc, and Cleanup (5 parallel)
 
-- [ ] 21. Run ATF tests in FreeBSD VM with snapshot/restore
+- [x] 21. Run ATF tests in FreeBSD VM with snapshot/restore
 
   **What to do**:
   - Restore VM to clean snapshot: `vmctl snapshot restore freebsd-oci clean` (or UTM/QEMU equivalent per T26)
@@ -1394,7 +1394,7 @@ Max Concurrent: 8 (Wave 1)
 
   **Commit**: NO (verification only)
 
-- [ ] 22. Create `.omo/drafts/oci-bootstrap-tasks.md` (working task tracker)
+- [x] 22. Create `.omo/drafts/oci-bootstrap-tasks.md` (working task tracker)
 
   **What to do**:
   - This is the working task doc the user requested
@@ -1444,7 +1444,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `docs: add working task tracker for oci-bootstrap work`
   - Files: `.omo/drafts/oci-bootstrap-tasks.md`
 
-- [ ] 23. Update `.plan/000.0-OCI-Jail-TOC.md` cross-references for the new 020.0 doc
+- [x] 23. Update `.plan/000.0-OCI-Jail-TOC.md` cross-references for the new 020.0 doc
 
   **What to do**:
   - Add a link from the Document Map to the new `.plan/020.0-Developer-Setup.md`
@@ -1488,7 +1488,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES (likely part of T6's commit) - `docs(plan): add 020.0 cross-refs to TOC`
   - Files: `.plan/000.0-OCI-Jail-TOC.md`
 
-- [ ] 24. Update `.gitignore` for cross-build artifacts and IDE cache
+- [x] 24. Update `.gitignore` for cross-build artifacts and IDE cache
 
   **What to do**:
   - Add to `.gitignore`:
