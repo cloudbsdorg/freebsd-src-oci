@@ -68,6 +68,14 @@ jobs:
           cd usr.sbin/ocifbsd
           bmake test-cross-build
 
+      - name: Run diff-main
+        if: github.event_name == 'pull_request'
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake diff-main
+          bmake diff-files
+          bmake diff-log
+
       - name: Show summary
         run: |
           echo "=== ocifbsd State Summary ==="
