@@ -1539,7 +1539,7 @@ Max Concurrent: 8 (Wave 1)
   **Commit**: YES - `chore: gitignore cross-build artifacts`
   - Files: `.gitignore`
 
-- [ ] 25. Commit and push feature branch (if user approved)
+- [x] 25. Commit and push feature branch (if user approved)
 
   **What to do**:
   - Verify all changes are committed: `git status` clean
@@ -1592,19 +1592,19 @@ Max Concurrent: 8 (Wave 1)
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 > **Never mark F1-F4 as checked before getting user's okay.** Rejection or user feedback -> fix -> re-run -> present again -> wait for okay.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in `.omo/evidence/`. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `xmllint --noout` on all `.idea/*.xml` files. Verify Makefile syntax with `bmake -n -C usr.sbin/ocifbsd` (dry run). Review all changed files for: AI slop patterns, empty bodies, commented-out code, unused imports. Check the audit report from T8 against actual evidence.
   Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
   Start from clean state. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration: do the custom build targets actually invoke bmake? Do the run configs point at real artifacts? Is the IDE workflow documented in 020.0 actually followed end-to-end? Save to `.omo/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff (`git log -p`, `git diff`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination. Flag unaccounted changes. Verify the 4 `.plan/` docs are present and accurate. Verify `.omo/drafts/oci-bootstrap-tasks.md` is the working tracker.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
