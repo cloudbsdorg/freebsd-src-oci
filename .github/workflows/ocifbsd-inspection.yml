@@ -1,0 +1,96 @@
+name: ocifbsd Inspection
+
+# Runs the ocifbsd Makefile inspection targets on every push and PR.
+# These targets verify source code quality without requiring a full build.
+# See usr.sbin/ocifbsd/Makefile for the full list of inspection targets.
+
+on:
+  push:
+    branches: [ main, 'feature/**', 'stable/[1-9][0-9]' ]
+  pull_request:
+    branches: [ main, 'feature/**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: ocifbsd Inspection (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history for git rev-parse in all-checks target
+          fetch-depth: 0
+
+      - name: Install packages
+        run: |
+          brew update --quiet || true
+          brew install bmake
+          # llvm provides clang, lldb
+          brew install llvm
+          # lld is a separate package since LLVM 19+
+          brew install lld
+
+      - name: Run smoke test
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake smoke
+
+      - name: Run audit
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake audit
+
+      - name: Run lint
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake lint
+
+      - name: Run find-hack
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake find-hack
+
+      - name: Run find-todos
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake find-todos
+
+      - name: Run all-checks (full report)
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake all-checks
+
+      - name: Run test-cross-build
+        run: |
+          cd usr.sbin/ocifbsd
+          bmake test-cross-build
+
+      - name: Show summary
+        run: |
+          echo "=== ocifbsd State Summary ==="
+          echo ""
+          echo "Source files:"
+          find usr.sbin/ocifbsd -name "*.c" -o -name "*.h" | wc -l | xargs echo "  Total:"
+          echo ""
+          echo "Markers:"
+          grep -rE "TODO|FIXME|XXX|HACK" usr.sbin/ocifbsd --include="*.c" --include="*.h" 2>/dev/null | wc -l | xargs echo "  Total markers:"
+          echo "  TODO:  $(grep -rE 'TODO' usr.sbin/ocifbsd --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+          echo "  FIXME: $(grep -rE 'FIXME' usr.sbin/ocifbsd --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+          echo "  XXX:   $(grep -rE 'XXX' usr.sbin/ocifbsd --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+          echo "  HACK:  $(grep -rE 'HACK' usr.sbin/ocifbsd --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ')"
+          echo ""
+          echo "Migration debt:"
+          echo "  Seccomp refs: $(grep -rln 'seccomp' usr.sbin/ocifbsd --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ') files (need capsicum)"
+          echo "  json-c refs:  $(grep -rln 'json-c\|json_object' usr.sbin/ocifbsd --include='*.c' --include='*.h' 2>/dev/null | wc -l | tr -d ' ') files (not in FreeBSD base)"
+
+      - name: Upload inspection report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocifbsd-inspection-report
+          path: /tmp/ocifbsd-inspection-report.txt
+          if-no-files-found: warn
+          retention-days: 30
