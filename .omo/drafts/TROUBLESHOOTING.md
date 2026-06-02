@@ -232,9 +232,17 @@ Host freebsd-oci
 | `audit` | AI slop markers | Yes |
 | `lint` | Code quality | Yes |
 | `smoke` | Host-side smoke test | Yes |
-| `docs` | List .plan/ docs | Yes |
 | `sources` | File inventory with LOC | Yes |
 | `size` | Tree size breakdown | Yes |
+| `docs` | List .plan/ docs | Yes |
+| `find-hack` | Show HACK markers with context | Yes |
+| `find-todos` | TODO/FIXME/XXX grouped by file | Yes |
+| `all-checks` | Run all inspection targets, save report | Yes |
+| `release-manifest` | What would go in a release tarball | Yes |
+| `test-cross-build` | Cross-build env diagnostic (no build) | Yes |
+| `check-deps` | Verify required tools | Yes |
+| `verify` | Pre-commit verification | Yes |
+| `dev` | One-command developer setup | Yes |
 | `darwin-bootstrap` | Install toolchain | Yes |
 | `darwin-build` | Cross-build | Partial (header leak) |
 | `darwin-test` | Deploy + test on VM | Needs VM |
@@ -244,6 +252,8 @@ Host freebsd-oci
 | `clean-all` | Deep clean | Yes |
 | (default) | Build ocifbsd | Needs FreeBSD |
 | `install` | Install to DESTDIR | Needs FreeBSD |
+
+See `CONTRIBUTING.md` for the full reference with usage examples.
 
 ## State Summary
 

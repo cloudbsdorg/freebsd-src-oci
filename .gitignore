@@ -71,3 +71,6 @@ tests/usr.sbin/ocifbsd/*.core
 # AI slop audit / tmp analysis
 .omo/slops/
 *.slop.txt
+
+# OMO session tracking (not part of source)
+.omo/boulder.json
