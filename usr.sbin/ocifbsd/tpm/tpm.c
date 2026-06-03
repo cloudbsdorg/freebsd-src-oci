@@ -813,40 +813,94 @@ tpm_attest(char **quote_json, char **pcr_json)
     }
     
     p = json;
-    p += sprintf(p, "{\n");
-    p += sprintf(p, "  \"nonce\": \"");
-    for (i = 0; i < 32; i++)
-        p += sprintf(p, "%02x", nonce[i]);
-    p += sprintf(p, "\",\n");
-    p += sprintf(p, "  \"pcrs\": [");
+    size_t remaining = json_size;
+    int n;
+
+    n = snprintf(p, remaining, "{\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    p += n; remaining -= (size_t)n;
+
+    n = snprintf(p, remaining, "  \"nonce\": \"");
+    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    p += n; remaining -= (size_t)n;
+
+    for (i = 0; i < 32; i++) {
+        n = snprintf(p, remaining, "%02x", nonce[i]);
+        if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+        p += n; remaining -= (size_t)n;
+    }
+
+    n = snprintf(p, remaining, "\",\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    p += n; remaining -= (size_t)n;
+
+    n = snprintf(p, remaining, "  \"pcrs\": [");
+    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    p += n; remaining -= (size_t)n;
+
     for (i = 0; i < 24; i++) {
         int j;
-        p += sprintf(p, "\"");
-        for (j = 0; j < 32; j++)
-            p += sprintf(p, "%02x", quote->pcr_values[i * 32 + j]);
-        p += sprintf(p, "\"%s\n", i < 23 ? "," : "");
+        n = snprintf(p, remaining, "\"");
+        if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+        p += n; remaining -= (size_t)n;
+
+        for (j = 0; j < 32; j++) {
+            n = snprintf(p, remaining, "%02x", quote->pcr_values[i * 32 + j]);
+            if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+            p += n; remaining -= (size_t)n;
+        }
+
+        n = snprintf(p, remaining, "\"%s\n", i < 23 ? "," : "");
+        if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+        p += n; remaining -= (size_t)n;
     }
-    p += sprintf(p, "  ]\n");
-    p += sprintf(p, "}\n");
-    
+
+    n = snprintf(p, remaining, "  ]\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    p += n; remaining -= (size_t)n;
+
+    n = snprintf(p, remaining, "}\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+
     *quote_json = json;
     
     /* Build PCR JSON */
     if (pcrs != NULL) {
-        json_size = 2048;
+        json_size = 256 + (size_t)pcr_count * 128;
         json = malloc(json_size);
         if (json != NULL) {
             p = json;
-            p += sprintf(p, "{\n  \"pcrs\": [\n");
+            size_t remaining = json_size;
+            int n;
+
+            n = snprintf(p, remaining, "{\n  \"pcrs\": [\n");
+            if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+            p += n; remaining -= (size_t)n;
+
             for (i = 0; i < pcr_count; i++) {
                 int j;
-                p += sprintf(p, "    {\"index\": %d, \"value\": \"", pcrs[i].index);
-                for (j = 0; j < 32; j++)
-                    p += sprintf(p, "%02x", pcrs[i].value[j]);
-                p += sprintf(p, "\"");
-                p += sprintf(p, "}%s\n", i < pcr_count - 1 ? "," : "");
+                n = snprintf(p, remaining, "    {\"index\": %d, \"value\": \"", pcrs[i].index);
+                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                p += n; remaining -= (size_t)n;
+
+                for (j = 0; j < 32; j++) {
+                    n = snprintf(p, remaining, "%02x", pcrs[i].value[j]);
+                    if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                    p += n; remaining -= (size_t)n;
+                }
+
+                n = snprintf(p, remaining, "\"");
+                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                p += n; remaining -= (size_t)n;
+
+                n = snprintf(p, remaining, "}%s\n", i < pcr_count - 1 ? "," : "");
+                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                p += n; remaining -= (size_t)n;
             }
-            p += sprintf(p, "  ]\n}\n");
+
+            n = snprintf(p, remaining, "  ]\n}\n");
+            if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+
             *pcr_json = json;
             free(pcrs);
         }
