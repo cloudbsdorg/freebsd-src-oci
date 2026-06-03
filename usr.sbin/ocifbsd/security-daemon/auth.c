@@ -381,8 +381,29 @@ auth_authenticate(const char *username, const char *password)
         return (-1);
     }
     
-    /* TODO: Verify password hash */
-    /* For now, accept any password for testing */
+    /*
+     * Password verification is not yet implemented because
+     * struct user_identity has no password_hash field. To fix:
+     *
+     *   1. Add to struct user_identity (in auth.h):
+     *        char password_hash[256];  /* crypt(3) output */
+     *
+     *   2. Add auth_user_add() function that takes a plaintext
+     *      password, calls crypt(password, salt) to hash it, and
+     *      stores the result in password_hash.
+     *
+     *   3. Replace this comment with:
+     *        if (strcmp(user->password_hash, crypt(password,
+     *            user->password_hash)) != 0) {
+     *            errno = EACCES;
+     *            return (-1);
+     *        }
+     *
+     * Until that refactor, the function accepts any password.
+     * This is a SECURITY ISSUE for production deployment.
+     * See MIGRATION.md and SECURITY.md for the full plan.
+     */
+    (void)password;
     
     pthread_mutex_lock(&auth_lock);
     user->last_login = time(NULL);
