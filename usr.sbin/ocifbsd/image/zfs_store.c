@@ -765,7 +765,25 @@ zfs_store_destroy_image(const char *registry, const char *repo,
 int
 zfs_store_list_images(struct zfs_image ***images, int *nimages)
 {
-	/* TODO: Implement using zfs list -t filesystem */
+	/*
+	 * Listing images via 'zfs list -t filesystem' is not yet
+	 * implemented. The implementation needs to:
+	 *
+	 *   1. Call 'zfs list -t filesystem -H -o name,used,quota,
+	 *      mountpoint,creation' to enumerate all ZFS filesystems
+	 *   2. Filter to only those under the ocifbsd dataset prefix
+	 *      (e.g., tank/ocifbsd/images/*)
+	 *   3. For each, parse the name into registry/repo/tag
+	 *   4. Optionally call 'zfs get -H digest' to get manifest digest
+	 *   5. Allocate zfs_image array, populate, return
+	 *
+	 * Alternative: use libzfs (libzfs.h, in base on FreeBSD) for
+	 * a proper C API instead of popen().
+	 *
+	 * This function runs on FreeBSD hosts only (macOS has no ZFS
+	 * in the kernel, and the userland zfs(8) tools are not in base).
+	 * See MIGRATION.md for the full plan.
+	 */
 	*nimages = 0;
 	*images = NULL;
 	return (0);
@@ -775,7 +793,19 @@ int
 zfs_store_get_image(const char *registry, const char *repo,
     const char *tag, struct zfs_image **image)
 {
-	/* TODO: Implement */
+	/*
+	 * Looking up a specific image is not yet implemented. Needs to:
+	 *   1. Build dataset path: <prefix>/<registry>/<repo>/<tag>
+	 *   2. Call 'zfs list -H <dataset>' to check existence
+	 *   3. If exists, call 'zfs get -H used,quota,mountpoint' for details
+	 *   4. Allocate and populate zfs_image struct
+	 *
+	 * This function runs on FreeBSD hosts only.
+	 * See MIGRATION.md for the full plan.
+	 */
+	(void)registry;
+	(void)repo;
+	(void)tag;
 	*image = NULL;
 	return (ENOENT);
 }
@@ -902,7 +932,20 @@ zfs_store_get_usage(uint64_t *used, uint64_t *available)
 int
 zfs_store_cleanup_unused(void)
 {
-	/* TODO: Implement cleanup of orphaned layers */
+	/*
+	 * Cleanup of orphaned layers is not yet implemented. Needs to:
+	 *   1. List all image datasets (via zfs_store_list_images)
+	 *   2. For each layer dataset, check if referenced by any image
+	 *   3. If unreferenced for >N days, 'zfs destroy <layer>'
+	 *   4. Optionally, snapshot before destroy for grace period
+	 *
+	 * Garbage collection is a separate concern from this function -
+	 * this is just the orphan cleanup, not the policy (when to
+	 * cleanup, retention, etc.).
+	 *
+	 * This function runs on FreeBSD hosts only.
+	 * See MIGRATION.md for the full plan.
+	 */
 	return (0);
 }
 
@@ -1079,7 +1122,16 @@ zfs_volume_free(struct zfs_volume *vol)
 int
 zfs_volume_list(struct zfs_volume ***volumes, int *nvolumes)
 {
-	/* TODO: Implement using zfs list */
+	/*
+	 * Listing ZFS volumes is not yet implemented. Needs to:
+	 *   1. Call 'zfs list -t volume -H -o name,volsize,encryption,
+	 *      mountpoint'
+	 *   2. Filter to ocifbsd volume prefix
+	 *   3. Parse into zfs_volume structs
+	 *
+	 * This function runs on FreeBSD hosts only.
+	 * See MIGRATION.md for the full plan.
+	 */
 	*nvolumes = 0;
 	*volumes = NULL;
 	return (0);
