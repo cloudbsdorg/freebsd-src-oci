@@ -141,6 +141,7 @@ mac_list_policies(char ***policies, int *npolicies)
 					*end-- = '\0';
 
 				list = realloc(list, (count + 1) * sizeof(char *));
+				if (list == NULL) continue;
 				list[count++] = strdup(p);
 			}
 		}

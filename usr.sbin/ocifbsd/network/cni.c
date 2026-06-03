@@ -293,29 +293,43 @@ cni_build_env(const char *container_id, const char *network_ns,
 	int n = 0;
 
 	/* CNI_COMMAND */
-	e = realloc(e, (n + 1) * sizeof(char *));
+	void *_new_c1 = realloc(e, (n + 1) * sizeof(char *));
+	if (_new_c1 == NULL) goto cni_alloc_fail;
+	e = _new_c1;
 	asprintf(&e[n++], "CNI_COMMAND=ADD");
 
 	/* CNI_CONTAINERID */
-	e = realloc(e, (n + 1) * sizeof(char *));
+	void *_new_c2 = realloc(e, (n + 1) * sizeof(char *));
+	if (_new_c2 == NULL) goto cni_alloc_fail;
+	e = _new_c2;
 	asprintf(&e[n++], "CNI_CONTAINERID=%s", container_id);
 
 	/* CNI_NETNS */
-	e = realloc(e, (n + 1) * sizeof(char *));
+	void *_new_c3 = realloc(e, (n + 1) * sizeof(char *));
+	if (_new_c3 == NULL) goto cni_alloc_fail;
+	e = _new_c3;
 	asprintf(&e[n++], "CNI_NETNS=%s", network_ns);
 
 	/* CNI_IFACE */
-	e = realloc(e, (n + 1) * sizeof(char *));
+	void *_new_c4 = realloc(e, (n + 1) * sizeof(char *));
+	if (_new_c4 == NULL) goto cni_alloc_fail;
+	e = _new_c4;
 	asprintf(&e[n++], "CNI_IFNAME=%s", interface_name);
 
 	/* CNI_PATH */
-	e = realloc(e, (n + 1) * sizeof(char *));
+	void *_new_c5 = realloc(e, (n + 1) * sizeof(char *));
+	if (_new_c5 == NULL) goto cni_alloc_fail;
+	e = _new_c5;
 	asprintf(&e[n++], "CNI_PATH=%s", CNI_BIN_DIR);
 
 	*env = e;
 	*nenv = n;
 
 	return (0);
+
+cni_alloc_fail:
+	free(e);
+	return (-1);
 }
 
 /*

@@ -359,12 +359,13 @@ metrics_list(int *count)
     RB_FOREACH(m, metric_tree, &metrics_registry) {
         if (n >= alloc) {
             alloc *= 2;
-            result = realloc(result, alloc * sizeof(struct metric *));
-            if (result == NULL) {
+            void *_new = realloc(result, alloc * sizeof(struct metric *));
+            if (_new == NULL) {
                 pthread_mutex_unlock(&metrics_lock);
                 *count = 0;
                 return (NULL);
             }
+            result = _new;
         }
         result[n++] = m;
     }
@@ -695,11 +696,12 @@ pod_metrics_list(struct pod_metrics **metrics, int *count)
         
         if (n >= alloc) {
             alloc *= 2;
-            result = realloc(result, alloc * sizeof(struct pod_metrics));
-            if (result == NULL) {
+            void *_new = realloc(result, alloc * sizeof(struct pod_metrics));
+            if (_new == NULL) {
                 closedir(dir);
                 return (-1);
             }
+            result = _new;
         }
         
         if (pod_metrics_collect(ent->d_name, &result[n]) == 0) {
@@ -901,11 +903,12 @@ metrics_set_threshold(const char *name, double warning, double critical, int com
 {
     pthread_mutex_lock(&threshold_lock);
     
-    thresholds = realloc(thresholds, (n_thresholds + 1) * sizeof(struct metrics_threshold));
-    if (thresholds == NULL) {
+    void *_new = realloc(thresholds, (n_thresholds + 1) * sizeof(struct metrics_threshold));
+    if (_new == NULL) {
         pthread_mutex_unlock(&threshold_lock);
         return (-1);
     }
+    thresholds = _new;
     
     strlcpy(thresholds[n_thresholds].metric_name, name,
         sizeof(thresholds[n_thresholds].metric_name));

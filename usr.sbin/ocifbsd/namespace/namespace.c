@@ -390,12 +390,13 @@ ns_list(int *count)
     RB_FOREACH(ns, ns_tree, &namespace_registry) {
         if (n >= alloc) {
             alloc *= 2;
-            result = realloc(result, alloc * sizeof(struct namespace *));
-            if (result == NULL) {
+            void *_new = realloc(result, alloc * sizeof(struct namespace *));
+            if (_new == NULL) {
                 pthread_mutex_unlock(&namespace_registry_lock);
                 *count = 0;
                 return (NULL);
             }
+            result = _new;
         }
         result[n++] = ns;
     }
@@ -598,11 +599,12 @@ ns_list_pods(struct namespace *ns, char ***pods, int *count)
         
         if (n >= alloc) {
             alloc = alloc ? alloc * 2 : 16;
-            result = realloc(result, alloc * sizeof(char *));
-            if (result == NULL) {
+            void *_new = realloc(result, alloc * sizeof(char *));
+            if (_new == NULL) {
                 closedir(dir);
                 return (-1);
             }
+            result = _new;
         }
         
         result[n] = strdup(ent->d_name);

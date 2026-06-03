@@ -433,7 +433,9 @@ rctl_get_rules(const char *jail_name, struct rctl_rule **rules, int *nrules)
 		if (strcmp(type, "type") == 0)
 			goto next_line;
 
-		list = realloc(list, (count + 1) * sizeof(*list));
+		void *_new_r = realloc(list, (count + 1) * sizeof(*list));
+		if (_new_r == NULL) goto next_line;
+		list = _new_r;
 		r = &list[count];
 
 		r->jail_name = strdup(jail_name);
@@ -615,7 +617,9 @@ rctl_get_all_usage(const char *jail_name, struct rctl_usage **usage, int *nusage
 		if (strcmp(type, "type") == 0)
 			goto next_line;
 
-		list = realloc(list, (count + 1) * sizeof(*list));
+		void *_new_u = realloc(list, (count + 1) * sizeof(*list));
+		if (_new_u == NULL) goto next_line;
+		list = _new_u;
 		u = &list[count];
 
 		u->jail_name = strdup(jail_name);

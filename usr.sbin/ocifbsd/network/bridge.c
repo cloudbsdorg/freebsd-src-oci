@@ -163,6 +163,7 @@ bridge_get_fdb(const char *bridge, char ***entries, int *nentries)
 			continue;  /* Skip empty entries */
 
 		list = realloc(list, (count + 1) * sizeof(char *));
+		if (list == NULL) continue;
 		list[count++] = strdup(cmd);
 	}
 

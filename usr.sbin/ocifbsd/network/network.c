@@ -268,6 +268,7 @@ bridge_list_interfaces(const char *bridge, char ***interfaces, int *ninterfaces)
 
 				if (*p) {
 					ifaces = realloc(ifaces, (nifaces + 1) * sizeof(char *));
+					if (ifaces == NULL) continue;
 					ifaces[nifaces++] = strdup(p);
 				}
 			}
@@ -722,6 +723,7 @@ network_list(struct network_config ***networks, int *nnetworks)
 			struct network_config *config = network_get(network_id);
 			if (config) {
 				list = realloc(list, (count + 1) * sizeof(*list));
+				if (list == NULL) continue;
 				list[count++] = config;
 			}
 		}

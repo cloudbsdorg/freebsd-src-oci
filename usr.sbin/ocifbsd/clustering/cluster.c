@@ -442,12 +442,13 @@ cluster_nodes_list(int *count)
     RB_FOREACH(node, node_tree, &node_registry) {
         if (n >= alloc) {
             alloc *= 2;
-            result = realloc(result, alloc * sizeof(struct cluster_node *));
-            if (result == NULL) {
+            void *_new = realloc(result, alloc * sizeof(struct cluster_node *));
+            if (_new == NULL) {
                 pthread_mutex_unlock(&node_registry_lock);
                 *count = 0;
                 return (NULL);
             }
+            result = _new;
         }
         result[n++] = node;
     }
@@ -484,12 +485,13 @@ cluster_nodes_by_role(int role, int *count)
         if (all[i]->role == role) {
             if (n >= alloc) {
                 alloc *= 2;
-                result = realloc(result, alloc * sizeof(struct cluster_node *));
-                if (result == NULL) {
+                void *_new = realloc(result, alloc * sizeof(struct cluster_node *));
+                if (_new == NULL) {
                     free(all);
                     *count = 0;
                     return (NULL);
                 }
+                result = _new;
             }
             result[n++] = all[i];
         }

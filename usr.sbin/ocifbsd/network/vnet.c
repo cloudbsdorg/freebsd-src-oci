@@ -116,6 +116,7 @@ vnet_get_jail_status(const char *jail_name, bool *has_vnet, char ***interfaces, 
 			token = strtok_r(buf, " \t\n", &save);
 			while (token) {
 				ifaces = realloc(ifaces, (count + 1) * sizeof(char *));
+				if (ifaces == NULL) continue;
 				ifaces[count++] = strdup(token);
 				token = strtok_r(NULL, " \t\n", &save);
 			}
