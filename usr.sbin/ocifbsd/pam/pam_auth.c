@@ -771,6 +771,71 @@ pam_refresh_token(const char *refresh_token, char **new_token)
 }
 
 /*
+ * Get JWT signing secret from one of:
+ *   1. OCIFBSD_JWT_SECRET environment variable
+ *   2. /etc/ocifbsd/jwt_secret file
+ *   3. Randomly generated (lifetime of process)
+ *
+ * Returns a pointer to a static buffer. NOT thread-safe; intended
+ * to be called once at startup. Length returned via secret_len_out.
+ */
+static const char *
+get_jwt_secret(size_t *secret_len_out)
+{
+	static char secret_buf[128];
+	static int initialized = 0;
+	const char *env_secret;
+	char path[PATH_MAX];
+	struct stat st;
+	ssize_t n;
+	int fd;
+
+	if (initialized) {
+		*secret_len_out = strlen(secret_buf);
+		return (secret_buf);
+	}
+
+	env_secret = getenv("OCIFBSD_JWT_SECRET");
+	if (env_secret != NULL && env_secret[0] != '\0') {
+		strlcpy(secret_buf, env_secret, sizeof(secret_buf));
+		initialized = 1;
+		*secret_len_out = strlen(secret_buf);
+		return (secret_buf);
+	}
+
+	snprintf(path, sizeof(path), "%s/jwt_secret", OCIFBSD_CONFIG_DIR);
+	if (stat(path, &st) == 0 && S_ISREG(st.st_mode) &&
+	    st.st_size > 0 && st.st_size < (off_t)sizeof(secret_buf)) {
+		fd = open(path, O_RDONLY);
+		if (fd >= 0) {
+			n = read(fd, secret_buf, sizeof(secret_buf) - 1);
+			close(fd);
+			if (n > 0) {
+				/* Strip trailing newline */
+				if (secret_buf[n - 1] == '\n')
+					secret_buf[n - 1] = '\0';
+				else
+					secret_buf[n] = '\0';
+				initialized = 1;
+				*secret_len_out = strlen(secret_buf);
+				return (secret_buf);
+			}
+		}
+	}
+
+	/* Fallback: random per-process secret. */
+	arc4random_buf(secret_buf, sizeof(secret_buf) - 1);
+	secret_buf[sizeof(secret_buf) - 1] = '\0';
+	fprintf(stderr, "WARNING: OCIFBSD_JWT_SECRET not set and %s/jwt_secret "
+	    "not found. Using a random per-process secret. Tokens will NOT "
+	    "survive a restart and cannot be verified by other processes.\n",
+	    OCIFBSD_CONFIG_DIR);
+	initialized = 1;
+	*secret_len_out = strlen(secret_buf);
+	return (secret_buf);
+}
+
+/*
  * Generate JWT token
  */
 int
@@ -781,12 +846,15 @@ pam_generate_token(const char *username, const char *role,
     char header_b64[256], payload_b64[512];
     SHA256_CTX ctx;
     uint8_t hash[SHA256_DIGEST_LENGTH];
-    static const char *secret = "ocifbsd-jwt-secret-change-in-production";
+    const char *secret;
+    size_t secret_len;
     size_t sig_len;
     FILE *fp;
 
     if (username == NULL || token_out == NULL)
         return (-1);
+
+    secret = get_jwt_secret(&secret_len);
 
     /* JWT Header */
     snprintf(header, sizeof(header), "{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
@@ -801,7 +869,7 @@ pam_generate_token(const char *username, const char *role,
     base64_encode(payload, strlen(payload), payload_b64, sizeof(payload_b64));
 
     /* HMAC SHA256 Signature */
-    hmac_sha256(secret, strlen(secret), payload_b64, strlen(payload_b64),
+    hmac_sha256(secret, secret_len, payload_b64, strlen(payload_b64),
         hash, SHA256_DIGEST_LENGTH);
     base64_encode((char *)hash, SHA256_DIGEST_LENGTH, signature, sizeof(signature));
 
@@ -823,11 +891,14 @@ pam_verify_jwt(const char *jwt, char **username, uint32_t *perms, time_t *exp)
     char expected_sig[128];
     SHA256_CTX ctx;
     uint8_t hash[SHA256_DIGEST_LENGTH];
-    static const char *secret = "ocifbsd-jwt-secret-change-in-production";
+    const char *secret;
+    size_t secret_len;
     uint32_t p;
 
     if (jwt == NULL)
         return (-1);
+
+    secret = get_jwt_secret(&secret_len);
 
     /* Parse JWT */
     token_copy = strdup(jwt);
@@ -880,7 +951,7 @@ pam_verify_jwt(const char *jwt, char **username, uint32_t *perms, time_t *exp)
     }
 
     /* Verify signature */
-    hmac_sha256(secret, strlen(secret), payload, strlen(payload),
+    hmac_sha256(secret, secret_len, payload, strlen(payload),
         hash, SHA256_DIGEST_LENGTH);
     base64_encode((char *)hash, SHA256_DIGEST_LENGTH, expected_sig, sizeof(expected_sig));
 
