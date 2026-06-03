@@ -1,5 +1,6 @@
 /*-
  * Copyright (c) 2024 The FreeBSD Foundation
+ * SPDX-License-Identifier: BSD-2-Clause
  *
  * This software was developed by Klara, Inc. under sponsorship
  * from the FreeBSD Foundation.
@@ -50,6 +51,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sysexits.h>
+#include <uuid/uuid.h>
 
 #include "network.h"
 
