@@ -608,7 +608,7 @@ network_connect(const char *network_id, const char *container_id,
 	if (endpoint == NULL)
 		return (-1);
 
-	endpoint->id = strdup("");  /* TODO: generate UUID */
+	endpoint->id = strdup(uuidgen());
 	endpoint->network_id = strdup(network_id);
 	endpoint->container_id = strdup(container_id);
 	endpoint->interface_name = strdup("eth0");
