@@ -476,7 +476,15 @@ push_image(struct registry *reg, const char *reference,
 
 	/* Push manifest */
 	char *manifest_json;
-	char config_digest[] = "sha256:placeholder";  /* TODO: compute from config */
+	char *config_digest = NULL;
+	char config_path[PATH_MAX];
+
+	snprintf(config_path, sizeof(config_path), "%s/config.json", sourcedir);
+	if (compute_file_digest(config_path, &config_digest) != 0) {
+		fprintf(stderr, "error: failed to compute config digest: %s\n",
+		    config_path);
+		goto cleanup;
+	}
 
 	ret = create_manifest(config_digest, (struct oci_layer **)layer_digests,
 	    nlayers, &manifest_json);
@@ -490,6 +498,7 @@ cleanup:
 	free(repo);
 	free(tag);
 	free(digest);
+	free(config_digest);
 
 	for (i = 0; i < nlayers; i++)
 		free(layer_digests[i]);
