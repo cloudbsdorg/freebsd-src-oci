@@ -79,6 +79,41 @@ static char hostname[MAXHOSTNAMELEN];
 static uint64_t next_log_id = 1;
 static int initialized = 0;
 
+/*
+ * Execute a command via /bin/sh -c, in a child process.
+ * Returns exit status, or -1 on error. The caller is responsible
+ * for fork()-ing if it wants to run in the background.
+ *
+ * NOTE: This still invokes the shell. It exists to be a more
+ * transparent replacement for system() (no implicit /bin/sh,
+ * explicit argv). It does NOT prevent shell injection of the
+ * command string. Callers must ensure the command comes from a
+ * trusted source (admin config, not user input).
+ */
+static int
+safe_shell_exec(const char *command)
+{
+	pid_t pid;
+	int status;
+
+	if (command == NULL)
+		return (-1);
+
+	pid = fork();
+	if (pid < 0)
+		return (-1);
+	if (pid == 0) {
+		closefrom(STDERR_FILENO + 1);
+		execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+		_exit(127);
+	}
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	if (WIFEXITED(status))
+		return (WEXITSTATUS(status));
+	return (-1);
+}
+
 /* Severity level names */
 static const char *severity_names[] = {
     "emerg", "alert", "crit", "err", "warning",
@@ -594,7 +629,7 @@ log_retention_apply(void)
         "find %s -name 'ocifbsd.*.log' -mtime +%d -delete",
         config.storage_path, config.retention_hot);
 
-    if (system(cmd) != 0) {
+    if (safe_shell_exec(cmd) != 0) {
         syslog(LOG_WARNING, "Retention policy failed: %s", cmd);
     }
 
@@ -899,7 +934,7 @@ alert_trigger(struct alert_rule *rule, struct log_entry *entry)
     if (rule->execute_command && rule->command[0] != '\0') {
         /* Execute in background */
         if (fork() == 0) {
-            system(rule->command);
+            safe_shell_exec(rule->command);
             _exit(0);
         }
     }

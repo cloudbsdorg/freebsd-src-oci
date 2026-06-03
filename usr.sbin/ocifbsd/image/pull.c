@@ -1066,7 +1066,7 @@ compute_digest(const char *path, char **digest)
 		return (-1);
 
 	for (n = 0; n < SHA256_DIGEST_LENGTH; n++)
-		sprintf(hex + n * 2, "%02x", hash[n]);
+		snprintf(hex + n * 2, 3, "%02x", hash[n]);
 
 	*digest = hex;
 	return (0);
