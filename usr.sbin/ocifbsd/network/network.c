@@ -507,7 +507,8 @@ network_create(struct network_config *config)
 		fprintf(f, "  \"name\": \"%s\",\n", config->name);
 		fprintf(f, "  \"id\": \"%s\",\n", config->id);
 		fprintf(f, "  \"type\": %d,\n", config->type);
-		fprintf(f, "  \"bridge\": \"%s\"\n", bridge_name);
+		fprintf(f, "  \"bridge\": \"%s\",\n", bridge_name);
+		fprintf(f, "  \"dns_servers\": []\n");
 		fprintf(f, "}\n");
 		fclose(f);
 		ret = 0;
@@ -808,17 +809,114 @@ nat_check(void)
 /*
  * DNS configuration
  */
+static int
+read_state_file(const char *path, char *buf, size_t bufsz, size_t *len_out)
+{
+	FILE *f = fopen(path, "r");
+	size_t len = 0;
+
+	if (f == NULL)
+		return (-1);
+
+	while (len < bufsz - 1 &&
+	    fgets(buf + len, (int)(bufsz - len), f) != NULL) {
+		len = strlen(buf);
+	}
+	fclose(f);
+
+	if (len == 0)
+		return (-1);
+
+	*len_out = len;
+	return (0);
+}
+
+static char *
+find_quoted_in_range(const char *start, const char *limit, const char *needle)
+{
+	char pattern[256];
+	char *p;
+
+	if (snprintf(pattern, sizeof(pattern), "\"%s\"", needle) >=
+	    (int)sizeof(pattern))
+		return (NULL);
+
+	p = strstr(start, pattern);
+	if (p == NULL || p >= limit)
+		return (NULL);
+
+	return (p);
+}
+
 int
 dns_add_server(const char *network_id, const char *server)
 {
-	char resolv_conf[PATH_MAX];
 	char state_file[PATH_MAX];
+	char buf[4096];
+	char new_buf[5120];
+	size_t len = 0;
+	char *dns_key, *arr, *end, *existing;
+	char server_entry[256];
+	int is_empty;
+
+	if (network_id == NULL || server == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
 
 	snprintf(state_file, sizeof(state_file), "%s/%s.json",
 	    OCIFBSD_NETWORK_STATE_DIR, network_id);
 
-	/* Add DNS server to network config */
-	/* TODO: implement */
+	if (read_state_file(state_file, buf, sizeof(buf), &len) != 0)
+		return (-1);
+
+	dns_key = strstr(buf, "\"dns_servers\":");
+	if (dns_key != NULL) {
+		arr = strchr(dns_key, '[');
+		end = strchr(dns_key, ']');
+		if (arr == NULL || end == NULL)
+			return (-1);
+
+		existing = find_quoted_in_range(arr, end, server);
+		if (existing != NULL)
+			return (0);
+
+		is_empty = (end == arr + 1);
+		snprintf(server_entry, sizeof(server_entry),
+		    is_empty ? "\"%s\"" : ", \"%s\"", server);
+
+		if ((size_t)(end - buf) + strlen(server_entry) +
+		    strlen(end) + 1 > sizeof(new_buf))
+			return (-1);
+
+		snprintf(new_buf, sizeof(new_buf), "%.*s%s%s",
+		    (int)(end - buf), buf, server_entry, end);
+	} else {
+		char *brace = strrchr(buf, '}');
+		char *trim;
+		int has_trailing_comma;
+
+		if (brace == NULL)
+			return (-1);
+
+		trim = brace;
+		while (trim > buf && (trim[-1] == ' ' || trim[-1] == '\n' ||
+		    trim[-1] == '\r' || trim[-1] == '\t'))
+			trim--;
+
+		has_trailing_comma = (trim > buf && trim[-1] == ',');
+		snprintf(new_buf, sizeof(new_buf),
+		    "%.*s%s\"dns_servers\": [\"%s\"]\n}\n",
+		    (int)(trim - buf), buf,
+		    has_trailing_comma ? "" : ", ",
+		    server);
+	}
+
+	FILE *f = fopen(state_file, "w");
+	if (f == NULL)
+		return (-1);
+	fputs(new_buf, f);
+	fclose(f);
 
 	return (0);
 }
@@ -826,8 +924,70 @@ dns_add_server(const char *network_id, const char *server)
 int
 dns_remove_server(const char *network_id, const char *server)
 {
-	/* Remove DNS server from network config */
-	/* TODO: implement */
+	char state_file[PATH_MAX];
+	char buf[4096];
+	char new_buf[5120];
+	size_t len = 0;
+	char *dns_key, *arr, *end, *match;
+	size_t prefix_len, suffix_len, remove_len;
+
+	if (network_id == NULL || server == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	snprintf(state_file, sizeof(state_file), "%s/%s.json",
+	    OCIFBSD_NETWORK_STATE_DIR, network_id);
+
+	if (read_state_file(state_file, buf, sizeof(buf), &len) != 0)
+		return (0);
+
+	dns_key = strstr(buf, "\"dns_servers\":");
+	if (dns_key == NULL)
+		return (0);
+
+	arr = strchr(dns_key, '[');
+	end = strchr(dns_key, ']');
+	if (arr == NULL || end == NULL)
+		return (-1);
+
+	match = find_quoted_in_range(arr, end, server);
+	if (match == NULL)
+		return (0);
+
+	prefix_len = (size_t)(match - buf);
+	remove_len = strlen(server) + 2;
+	if (match[remove_len] == ',') {
+		remove_len++;
+		if (match[remove_len] == ' ')
+			remove_len++;
+	} else if (match > arr + 1 && match[-1] == ',') {
+		prefix_len--;
+		remove_len++;
+		if (match[remove_len] == ' ') {
+			prefix_len--;
+			remove_len++;
+		}
+	} else if (match > arr + 1 && match[-1] == ' ') {
+		prefix_len--;
+		remove_len++;
+	}
+
+	const char *suffix = match + remove_len;
+	suffix_len = strlen(suffix);
+
+	if (prefix_len + suffix_len + 1 > sizeof(new_buf))
+		return (-1);
+
+	memcpy(new_buf, buf, prefix_len);
+	memcpy(new_buf + prefix_len, suffix, suffix_len + 1);
+
+	FILE *f = fopen(state_file, "w");
+	if (f == NULL)
+		return (-1);
+	fputs(new_buf, f);
+	fclose(f);
+
 	return (0);
 }
 
