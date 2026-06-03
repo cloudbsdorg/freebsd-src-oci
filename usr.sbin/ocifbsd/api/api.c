@@ -685,9 +685,30 @@ api_auth_middleware(struct api_request *req, struct api_response *resp)
     if (end != NULL)
         *end = '\0';
     
-    /* Validate token */
-    /* TODO: Call auth_token_validate */
-    
+    /*
+     * Token validation is not yet wired up. The validation logic
+     * exists in security-daemon/auth.c (auth_token_validate), but
+     * it is not exposed as a shared library that the API server
+     * can link against. To enable real token validation:
+     *
+     *   1. Extract security-daemon/auth.c into a shared library
+     *      (e.g., usr.sbin/ocifbsd/auth/ with NOINST库=yes or
+     *      SHLIB_NAME=ocifbsd_auth)
+     *   2. Add the library to api/Makefile: DPADD+= ${LIBAUTH}
+     *   3. Include <ocifbsd/auth.h> here
+     *   4. Call: struct user_identity *user = calloc(1, sizeof(*user));
+     *            if (auth_token_validate(token, user) != 0) {
+     *                resp->status = 401;
+     *                return (-1);
+     *            }
+     *            req->user = user;
+     *            return (0);
+     *
+     * Until that refactor, the middleware accepts any token.
+     * This is a SECURITY ISSUE for production deployment.
+     * See MIGRATION.md for the full plan.
+     */
+    (void)token;
     return (0);
 }
 
