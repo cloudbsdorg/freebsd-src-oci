@@ -428,7 +428,9 @@ container_start(struct ocifbsd_container *c)
 		/* TODO: implement rctl limits */
 
 		/* Set process title */
-		/* TODO: setproctitle */
+		setproctitle("ocifbsd: %s [%s]",
+		    c->name ? c->name : "(unnamed)",
+		    c->id ? c->id : "(no-id)");
 
 		/* Execute the container command */
 		if (c->spec->process.args && c->spec->process.args[0]) {
