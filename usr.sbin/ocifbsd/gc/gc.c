@@ -67,6 +67,35 @@ static int running = 1;
 static int initialized = 0;
 
 /*
+ * Safely execute a command without shell interpolation.
+ * argv must be NULL-terminated. Returns exit status, or -1 on error.
+ */
+static int
+safe_execv(const char *path, char *const argv[])
+{
+	pid_t pid;
+	int status;
+
+	pid = fork();
+	if (pid < 0)
+		return (-1);
+
+	if (pid == 0) {
+		closefrom(STDERR_FILENO + 1);
+		execv(path, argv);
+		_exit(127);
+	}
+
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+
+	if (WIFEXITED(status))
+		return (WEXITSTATUS(status));
+
+	return (-1);
+}
+
+/*
  * Initialize GC daemon
  */
 int
@@ -249,8 +278,8 @@ gc_delete_container(const char *name)
         return (0);
     }
 
-    snprintf(cmd, sizeof(cmd), "%s delete %s", OCIFBSD_BIN, name);
-    ret = system(cmd);
+    char *argv[] = { OCIFBSD_BIN, "delete", (char *)name, NULL };
+    ret = safe_execv(OCIFBSD_BIN, argv);
 
     return (ret == 0 ? 0 : -1);
 }
@@ -261,7 +290,6 @@ gc_delete_container(const char *name)
 static int
 gc_delete_image(const char *name)
 {
-    char cmd[PATH_MAX];
     int ret;
 
     if (config.dry_run) {
@@ -269,8 +297,8 @@ gc_delete_image(const char *name)
         return (0);
     }
 
-    snprintf(cmd, sizeof(cmd), "%s rmi %s", OCIFBSD_BIN, name);
-    ret = system(cmd);
+    char *argv[] = { OCIFBSD_BIN, "rmi", (char *)name, NULL };
+    ret = safe_execv(OCIFBSD_BIN, argv);
 
     return (ret == 0 ? 0 : -1);
 }
@@ -281,7 +309,6 @@ gc_delete_image(const char *name)
 static int
 gc_delete_volume(const char *name)
 {
-    char cmd[PATH_MAX];
     int ret;
 
     if (config.dry_run) {
@@ -289,8 +316,8 @@ gc_delete_volume(const char *name)
         return (0);
     }
 
-    snprintf(cmd, sizeof(cmd), "%s volume rm %s", OCIFBSD_BIN, name);
-    ret = system(cmd);
+    char *argv[] = { OCIFBSD_BIN, "volume", "rm", (char *)name, NULL };
+    ret = safe_execv(OCIFBSD_BIN, argv);
 
     return (ret == 0 ? 0 : -1);
 }
@@ -301,7 +328,6 @@ gc_delete_volume(const char *name)
 static int
 gc_delete_network(const char *name)
 {
-    char cmd[PATH_MAX];
     int ret;
 
     if (config.dry_run) {
@@ -309,8 +335,8 @@ gc_delete_network(const char *name)
         return (0);
     }
 
-    snprintf(cmd, sizeof(cmd), "%s network rm %s", OCIFBSD_BIN, name);
-    ret = system(cmd);
+    char *argv[] = { OCIFBSD_BIN, "network", "rm", (char *)name, NULL };
+    ret = safe_execv(OCIFBSD_BIN, argv);
 
     return (ret == 0 ? 0 : -1);
 }
@@ -1066,8 +1092,8 @@ gc_zfs_cleanup(const char *dataset)
         return (0);
     }
 
-    snprintf(cmd, sizeof(cmd), "zfs destroy -r %s", dataset);
-    return (system(cmd) == 0 ? 0 : -1);
+    char *argv[] = { "zfs", "destroy", "-r", (char *)dataset, NULL };
+    return (safe_execv("/sbin/zfs", argv) == 0 ? 0 : -1);
 }
 
 /*
@@ -1099,15 +1125,13 @@ gc_zfs_snapshots(int ttl_seconds)
 int
 gc_zfs_destroy_dataset(const char *dataset)
 {
-    char cmd[PATH_MAX];
-
     if (config.dry_run) {
         syslog(LOG_INFO, "[DRY RUN] Would destroy ZFS dataset: %s", dataset);
         return (0);
     }
 
-    snprintf(cmd, sizeof(cmd), "zfs destroy -r %s", dataset);
-    return (system(cmd) == 0 ? 0 : -1);
+    char *argv[] = { "zfs", "destroy", "-r", (char *)dataset, NULL };
+    return (safe_execv("/sbin/zfs", argv) == 0 ? 0 : -1);
 }
 
 /*
@@ -1116,10 +1140,9 @@ gc_zfs_destroy_dataset(const char *dataset)
 int
 gc_pf_anchors(const char *anchor)
 {
-    char cmd[PATH_MAX];
-
-    snprintf(cmd, sizeof(cmd), "pfctl -a %s -F all", anchor ? anchor : "ocifbsd");
-    return (system(cmd) == 0 ? 0 : -1);
+    const char *a = anchor ? anchor : "ocifbsd";
+    char *argv[] = { "pfctl", "-a", (char *)a, "-F", "all", NULL };
+    return (safe_execv("/sbin/pfctl", argv) == 0 ? 0 : -1);
 }
 
 /*
@@ -1128,11 +1151,9 @@ gc_pf_anchors(const char *anchor)
 int
 gc_pf_rules(const char *table)
 {
-    char cmd[PATH_MAX];
-
-    snprintf(cmd, sizeof(cmd), "pfctl -t %s -T flush",
-        table ? table : "ocifbsdcontainers");
-    return (system(cmd) == 0 ? 0 : -1);
+    const char *t = table ? table : "ocifbsdcontainers";
+    char *argv[] = { "pfctl", "-t", (char *)t, "-T", "flush", NULL };
+    return (safe_execv("/sbin/pfctl", argv) == 0 ? 0 : -1);
 }
 
 /*

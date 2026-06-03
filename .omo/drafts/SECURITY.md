@@ -260,6 +260,80 @@ mounts:
 | Date | Type | Description | Status |
 |------|------|-------------|--------|
 | 2026-06-02 | Initial | feature/oci-bootstrap branch created | Pre-audit |
+| 2026-06-03 | High | Shell injection via `system()` with user-controlled paths in `gc/gc.c`, `image/zfs_store.c`, `network/bridge.c`, `network/vnet.c` (~25 call sites) | Documented, fixing critical ones |
+
+## Shell Injection Vulnerabilities (HIGH PRIORITY)
+
+**Discovered 2026-06-03 during TODO cleanup.**
+
+Multiple functions use `system(snprintf(...))` to execute shell commands.
+If any user-controlled input flows into these strings, a malicious
+actor can inject arbitrary shell commands.
+
+### Pattern
+
+```c
+char cmd[PATH_MAX];
+snprintf(cmd, sizeof(cmd), "zfs destroy -r %s", dataset);  // BAD
+ret = system(cmd);                                          // BAD
+```
+
+An attacker who controls `dataset` (e.g., `tank/images;rm -rf /`)
+gets arbitrary command execution as the ocifbsd user.
+
+### Affected Files
+
+| File | Functions | User-controlled input |
+|------|-----------|----------------------|
+| `gc/gc.c` | `gc_delete_container`, `gc_delete_image`, `gc_delete_volume`, `gc_delete_network`, `gc_zfs_snapshots`, `gc_zfs_destroy_dataset`, `gc_zfs_cleanup` | container/image/volume/network names, dataset paths |
+| `image/zfs_store.c` | `zfs_image_create`, `zfs_image_delete`, `zfs_volume_create` | dataset paths, image names |
+| `network/bridge.c` | `bridge_create`, `bridge_destroy`, `bridge_add_interface`, etc. | bridge names, interface names |
+| `network/vnet.c` | `vnet_create_jail`, etc. | jail names, interface names |
+
+### Fix Pattern
+
+Replace `system(snprintf(...))` with `fork()+execv()` using
+a static argv array. This bypasses the shell entirely:
+
+```c
+char *argv[] = { "zfs", "destroy", "-r", (char *)dataset, NULL };
+pid_t pid = fork();
+if (pid == 0) {
+    closefrom(STDERR_FILENO + 1);
+    execv("/sbin/zfs", argv);
+    _exit(127);
+}
+int status;
+waitpid(pid, &status, 0);
+```
+
+This eliminates shell metacharacter interpretation.
+
+### Workaround Until Fixed
+
+If you must use ocifbsd in production, ensure that:
+- Container names match `[a-z0-9_-]{1,64}` (no shell metacharacters)
+- Image names come from trusted registries (OCI spec compliant)
+- Dataset paths are configured by the admin, not from user input
+
+### Mitigation Status
+
+- **Critical paths (gc_zfs_destroy_dataset, zfs_image_delete)**: not yet fixed
+- **Recommended fix effort**: 2-3 days to add `safe_execv()` helper and
+  convert all `system()` call sites
+- **Tracking**: see issues #TBD
+
+## Resource Leaks (MEDIUM)
+
+- `network_disconnect` (network.c:636): cleanup partially implemented
+- `vnet_delete_jail` (network.c:758): epairs not tracked, not cleaned up
+- `container_pause` (container.c:561): state set to PAUSED but processes NOT paused
+
+## Cryptographic Issues (FIXED in this audit)
+
+- `auth.c` `secret_encrypt`/`secret_decrypt` (line 772-925): now uses
+  real AES-256-CBC instead of plaintext copy (CRITICAL fix)
+- `push.c` (line 479): real SHA256 digest of config.json (was placeholder)
 
 ## References
 
