@@ -49,6 +49,9 @@
 
 #include "network.h"
 
+/* run_cmd is static in network.c, forward-declare for use here */
+int run_cmd(int argc, ...);
+
 /*
  * VNET (Virtual Network Stack) Implementation
  *
@@ -132,23 +135,15 @@ vnet_get_jail_status(const char *jail_name, bool *has_vnet, char ***interfaces, 
 int
 vnet_add_route(const char *jail_name, const char *network, const char *gateway)
 {
-	char cmd[512];
-
-	snprintf(cmd, sizeof(cmd), "jexec %s route add -net %s %s",
-	    jail_name, network, gateway);
-
-	return (system(cmd));
+	return run_cmd(7, "jexec", (char *)jail_name, "route", "add", "-net",
+	    (char *)network, (char *)gateway);
 }
 
 int
 vnet_delete_route(const char *jail_name, const char *network)
 {
-	char cmd[512];
-
-	snprintf(cmd, sizeof(cmd), "jexec %s route delete -net %s",
-	    jail_name, network);
-
-	return (system(cmd));
+	return run_cmd(5, "jexec", (char *)jail_name, "route", "delete", "-net",
+	    (char *)network);
 }
 
 /*
@@ -176,10 +171,8 @@ vnet_configure_pf(const char *jail_name, const char *rules)
 	fclose(f);
 
 	/* Load rules in jail */
-	char cmd[512];
-	snprintf(cmd, sizeof(cmd), "jexec %s pfctl -f %s", jail_name, pf_rules_file);
-
-	return (system(cmd));
+	return run_cmd(4, "jexec", (char *)jail_name, "pfctl", "-f",
+	    pf_rules_file);
 }
 
 /*
@@ -253,8 +246,6 @@ vnet_clone_interface(const char *jail_name, const char *template_if, const char 
 		return (-1);
 
 	/* Move to jail's VNET */
-	snprintf(cmd, sizeof(cmd), "jexec %s ifconfig %s vnet %s",
-	    jail_name, new_name, jail_name);
-
-	return (system(cmd));
+	return run_cmd(6, "jexec", (char *)jail_name, "ifconfig", new_name,
+	    "vnet", (char *)jail_name);
 }

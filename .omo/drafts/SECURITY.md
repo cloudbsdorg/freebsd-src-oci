@@ -323,6 +323,23 @@ If you must use ocifbsd in production, ensure that:
   convert all `system()` call sites
 - **Tracking**: see issues #TBD
 
+### Fix Progress (2026-06-03)
+
+| File | Functions Fixed | Method |
+|------|----------------|--------|
+| `gc/gc.c` | 7 (delete_container, delete_image, delete_volume, delete_network, zfs_cleanup, zfs_destroy_dataset, pf_anchors, pf_rules) | New `safe_execv()` helper |
+| `image/zfs_store.c` | 3 (mountpoint set, set_property, mount_nullfs) | Existing `run_zfs` + inline fork+execv |
+| `network/bridge.c` | 7 (stp, vlan_filter, add_static_fdb, flush_fdb, set_priority, set_forward_delay, set_hello_time) | Existing `run_cmd` |
+| `network/vnet.c` | 4 (add_route, delete_route, configure_pf, clone_to_vnet) | Existing `run_cmd` |
+| **Total** | **21 call sites fixed** | |
+
+### Remaining
+
+| File | Function | Risk | Reason |
+|------|----------|------|--------|
+| `gc/gc.c` | `gc_zfs_snapshots` | LOW | Uses `awk\|xargs` pipeline, no direct user input, cutoff is a long int formatted with `%ld` |
+| `network/cni.c` | (several) | TBD | Need to audit |
+
 ## Resource Leaks (MEDIUM)
 
 - `network_disconnect` (network.c:636): cleanup partially implemented

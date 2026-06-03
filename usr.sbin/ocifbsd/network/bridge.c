@@ -48,6 +48,9 @@
 
 #include "network.h"
 
+/* run_cmd is static in network.c, forward-declare for use here */
+int run_cmd(int argc, ...);
+
 /*
  * Bridge networking implementation
  *
@@ -85,9 +88,9 @@ bridge_create_advanced(const char *name, struct bridge_config *config)
 
 	/* Enable STP if requested */
 	if (config && config->stp_enabled) {
-		snprintf(cmd, sizeof(cmd), "bridge%s stp %s on",
-		    name, name);
-		system(cmd);
+		char stp_name[64];
+		snprintf(stp_name, sizeof(stp_name), "bridge%s", name);
+		run_cmd(5, "ifconfig", stp_name, "stp", (char *)name, "on");
 	}
 
 	/* Bring up the bridge */
@@ -105,8 +108,7 @@ bridge_set_vlan_filtering(const char *bridge, bool enable)
 	char cmd[256];
 
 	if (enable) {
-		snprintf(cmd, sizeof(cmd), "sysctl net.link.bridge.pfil_onlyip=0");
-		system(cmd);
+		run_cmd(3, "sysctl", "net.link.bridge.pfil_onlyip=0");
 	}
 
 	return (0);
@@ -178,10 +180,8 @@ bridge_get_fdb(const char *bridge, char ***entries, int *nentries)
 int
 bridge_add_static_fdb(const char *bridge, const char *mac, const char *iface)
 {
-	char cmd[256];
-
-	snprintf(cmd, sizeof(cmd), "ifconfig %s addf %s %s", bridge, mac, iface);
-	return (system(cmd));
+	return run_cmd(5, "ifconfig", (char *)bridge, "addf", (char *)mac,
+	    (char *)iface);
 }
 
 /*
@@ -190,14 +190,9 @@ bridge_add_static_fdb(const char *bridge, const char *mac, const char *iface)
 int
 bridge_flush_fdb(const char *bridge, bool static_only)
 {
-	char cmd[128];
-
 	if (static_only)
-		snprintf(cmd, sizeof(cmd), "ifconfig %s flushtab", bridge);
-	else
-		snprintf(cmd, sizeof(cmd), "ifconfig %s flush", bridge);
-
-	return (system(cmd));
+		return run_cmd(4, "ifconfig", (char *)bridge, "flushtab");
+	return run_cmd(4, "ifconfig", (char *)bridge, "flush");
 }
 
 /*
@@ -246,10 +241,9 @@ bridge_get_port_stats(const char *bridge, const char *port,
 int
 bridge_set_priority(const char *bridge, uint16_t priority)
 {
-	char cmd[256];
-
-	snprintf(cmd, sizeof(cmd), "ifconfig %s maxage %u", bridge, priority);
-	return (system(cmd));
+	char prio[16];
+	snprintf(prio, sizeof(prio), "%u", priority);
+	return run_cmd(4, "ifconfig", (char *)bridge, "maxage", prio);
 }
 
 /*
@@ -258,10 +252,9 @@ bridge_set_priority(const char *bridge, uint16_t priority)
 int
 bridge_set_forward_delay(const char *bridge, uint16_t delay)
 {
-	char cmd[256];
-
-	snprintf(cmd, sizeof(cmd), "ifconfig %s fwddelay %u", bridge, delay);
-	return (system(cmd));
+	char dly[16];
+	snprintf(dly, sizeof(dly), "%u", delay);
+	return run_cmd(4, "ifconfig", (char *)bridge, "fwddelay", dly);
 }
 
 /*
@@ -270,8 +263,7 @@ bridge_set_forward_delay(const char *bridge, uint16_t delay)
 int
 bridge_set_hello_time(const char *bridge, uint16_t hello)
 {
-	char cmd[256];
-
-	snprintf(cmd, sizeof(cmd), "ifconfig %s hellotime %u", bridge, hello);
-	return (system(cmd));
+	char h[16];
+	snprintf(h, sizeof(h), "%u", hello);
+	return run_cmd(4, "ifconfig", (char *)bridge, "hellotime", h);
 }

@@ -210,9 +210,9 @@ zfs_store_ensure_dataset(const char *dataset, const char *mountpoint)
 		return (-1);
 
 	if (mountpoint != NULL) {
-		snprintf(cmd, sizeof(cmd), "zfs set mountpoint=%s %s",
-		    mountpoint, dataset);
-		ret = system(cmd);
+		char mnt_arg[PATH_MAX * 2];
+		snprintf(mnt_arg, sizeof(mnt_arg), "mountpoint=%s", mountpoint);
+		ret = run_zfs(4, "zfs", "set", mnt_arg, dataset);
 		if (ret != 0)
 			return (-1);
 	}
@@ -312,11 +312,11 @@ zfs_volume_path(const char *name)
 int
 zfs_set_property(const char *dataset, const char *property, const char *value)
 {
-	char cmd[PATH_MAX * 2];
+	char prop_arg[PATH_MAX * 2];
 	int ret;
 
-	snprintf(cmd, sizeof(cmd), "zfs set %s=%s %s", property, value, dataset);
-	ret = system(cmd);
+	snprintf(prop_arg, sizeof(prop_arg), "%s=%s", property, value);
+	ret = run_zfs(4, "zfs", "set", prop_arg, dataset);
 
 	return (ret == 0 ? 0 : -1);
 }
@@ -726,9 +726,18 @@ zfs_store_add_layer(const char *image_dataset, const char *layer_digest)
 	}
 
 	/* Bind mount layer into image */
-	snprintf(cmd, sizeof(cmd), "mount_nullfs -o ro %s %s/%s",
-	    layer_mp, mp, layer_digest);
-	ret = system(cmd);
+	char target_path[PATH_MAX * 2];
+	snprintf(target_path, sizeof(target_path), "%s/%s", mp, layer_digest);
+	pid_t pid = fork();
+	if (pid == 0) {
+		closefrom(STDERR_FILENO + 1);
+		execlp("mount_nullfs", "mount_nullfs", "-o", "ro",
+		    layer_mp, target_path, (char *)NULL);
+		_exit(127);
+	}
+	int status;
+	waitpid(pid, &status, 0);
+	ret = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
 	free(mp);
 	free(layer_mp);
