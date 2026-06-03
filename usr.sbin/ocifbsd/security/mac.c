@@ -471,34 +471,51 @@ mac_label_compare(struct mac_label *a, struct mac_label *b)
 }
 
 /*
- * Seccomp operations (placeholder - requires libseccomp)
+ * Seccomp operations (placeholder - requires capsicum translation)
+ *
+ * seccomp(2) is Linux-only. FreeBSD uses capsicum(4) for capability-
+ * based sandboxing. The functions below are stubs that document the
+ * API surface; the real implementation should translate seccomp
+ * profiles to capsicum capabilities.
+ *
+ * See MIGRATION.md for the full translation plan. Until the
+ * translation is implemented, containers have NO syscall filtering
+ * (a misbehaving container can use any syscall).
+ *
+ * API surface preserved so callers compile and link; behavior is
+ * "do nothing, return success" until the capsicum implementation
+ * replaces these stubs.
  */
 int
 seccomp_load_profile(const char *profile_path)
 {
-	/* TODO: Load seccomp profile using libseccomp */
-	fprintf(stderr, "warning: seccomp not yet implemented\n");
+	/* TODO(seccomp→capsicum): translate profile to capabilities */
+	(void)profile_path;
+	fprintf(stderr, "warning: seccomp not yet implemented (see MIGRATION.md)\n");
 	return (0);
 }
 
 int
 seccomp_create_jail_filter(const char *jail_name, struct seccomp_profile *profile)
 {
-	/* TODO: Create seccomp filter for jail */
+	/* TODO(seccomp→capsicum): cap_enter() + cap_rights_init() per rule */
+	(void)jail_name;
+	(void)profile;
 	return (0);
 }
 
 int
 seccomp_remove_filter(const char *jail_name)
 {
-	/* TODO: Remove seccomp filter */
+	/* TODO(seccomp→capsicum): capsicum has no per-filter removal */
+	(void)jail_name;
 	return (0);
 }
 
 int
 seccomp_get_syscall_list(char ***syscalls, int *nsyscalls)
 {
-	/* TODO: Get list of available syscalls */
+	/* TODO(seccomp→capsicum): no syscall list; use capsicum capabilities */
 	*syscalls = NULL;
 	*nsyscalls = 0;
 	return (0);
@@ -516,7 +533,10 @@ mac_parse_oci_security(struct security_context **ctx, const char *oci_json)
 	if (c == NULL)
 		return (-1);
 
-	/* TODO: Parse OCI security context JSON */
+	/* TODO(oci-security): parse oci_json for seccomp profile path,
+	 * capabilities, noNewPrivileges, etc. and populate ctx.
+	 * Once seccomp→capsicum is implemented, this will also create
+	 * the capsicum capability set. */
 
 	*ctx = c;
 	return (0);
