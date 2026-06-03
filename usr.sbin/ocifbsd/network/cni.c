@@ -179,7 +179,16 @@ cni_find_config(const char *network_name, struct cni_config **config)
 				ret = 0;
 				break;
 			}
-			/* TODO: check for chained plugins */
+			/*
+			 * Chained plugins (e.g., portmap + firewall + isolation)
+			 * are not yet supported. CNI chains are identified by
+			 * a 'chain' field in the plugin config, and multiple
+			 * plugins in the same chain should be executed in order.
+			 * For now, only the first matching network is used.
+			 * Single-plugin networks work fine; multi-plugin chains
+			 * need this implementation.
+			 * See https://www.cni.dev/docs/spec/ for the spec.
+			 */
 			free(cfg->type);
 			free(cfg->network_name);
 			free(cfg);
