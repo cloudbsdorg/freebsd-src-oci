@@ -622,8 +622,23 @@ network_connect(const char *network_id, const char *container_id,
 		/* Jail side goes to container */
 		endpoint->interface_name = side_b;  /* jail will use this */
 
-		/* Assign IP from pool */
-		/* TODO: implement proper IPAM */
+		/*
+		 * Proper IPAM (IP Address Management) is not yet implemented.
+		 * The current code does not assign an IP from a pool; the
+		 * caller is expected to configure it externally. A real
+		 * implementation needs to:
+		 *
+		 *   1. Track which IP ranges are in use per network
+		 *      (e.g., 10.0.0.0/24 split into /30 subnets)
+		 *   2. Allocate a free /30 (2 usable addresses) on request
+		 *   3. Persist the allocation in the network state JSON
+		 *   4. Free the allocation when the endpoint is deleted
+		 *
+		 * This is a NETWORK CORRECTNESS issue: without IPAM, two
+		 * endpoints can be assigned the same IP, breaking
+		 * connectivity. See MIGRATION.md for the full plan.
+		 */
+		(void)0;
 
 		free(side_a);
 	}
@@ -755,8 +770,22 @@ vnet_create_jail(const char *jail_name, struct vnet_config *config)
 int
 vnet_delete_jail(const char *jail_name)
 {
-	/* Clean up any epairs associated with this jail */
-	/* TODO: track and clean up epairs */
+	/*
+	 * Epair cleanup is not yet implemented. To clean up epairs
+	 * associated with a jail, the system needs to:
+	 *
+	 *   1. Track which epairs were created for which jail
+	 *      (currently the epair_create function is called but
+	 *      the mapping is not persisted)
+	 *   2. On jail delete, look up the epairs for this jail
+	 *   3. Destroy each epair with 'ifconfig <epair> destroy'
+	 *   4. Remove the bridge member mappings
+	 *
+	 * This is a RESOURCE LEAK: without cleanup, deleted jails
+	 * leave their epair interfaces in the kernel, eventually
+	 * exhausting interface slots. See MIGRATION.md for the plan.
+	 */
+	(void)jail_name;
 	return (0);
 }
 
@@ -793,9 +822,72 @@ nat_enable(const char *jail_name, const char *external_iface)
 int
 nat_disable(const char *jail_name)
 {
-	/* Remove NAT rules for this jail */
-	/* TODO: implement rule removal */
-	return (run_cmd(2, "pfctl", "-f /etc/pf.conf"));
+	char pf_ocifbsd[PATH_MAX];
+	char buf[8192];
+	FILE *in, *out;
+	size_t len = 0;
+	int in_ocifbsd_section = 0;
+	int removed = 0;
+
+	(void)jail_name;
+
+	snprintf(pf_ocifbsd, sizeof(pf_ocifbsd), "/etc/pf.conf.ocifbsd");
+
+	in = fopen(pf_ocifbsd, "r");
+	if (in == NULL) {
+		return (run_cmd(2, "pfctl", "-f", "/etc/pf.conf"));
+	}
+
+	out = fopen("/etc/pf.conf.ocifbsd.tmp", "w");
+	if (out == NULL) {
+		fclose(in);
+		return (-1);
+	}
+
+	while (len < sizeof(buf) - 1 &&
+	    fgets(buf + len, (int)(sizeof(buf) - len), in) != NULL) {
+		len = strlen(buf);
+	}
+	fclose(in);
+
+	if (len == 0) {
+		fclose(out);
+		unlink("/etc/pf.conf.ocifbsd.tmp");
+		return (run_cmd(2, "pfctl", "-f", "/etc/pf.conf"));
+	}
+
+	const char *p = buf;
+	while (*p != '\0') {
+		const char *eol = strchr(p, '\n');
+		size_t llen = eol ? (size_t)(eol - p) + 1 : strlen(p);
+
+		if (in_ocifbsd_section) {
+			removed = 1;
+			if (eol == NULL || llen == 0)
+				break;
+		} else {
+			if (llen >= strlen("# ocifbsd NAT rules") &&
+			    strncmp(p, "# ocifbsd NAT rules", llen > 22 ? 22 : llen) == 0) {
+				in_ocifbsd_section = 1;
+				removed = 1;
+			} else {
+				fwrite(p, 1, llen, out);
+			}
+		}
+		p += llen;
+	}
+	fclose(out);
+
+	if (removed) {
+		if (rename("/etc/pf.conf.ocifbsd.tmp", pf_ocifbsd) != 0) {
+			unlink("/etc/pf.conf.ocifbsd.tmp");
+			return (-1);
+		}
+	} else {
+		unlink("/etc/pf.conf.ocifbsd.tmp");
+	}
+
+	return (run_cmd(2, "pfctl", "-f", "/etc/pf.conf.ocifbsd"));
 }
 
 int
@@ -1022,19 +1114,91 @@ dns_set_resolver(const char *jail_name, char **servers, int nservers)
 /*
  * Network monitoring
  */
-int
-network_stats(const char *network_id, uint64_t *rx_bytes, uint64_t *tx_bytes)
+static int
+parse_iface_stats(const char *iface, uint64_t *rx_bytes, uint64_t *tx_bytes)
 {
 	char *output = NULL;
 	char *line, *save;
+	int found_rx = 0, found_tx = 0;
 
 	*rx_bytes = 0;
 	*tx_bytes = 0;
 
-	/* Get bridge statistics */
-	/* TODO: implement using netstat or ifconfig parsing */
+	if (iface == NULL || run_cmd_output(&output, 3, "ifconfig", iface) != 0) {
+		free(output);
+		return (-1);
+	}
 
+	line = strtok_r(output, "\n", &save);
+	while (line != NULL) {
+		const char *bytes_str;
+
+		if (!found_rx && (bytes_str = strstr(line, "input packets")) != NULL) {
+			bytes_str = strstr(bytes_str, "bytes ");
+			if (bytes_str != NULL) {
+				*rx_bytes = strtoull(bytes_str + 6, NULL, 10);
+				found_rx = 1;
+			}
+		} else if (!found_tx && (bytes_str = strstr(line, "output packets")) != NULL) {
+			bytes_str = strstr(bytes_str, "bytes ");
+			if (bytes_str != NULL) {
+				*tx_bytes = strtoull(bytes_str + 6, NULL, 10);
+				found_tx = 1;
+			}
+		}
+		line = strtok_r(NULL, "\n", &save);
+	}
+
+	free(output);
 	return (0);
+}
+
+int
+network_stats(const char *network_id, uint64_t *rx_bytes, uint64_t *tx_bytes)
+{
+	char state_file[PATH_MAX];
+	char bridge[64] = {0};
+	char *fgets_ret;
+	FILE *f;
+
+	*rx_bytes = 0;
+	*tx_bytes = 0;
+
+	if (network_id == NULL)
+		return (-1);
+
+	snprintf(state_file, sizeof(state_file), "%s/%s.json",
+	    OCIFBSD_NETWORK_STATE_DIR, network_id);
+
+	f = fopen(state_file, "r");
+	if (f == NULL)
+		return (-1);
+
+	char buf[4096];
+	while ((fgets_ret = fgets(buf, sizeof(buf), f)) != NULL) {
+		char *p = strstr(buf, "\"bridge\":");
+		if (p != NULL) {
+			p = strchr(p, '"');
+			if (p != NULL) {
+				p++;
+				char *end = strchr(p, '"');
+				if (end != NULL) {
+					size_t len = (size_t)(end - p);
+					if (len >= sizeof(bridge))
+						len = sizeof(bridge) - 1;
+					memcpy(bridge, p, len);
+					bridge[len] = '\0';
+				}
+			}
+			break;
+		}
+	}
+	fclose(f);
+
+	if (bridge[0] == '\0')
+		return (-1);
+
+	return (parse_iface_stats(bridge, rx_bytes, tx_bytes));
 }
 
 int
@@ -1043,8 +1207,10 @@ endpoint_stats(const char *endpoint_id, uint64_t *rx_bytes, uint64_t *tx_bytes)
 	*rx_bytes = 0;
 	*tx_bytes = 0;
 
-	/* TODO: implement endpoint statistics */
-	return (0);
+	if (endpoint_id == NULL)
+		return (-1);
+
+	return (parse_iface_stats(endpoint_id, rx_bytes, tx_bytes));
 }
 
 /*
