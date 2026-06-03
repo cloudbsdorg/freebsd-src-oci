@@ -767,44 +767,140 @@ secret_get(const char *name, const char *namespace, size_t *len)
 }
 
 /*
- * Encrypt data
+ * Encrypt data using AES-256-CBC.
+ * Output format: 16-byte IV || ciphertext (PKCS#7 padded)
  */
 int
 secret_encrypt(void *data, size_t len, void **out, size_t *out_len)
 {
-    if (data == NULL || out == NULL)
+    keyInstance key;
+    uint8_t iv[16];
+    uint8_t *buf;
+    size_t padded_len;
+    int pad;
+    size_t i;
+
+    if (data == NULL || out == NULL || len == 0)
         return (-1);
-    
-    /* TODO: Implement proper AES encryption */
-    /* For now, just copy the data */
-    *out = malloc(len);
-    if (*out == NULL)
+
+    if (!encryption_key_initialized) {
+        errno = EINVAL;
         return (-1);
-    
-    memcpy(*out, data, len);
-    *out_len = len;
-    
+    }
+
+    /* PKCS#7 pad to next 16-byte boundary */
+    pad = 16 - (len % 16);
+    padded_len = len + pad;
+
+    /* Output: 16-byte IV + padded ciphertext */
+    *out_len = 16 + padded_len;
+    buf = malloc(*out_len);
+    if (buf == NULL)
+        return (-1);
+
+    /* Generate random IV */
+    arc4random_buf(iv, sizeof(iv));
+    memcpy(buf, iv, sizeof(iv));
+
+    /* Initialize AES-256 key schedule */
+    if (rijndael_makeKey(&key, DIR_ENCRYPT, 256, encryption_key) != 1) {
+        free(buf);
+        errno = EINVAL;
+        return (-1);
+    }
+
+    /* Encrypt each 16-byte block in CBC mode */
+    uint8_t prev[16];
+    memcpy(prev, iv, sizeof(prev));
+    for (i = 0; i < padded_len; i += 16) {
+        uint8_t block[16];
+        size_t in_len = (i + 16 <= len) ? 16 : (len - i);
+        size_t j;
+
+        memcpy(block, (uint8_t *)data + i, in_len);
+        /* PKCS#7 padding */
+        for (j = in_len; j < 16; j++)
+            block[j] = (uint8_t)pad;
+        /* CBC: XOR with previous ciphertext (or IV) */
+        for (j = 0; j < 16; j++)
+            block[j] ^= prev[j];
+        /* Encrypt */
+        rijndael_encrypt(block, &buf[16 + i], &key);
+        memcpy(prev, &buf[16 + i], sizeof(prev));
+    }
+
+    *out = buf;
     return (0);
 }
 
 /*
- * Decrypt data
+ * Decrypt data using AES-256-CBC.
+ * Input format: 16-byte IV || ciphertext (PKCS#7 padded)
  */
 int
 secret_decrypt(void *data, size_t len, void **out, size_t *out_len)
 {
+    keyInstance key;
+    const uint8_t *iv;
+    const uint8_t *ciphertext;
+    size_t ciphertext_len;
+    uint8_t *buf;
+    size_t i;
+
     if (data == NULL || out == NULL)
         return (-1);
-    
-    /* TODO: Implement proper AES decryption */
-    /* For now, just copy the data */
-    *out = malloc(len);
-    if (*out == NULL)
+    /* Need at least IV (16) + one block (16) = 32 bytes */
+    if (len < 32 || (len % 16) != 0) {
+        errno = EINVAL;
         return (-1);
-    
-    memcpy(*out, data, len);
-    *out_len = len;
-    
+    }
+
+    if (!encryption_key_initialized) {
+        errno = EINVAL;
+        return (-1);
+    }
+
+    iv = (const uint8_t *)data;
+    ciphertext = iv + 16;
+    ciphertext_len = len - 16;
+
+    buf = malloc(ciphertext_len);
+    if (buf == NULL)
+        return (-1);
+
+    /* Initialize AES-256 key schedule */
+    if (rijndael_makeKey(&key, DIR_DECRYPT, 256, encryption_key) != 1) {
+        free(buf);
+        errno = EINVAL;
+        return (-1);
+    }
+
+    /* Decrypt each 16-byte block in CBC mode */
+    for (i = 0; i < ciphertext_len; i += 16) {
+        uint8_t block[16];
+        size_t j;
+
+        memcpy(block, &ciphertext[i], 16);
+        rijndael_decrypt(block, &buf[i], &key);
+        /* CBC: XOR with previous ciphertext (or IV) */
+        if (i == 0) {
+            for (j = 0; j < 16; j++)
+                buf[i + j] ^= iv[j];
+        } else {
+            for (j = 0; j < 16; j++)
+                buf[i + j] ^= ciphertext[i - 16 + j];
+        }
+    }
+
+    /* Remove PKCS#7 padding */
+    uint8_t pad = buf[ciphertext_len - 1];
+    if (pad < 1 || pad > 16) {
+        free(buf);
+        errno = EINVAL;
+        return (-1);
+    }
+    *out_len = ciphertext_len - pad;
+    *out = buf;
     return (0);
 }
 
