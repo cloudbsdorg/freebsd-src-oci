@@ -114,6 +114,24 @@ safe_shell_exec(const char *command)
 	return (-1);
 }
 
+/*
+ * Realloc that preserves the original pointer on failure.
+ * Without this, `ptr = realloc(ptr, n); if (!ptr) return -1;`
+ * leaks the old buffer because ptr is now NULL and we've lost
+ * the only reference to the original allocation.
+ *
+ * Usage: REALLOC_SAFE(ptr, size, label)
+ *   - If realloc fails, jumps to 'label' with the original
+ *     pointer still valid (caller should free it).
+ */
+#define REALLOC_SAFE(ptr, newsz, label) do {				\
+	void *_new = realloc((ptr), (newsz));				\
+	if (_new == NULL) {						\
+		goto label;						\
+	}								\
+	(ptr) = _new;							\
+} while (0)
+
 /* Severity level names */
 static const char *severity_names[] = {
     "emerg", "alert", "crit", "err", "warning",
@@ -371,9 +389,7 @@ log_query_exec(struct log_query *query, uint64_t *count)
         if (query->source_name && fnmatch(query->source_name, entry->source_name, 0) != 0)
             continue;
 
-        results = realloc(results, (n + 1) * sizeof(*results));
-        if (results == NULL)
-            break;
+        REALLOC_SAFE(results, (n + 1) * sizeof(*results), realloc_fail);
         results[n++] = entry;
 
         if (query->limit && n >= query->limit)
@@ -382,6 +398,11 @@ log_query_exec(struct log_query *query, uint64_t *count)
 
     *count = n;
     return (results);
+
+realloc_fail:
+    free(results);
+    *count = 0;
+    return (NULL);
 }
 
 /*
@@ -731,9 +752,7 @@ event_query(time_t start, time_t end, int *types, int num_types,
                 continue;
         }
 
-        results = realloc(results, (n + 1) * sizeof(*results));
-        if (results == NULL)
-            break;
+        REALLOC_SAFE(results, (n + 1) * sizeof(*results), realloc_fail);
         results[n++] = event;
 
         if (limit && n >= limit)
@@ -742,6 +761,11 @@ event_query(time_t start, time_t end, int *types, int num_types,
 
     *count = n;
     return (results);
+
+realloc_fail:
+    free(results);
+    *count = 0;
+    return (NULL);
 }
 
 /*
@@ -830,9 +854,7 @@ alert_rule_list(int *count)
     pthread_mutex_lock(&state_lock);
 
     RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
-        rules = realloc(rules, (n + 1) * sizeof(*rules));
-        if (rules == NULL)
-            break;
+        REALLOC_SAFE(rules, (n + 1) * sizeof(*rules), realloc_fail);
         rules[n++] = rule;
     }
 
@@ -840,6 +862,12 @@ alert_rule_list(int *count)
 
     *count = n;
     return (rules);
+
+realloc_fail:
+    pthread_mutex_unlock(&state_lock);
+    free(rules);
+    *count = 0;
+    return (NULL);
 }
 
 /*
@@ -1071,9 +1099,7 @@ forwarder_list(int *count)
     pthread_mutex_lock(&state_lock);
 
     LIST_FOREACH(fw, &forwarders, next) {
-        list = realloc(list, (n + 1) * sizeof(*list));
-        if (list == NULL)
-            break;
+        REALLOC_SAFE(list, (n + 1) * sizeof(*list), realloc_fail);
         list[n++] = fw;
     }
 
@@ -1081,6 +1107,12 @@ forwarder_list(int *count)
 
     *count = n;
     return (list);
+
+realloc_fail:
+    pthread_mutex_unlock(&state_lock);
+    free(list);
+    *count = 0;
+    return (NULL);
 }
 
 /*

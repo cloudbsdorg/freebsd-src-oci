@@ -232,9 +232,10 @@ ringbuf_query(struct log_ringbuf *rb, struct log_query *query,
         if (query->severity_max && entry->severity > query->severity_max)
             continue;
 
-        res = realloc(res, (n + 1) * sizeof(*res));
-        if (res == NULL)
+        void *_new = realloc(res, (n + 1) * sizeof(*res));
+        if (_new == NULL)
             break;
+        res = _new;
         res[n++] = entry;
 
         if (query->limit && n >= query->limit)
