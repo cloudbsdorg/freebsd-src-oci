@@ -803,32 +803,39 @@ metrics_serialize_json(void)
 {
     struct metric **list;
     char *json, *p;
-    int count, i;
-    size_t json_size;
-    
+    int count, i, n;
+    size_t json_size, remaining;
+
     list = metrics_list(&count);
     if (list == NULL)
         return (NULL);
-    
-    /* Estimate size */
-    json_size = 256 + count * 256;
+
+    json_size = 256 + (size_t)count * 512;
     json = malloc(json_size);
     if (json == NULL) {
         free(list);
         return (NULL);
     }
-    
+
     p = json;
-    p += sprintf(p, "{\n  \"metrics\": [\n");
-    
+    remaining = json_size;
+
+    n = snprintf(p, remaining, "{\n  \"metrics\": [\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(list); return (NULL); }
+    p += n; remaining -= (size_t)n;
+
     for (i = 0; i < count; i++) {
-        p += sprintf(p, "    {\"name\": \"%s\", \"type\": %d, \"value\": %g}%s\n",
+        n = snprintf(p, remaining,
+            "    {\"name\": \"%s\", \"type\": %d, \"value\": %g}%s\n",
             list[i]->name, list[i]->type, list[i]->value,
             i < count - 1 ? "," : "");
+        if (n < 0 || (size_t)n >= remaining) { free(json); free(list); return (NULL); }
+        p += n; remaining -= (size_t)n;
     }
-    
-    p += sprintf(p, "  ]\n}\n");
-    
+
+    n = snprintf(p, remaining, "  ]\n}\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(list); return (NULL); }
+
     free(list);
     return (json);
 }
@@ -841,49 +848,47 @@ metrics_serialize_prometheus(void)
 {
     struct metric **list;
     char *text, *p;
-    int count, i;
-    size_t text_size;
-    
+    int count, i, n;
+    size_t text_size, remaining;
+
     list = metrics_list(&count);
     if (list == NULL)
         return (NULL);
-    
-    /* Estimate size */
-    text_size = 256 + count * 256;
+
+    text_size = 256 + (size_t)count * 512;
     text = malloc(text_size);
     if (text == NULL) {
         free(list);
         return (NULL);
     }
-    
+
     p = text;
-    
+    remaining = text_size;
+
     for (i = 0; i < count; i++) {
-        p += sprintf(p, "# HELP %s %s\n", list[i]->name,
-            list[i]->help[0] ? list[i]->help : list[i]->name);
-        
         const char *type_str;
         switch (list[i]->type) {
-            case METRIC_TYPE_GAUGE:
-                type_str = "gauge";
-                break;
-            case METRIC_TYPE_COUNTER:
-                type_str = "counter";
-                break;
-            case METRIC_TYPE_HISTOGRAM:
-                type_str = "histogram";
-                break;
-            case METRIC_TYPE_SUMMARY:
-                type_str = "summary";
-                break;
-            default:
-                type_str = "untyped";
+            case METRIC_TYPE_GAUGE: type_str = "gauge"; break;
+            case METRIC_TYPE_COUNTER: type_str = "counter"; break;
+            case METRIC_TYPE_HISTOGRAM: type_str = "histogram"; break;
+            case METRIC_TYPE_SUMMARY: type_str = "summary"; break;
+            default: type_str = "untyped";
         }
-        
-        p += sprintf(p, "# TYPE %s %s\n", list[i]->name, type_str);
-        p += sprintf(p, "%s %g\n", list[i]->name, list[i]->value);
+
+        n = snprintf(p, remaining, "# HELP %s %s\n", list[i]->name,
+            list[i]->help[0] ? list[i]->help : list[i]->name);
+        if (n < 0 || (size_t)n >= remaining) { free(text); free(list); return (NULL); }
+        p += n; remaining -= (size_t)n;
+
+        n = snprintf(p, remaining, "# TYPE %s %s\n", list[i]->name, type_str);
+        if (n < 0 || (size_t)n >= remaining) { free(text); free(list); return (NULL); }
+        p += n; remaining -= (size_t)n;
+
+        n = snprintf(p, remaining, "%s %g\n", list[i]->name, list[i]->value);
+        if (n < 0 || (size_t)n >= remaining) { free(text); free(list); return (NULL); }
+        p += n; remaining -= (size_t)n;
     }
-    
+
     free(list);
     return (text);
 }
@@ -988,26 +993,34 @@ metrics_get_alerts_json(void)
     size_t json_size;
     
     pthread_mutex_lock(&alert_lock);
-    
-    json_size = 256 + n_alerts * 256;
+
+    json_size = 256 + (size_t)n_alerts * 512;
     json = malloc(json_size);
     if (json == NULL) {
         pthread_mutex_unlock(&alert_lock);
         return (NULL);
     }
-    
+
     p = json;
-    p += sprintf(p, "{\n  \"alerts\": [\n");
-    
+    size_t remaining = json_size;
+    int n;
+
+    n = snprintf(p, remaining, "{\n  \"alerts\": [\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); pthread_mutex_unlock(&alert_lock); return (NULL); }
+    p += n; remaining -= (size_t)n;
+
     for (i = 0; i < n_alerts; i++) {
-        p += sprintf(p, "    {\"message\": \"%s\"}%s\n",
+        n = snprintf(p, remaining, "    {\"message\": \"%s\"}%s\n",
             active_alerts[i],
             i < n_alerts - 1 ? "," : "");
+        if (n < 0 || (size_t)n >= remaining) { free(json); pthread_mutex_unlock(&alert_lock); return (NULL); }
+        p += n; remaining -= (size_t)n;
     }
-    
-    p += sprintf(p, "  ]\n}\n");
-    
+
+    n = snprintf(p, remaining, "  ]\n}\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); pthread_mutex_unlock(&alert_lock); return (NULL); }
+
     pthread_mutex_unlock(&alert_lock);
-    
+
     return (json);
 }

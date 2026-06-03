@@ -507,8 +507,11 @@ import_create_container(const char *metadata, uint8_t *image_data,
         name_start += 8;
         char *name_end = strchr(name_start, '"');
         if (name_end) {
-            strncpy(name, name_start, name_end - name_start);
-            name[name_end - name_start] = '\0';
+            size_t name_len = (size_t)(name_end - name_start);
+            if (name_len >= sizeof(name))
+                name_len = sizeof(name) - 1;
+            memcpy(name, name_start, name_len);
+            name[name_len] = '\0';
         }
     }
 
