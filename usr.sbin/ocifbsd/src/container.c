@@ -424,8 +424,37 @@ container_start(struct ocifbsd_container *c)
 		/* Set up environment */
 		setup_process_env(c);
 
-		/* Set resource limits if specified */
-		/* TODO: implement rctl limits */
+		/*
+		 * Resource limits are not yet applied here. The OCI spec's
+		 * process.rlimits (POSIX rlimits: RLIMIT_CPU, RLIMIT_AS,
+		 * RLIMIT_NPROC, RLIMIT_NOFILE, RLIMIT_FSIZE) should be
+		 * applied with setrlimit() in this child process after
+		 * jail_attach().
+		 *
+		 * FreeBSD-specific RCTL rules (c->spec->freebsd->rctl_rules)
+		 * are trickier: they must be applied to the JAIL, not the
+		 * process. This means they should be applied by the PARENT
+		 * before the child is forked, using either:
+		 *   - jail_set(2) with jailparam "rctl.*" rules
+		 *   - rctl_add_rule(2) with subject "jail:<jid>"
+		 *   - system("rctl -a jail:<jid> <rule>")
+		 *
+		 * To implement properly:
+		 *   1. Add 'struct oci_rlimit *rlimits' to oci_process
+		 *   2. Parse process.rlimits in oci_parse_config
+		 *   3. In container_start (parent, before fork):
+		 *        for each freebsd->rctl_rules[i]:
+		 *          jail_set with "rctl.rule" param
+		 *   4. In child (here, after fork):
+		 *        for each spec->process.rlimits:
+		 *          setrlimit(RLIMIT_*, ...)
+		 *
+		 * Without this, containers have NO resource limits
+		 * (a misbehaving container can exhaust system resources).
+		 * This is a SECURITY/STABILITY issue.
+		 * See MIGRATION.md for the full plan.
+		 */
+		(void)0;
 
 		/* Set process title */
 		setproctitle("ocifbsd: %s [%s]",
@@ -557,8 +586,30 @@ container_pause(struct ocifbsd_container *c)
 		return (-1);
 	}
 
-	/* Pause jail using RCTL */
-	/* TODO: implement using rctl(8) or jail_attach pause */
+	/*
+	 * Pausing a jail is not yet implemented. The proper way to
+	 * pause a jail on FreeBSD is to send SIGSTOP to the init
+	 * process (and all its children). The naive approach is:
+	 *
+	 *   kill(c->init_pid, SIGSTOP);
+	 *
+	 * But this only pauses the init process, not the entire
+	 * process tree. To pause the whole tree:
+	 *
+	 *   1. Use kvm_getprocs() to enumerate all processes in the jail
+	 *   2. For each PID with prison matching c->jid, send SIGSTOP
+	 *   3. Track which PIDs were stopped (for resume)
+	 *
+	 * Or use the kernel interface (if available):
+	 *   - procctl(PROC_PID, pid, PROC_CTL_JAIL_PAUSE)
+	 *   - jail_set with "jail.stopped" parameter
+	 *
+	 * For now, the state is set to PAUSED but the process tree
+	 * is NOT actually paused. This is a BUG: container_pause()
+	 * returns success without doing anything.
+	 * See MIGRATION.md for the full plan.
+	 */
+	(void)0;
 
 	c->state = OCIFBSD_STATE_PAUSED;
 	state_save(c);
