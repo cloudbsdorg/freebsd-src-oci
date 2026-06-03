@@ -634,7 +634,25 @@ network_connect(const char *network_id, const char *container_id,
 int
 network_disconnect(const char *network_id, const char *container_id)
 {
-	/* TODO: remove endpoint */
+	char state_file[PATH_MAX];
+
+	/*
+	 * Endpoint tracking is not yet implemented. For now, just
+	 * remove the per-container state file if it exists. When
+	 * endpoint tracking is added (see endpoint_find()), this
+	 * should also remove the endpoint from the bridge and
+	 * destroy the epair interface.
+	 */
+	(void)network_id;	/* unused for now */
+	(void)container_id;	/* unused for now */
+
+	snprintf(state_file, sizeof(state_file),
+	    "%s/endpoint_%s_%s.json",
+	    OCIFBSD_NETWORK_STATE_DIR, network_id, container_id);
+	if (unlink(state_file) == -1 && errno != ENOENT) {
+		/* State file doesn't exist (or can't be removed) - not fatal */
+		return (0);
+	}
 	return (0);
 }
 
