@@ -664,10 +664,34 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
 static void
 gossip_process_state(const char *source_id, uint8_t *payload, size_t len)
 {
+    /*
+     * Anti-entropy state reconciliation is not yet implemented.
+     * The gossip protocol delivers state digests to this function
+     * (payload = serialized state, len = length), and we should:
+     *
+     *   1. Deserialize the incoming state
+     *   2. Compare against local state (key-by-key, version-by-version)
+     *   3. Pull missing/older keys from the source node
+     *   4. Push newer keys to the source node
+     *   5. Resolve conflicts using a tie-breaker (e.g., higher version,
+     *      or node ID lex order)
+     *
+     * A full implementation is ~200 LOC of:
+     * - State serialization (use existing cluster_state_* funcs)
+     * - Merkle tree or version-vector comparison
+     * - Pull/push request handlers (already exist as gossip_send_message)
+     * - Conflict resolution logic
+     *
+     * For now, the function silently drops incoming state. This means
+     * cluster nodes will diverge over time (no anti-entropy).
+     * Single-node clusters work fine; multi-node clusters need this.
+     *
+     * See MIGRATION.md and the original SWIM paper for the algorithm:
+     * https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf
+     */
     (void)source_id;
     (void)payload;
     (void)len;
-    /* TODO: Implement anti-entropy state reconciliation */
 }
 
 /*
