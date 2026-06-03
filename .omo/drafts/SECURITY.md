@@ -261,6 +261,8 @@ mounts:
 |------|------|-------------|--------|
 | 2026-06-02 | Initial | feature/oci-bootstrap branch created | Pre-audit |
 | 2026-06-03 | High | Shell injection via `system()` with user-controlled paths in `gc/gc.c`, `image/zfs_store.c`, `network/bridge.c`, `network/vnet.c` (~25 call sites) | Documented, fixing critical ones |
+| 2026-06-03 | High | Buffer overflows in `metrics.c`, `tpm.c`, `export.c`, `cluster.c` (sprintf without bounds, strncpy without length check) | Fixed |
+| 2026-06-03 | High | CRITICAL: hardcoded JWT signing secret in `pam/pam_auth.c` (line 784, 826) - allows anyone to forge auth tokens | Fixed - loads from env/file/random |
 
 ## Shell Injection Vulnerabilities (HIGH PRIORITY)
 
@@ -351,6 +353,29 @@ If you must use ocifbsd in production, ensure that:
 - `auth.c` `secret_encrypt`/`secret_decrypt` (line 772-925): now uses
   real AES-256-CBC instead of plaintext copy (CRITICAL fix)
 - `push.c` (line 479): real SHA256 digest of config.json (was placeholder)
+- `pam/pam_auth.c` (line 784, 826): CRITICAL - hardcoded JWT secret
+  replaced with get_jwt_secret() that loads from:
+    1. `OCIFBSD_JWT_SECRET` environment variable
+    2. `/etc/ocifbsd/jwt_secret` file
+    3. Random per-process secret (with warning)
+  Deploy: `openssl rand -hex 32 > /etc/ocifbsd/jwt_secret && chmod 600`
+
+## Buffer Overflows (FIXED in this audit)
+
+- `export/export.c:510` - strncpy with name_end - name_start bytes
+  into char[256] - overflows on long JSON names
+- `metrics/metrics.c:800,840,980` - sprintf without bounds
+- `tpm/tpm.c:800,860` - sprintf without bounds (24 PCRs of 32 bytes)
+- `clustering/cluster.c:1115,1320` - sprintf without bounds
+  with user-controlled node_id, ip, service_name strings
+
+## run_zfs_str Critical Bug (FIXED in this audit)
+
+- `image/zfs_store.c:130` - `result - newp == 0` always true
+  so `result[0] = '\0'` fires every iteration, destroying accumulated
+  content. Also realloc(NULL, n+1) returns uninitialized memory
+  that strcat reads. Result: only LAST line of popen output was
+  returned (silent data loss). Fixed with explicit 'first' flag.
 
 ## References
 
