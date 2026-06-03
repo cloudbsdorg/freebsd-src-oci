@@ -111,6 +111,7 @@ run_zfs_str(const char *cmd, char **output)
 	char buf[1024];
 	size_t len;
 	char *result = NULL;
+	int first = 1;
 
 	fp = popen(cmd, "r");
 	if (fp == NULL)
@@ -125,8 +126,10 @@ run_zfs_str(const char *cmd, char **output)
 			return (-1);
 		}
 		result = newp;
-		if (result - newp == 0)  /* first allocation */
+		if (first) {
 			result[0] = '\0';
+			first = 0;
+		}
 		strcat(result, buf);
 	}
 

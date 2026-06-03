@@ -1112,19 +1112,24 @@ cluster_nodes_json(char **json_out, size_t *json_len)
         return (*json_out != NULL ? 0 : -1);
     }
     
-    json_size = 4096 + count * 512;
+    json_size = 4096 + (size_t)count * 1024;
     json = malloc(json_size);
     if (json == NULL) {
         free(nodes);
         return (-1);
     }
-    
+
     p = json;
-    p += sprintf(p, "{\n  \"nodes\": [\n");
-    
+    size_t remaining = json_size;
+    int n;
+
+    n = snprintf(p, remaining, "{\n  \"nodes\": [\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(nodes); return (-1); }
+    p += n; remaining -= (size_t)n;
+
     for (i = 0; i < count; i++) {
         pthread_mutex_lock(&nodes[i]->lock);
-        p += sprintf(p,
+        n = snprintf(p, remaining,
             "    {\"id\":\"%s\",\"ip\":\"%s\",\"role\":%d,\"state\":%d,\"last_seen\":%ld}%s\n",
             nodes[i]->node_id,
             nodes[i]->ip,
@@ -1133,15 +1138,18 @@ cluster_nodes_json(char **json_out, size_t *json_len)
             (long)nodes[i]->last_seen,
             i < count - 1 ? "," : "");
         pthread_mutex_unlock(&nodes[i]->lock);
+        if (n < 0 || (size_t)n >= remaining) { free(json); free(nodes); return (-1); }
+        p += n; remaining -= (size_t)n;
     }
-    
-    p += sprintf(p, "  ]\n}");
-    
+
+    n = snprintf(p, remaining, "  ]\n}");
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(nodes); return (-1); }
+
     free(nodes);
     *json_out = json;
     if (json_len != NULL)
         *json_len = strlen(json);
-    
+
     return (0);
 }
 
@@ -1320,30 +1328,38 @@ cluster_services_json(char **json_out, size_t *json_len)
     
     pthread_mutex_lock(&service_lock);
     
-    json_size = 4096 + n_services * 256;
+    json_size = 4096 + (size_t)n_services * 1024;
     json = malloc(json_size);
     if (json == NULL) {
         pthread_mutex_unlock(&service_lock);
         return (-1);
     }
-    
+
     p = json;
-    p += sprintf(p, "{\n  \"services\": [\n");
-    
+    size_t remaining = json_size;
+    int n;
+
+    n = snprintf(p, remaining, "{\n  \"services\": [\n");
+    if (n < 0 || (size_t)n >= remaining) { free(json); pthread_mutex_unlock(&service_lock); return (-1); }
+    p += n; remaining -= (size_t)n;
+
     for (i = 0; i < n_services; i++) {
-        p += sprintf(p,
+        n = snprintf(p, remaining,
             "    {\"name\":\"%s\",\"ns\":\"%s\",\"ip\":\"%s\",\"port\":%d}%s\n",
             service_registry[i]->service_name,
             service_registry[i]->namespace,
             service_registry[i]->ip,
             service_registry[i]->port,
             i < n_services - 1 ? "," : "");
+        if (n < 0 || (size_t)n >= remaining) { free(json); pthread_mutex_unlock(&service_lock); return (-1); }
+        p += n; remaining -= (size_t)n;
     }
-    
-    p += sprintf(p, "  ]\n}");
-    
+
+    n = snprintf(p, remaining, "  ]\n}");
+    if (n < 0 || (size_t)n >= remaining) { free(json); pthread_mutex_unlock(&service_lock); return (-1); }
+
     pthread_mutex_unlock(&service_lock);
-    
+
     *json_out = json;
     if (json_len != NULL)
         *json_len = strlen(json);
