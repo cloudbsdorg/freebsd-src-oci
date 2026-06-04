@@ -157,7 +157,8 @@ cleanup:
  * Run a set of hooks
  */
 int
-hooks_run(const struct oci_hook **hooks, int nhooks, const char *state_file)
+static int
+hooks_run(const struct oci_hook * const *hooks, int nhooks, const char *state_file)
 {
 	int i;
 	int ret = 0;
