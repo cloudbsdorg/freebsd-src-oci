@@ -87,7 +87,8 @@ LIBADD=	\
 	zfs \
 	m \
 	pthread \
-	crypto
+	crypto \
+	md
 
 # json-c is NOT in FreeBSD base (it's a port: devel/json-c). The
 # standard FreeBSD approach for port dependencies is to use LDADD with
