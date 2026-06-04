@@ -54,7 +54,6 @@ execute_hook(const struct oci_hook *hook, const char *state_file)
 	int status;
 	char **envp;
 	char **argp;
-	char *state_arg;
 	int env_count, arg_count;
 	int ret = 0;
 	int i;
@@ -194,8 +193,12 @@ hooks_run_prestart(const struct ocifbsd_container *c)
 	snprintf(state_file, sizeof(state_file), "%s/state.json",
 	    c->bundle_path ? c->bundle_path : "/tmp");
 
-	return (hooks_run((const struct oci_hook **)c->spec->hooks->prestart,
-	    c->spec->hooks->n_prestart, state_file));
+	{
+		const struct oci_hook *const *prestart =
+		    c->spec->hooks->prestart;
+		return (hooks_run(prestart, c->spec->hooks->n_prestart,
+		    state_file));
+	}
 }
 
 /*
@@ -206,14 +209,18 @@ hooks_run_poststart(const struct ocifbsd_container *c)
 {
 	char state_file[PATH_MAX];
 
-	if (c == NULL || c->spec == NULL || c->spec->hooks == NULL)
+	if (c->spec == NULL || c->spec->hooks == NULL)
 		return (0);
 
 	snprintf(state_file, sizeof(state_file), "%s/state.json",
 	    c->bundle_path ? c->bundle_path : "/tmp");
 
-	return (hooks_run((const struct oci_hook **)c->spec->hooks->poststart,
-	    c->spec->hooks->n_poststart, state_file));
+	{
+		const struct oci_hook *const *poststart =
+		    c->spec->hooks->poststart;
+		return (hooks_run(poststart, c->spec->hooks->n_poststart,
+		    state_file));
+	}
 }
 
 /*
@@ -224,12 +231,16 @@ hooks_run_poststop(const struct ocifbsd_container *c)
 {
 	char state_file[PATH_MAX];
 
-	if (c == NULL || c->spec == NULL || c->spec->hooks == NULL)
+	if (c->spec == NULL || c->spec->hooks == NULL)
 		return (0);
 
 	snprintf(state_file, sizeof(state_file), "%s/state.json",
 	    c->bundle_path ? c->bundle_path : "/tmp");
 
-	return (hooks_run((const struct oci_hook **)c->spec->hooks->poststop,
-	    c->spec->hooks->n_poststop, state_file));
+	{
+		const struct oci_hook *const *poststop =
+		    c->spec->hooks->poststop;
+		return (hooks_run(poststop, c->spec->hooks->n_poststop,
+		    state_file));
+	}
 }
