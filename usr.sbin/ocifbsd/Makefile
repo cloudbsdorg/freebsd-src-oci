@@ -51,11 +51,19 @@ HAS_TESTS=
 SUBDIR.${MK_TESTS}+=	tests
 
 # === Default target: FreeBSD native build ===
-# bmake uses the FIRST explicit target as the default. We put `all` first
-# so that a bare `bmake` invocation builds the native ocifbsd binary, not
-# the cross-build helpers below. The cross-* targets are opt-in and must
-# be invoked explicitly (`bmake cross-build`).
-all: ${PROG}
+# bmake uses the FIRST explicit target as the default. Without an explicit
+# `all` here, bsd.prog.mk provides its own `all: ${PROG} ${SCRIPTS}` which
+# chains through ${PROG_FULL} -> ${OBJS} (derived from ${SRCS}). The cross-*
+# targets below are opt-in and must be invoked explicitly.
+#
+# We use .MAIN: all to force the default to be the bsd.prog.mk-provided
+# `all` target, NOT the first explicit target (which is now `cross-bootstrap`).
+.MAIN: all
+
+# Tell bmake where to find .c files in subdirectories.
+# SRCS contains paths like 'src/container.c' — bmake needs .PATH to resolve
+# them when generating the .o -> .c dependency rules.
+.PATH: ${.CURDIR}/src
 
 # === Cross-build (OPT-IN, for macOS/Linux hosts) ===
 # =============================================================================
