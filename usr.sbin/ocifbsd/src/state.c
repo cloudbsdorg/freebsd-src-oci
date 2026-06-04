@@ -50,7 +50,6 @@
 
 static const char *state_dir = OCIFBSD_STATE_DIR;
 static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int state_fd = -1;
 
 /*
  * Initialize state directory
