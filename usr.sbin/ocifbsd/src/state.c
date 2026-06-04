@@ -204,8 +204,6 @@ state_load(const char *id)
 		return (NULL);
 	}
 
-	obj = (root);
-
 	/* Allocate container */
 	c = calloc(1, sizeof(*c));
 	if (c == NULL) {
