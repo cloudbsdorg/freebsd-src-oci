@@ -49,7 +49,7 @@
 static bool verbose = false;
 
 /* Command options */
-struct cmd_options {
+static struct cmd_options {
 	int verbose;
 	int help;
 	int version;
@@ -102,7 +102,6 @@ cmd_create(int argc, char **argv)
 	struct ocifbsd_container *c;
 	char *bundle_path;
 	char *cname;
-	char *id;
 	int ret;
 
 	/* Parse create-specific options */
