@@ -52,6 +52,11 @@
 
 #include "zfs_store.h"
 
+#include <stdarg.h>
+
+extern int mkdirp(const char *path);
+extern int copy_file(const char *from, const char *to, int mode);
+
 /*
  * Configuration
  */
@@ -205,7 +210,6 @@ zfs_store_init(void)
 int
 zfs_store_ensure_dataset(const char *dataset, const char *mountpoint)
 {
-	char cmd[PATH_MAX];
 	int ret;
 
 	ret = run_zfs(4, "zfs", "create", "-p", dataset);
@@ -328,7 +332,6 @@ int
 zfs_get_property(const char *dataset, const char *property, char **value)
 {
 	char cmd[PATH_MAX * 2];
-	char buf[PATH_MAX];
 	char *output = NULL;
 	int ret;
 
@@ -366,6 +369,8 @@ int
 zfs_destroy_dataset(const char *dataset, bool recursive)
 {
 	int argc = 4;
+	int actual_argc = 3;
+	int ret;
 	char *argv[6];
 
 	argv[0] = "zfs";
@@ -398,7 +403,6 @@ int
 zfs_layer_create(const char *digest, uint64_t size __unused)
 {
 	char dataset[PATH_MAX];
-	char cmd[PATH_MAX];
 	int ret;
 
 	make_dataset_name(zfs_get_layers_dataset(), digest, dataset,
@@ -692,7 +696,7 @@ zfs_store_clone_layer(const char *src_digest, const char *dst_digest)
 	int ret;
 
 	make_dataset_name(zfs_get_layers_dataset(), src_digest, src_dataset,
-	    sizeof(dataset));
+	    sizeof(src_dataset));
 	make_dataset_name(zfs_get_layers_dataset(), dst_digest, dst_dataset,
 	    sizeof(dst_dataset));
 
@@ -712,7 +716,6 @@ zfs_store_clone_layer(const char *src_digest, const char *dst_digest)
 int
 zfs_store_add_layer(const char *image_dataset, const char *layer_digest)
 {
-	char cmd[PATH_MAX * 2];
 	char *mp;
 	int ret;
 
@@ -784,7 +787,7 @@ zfs_store_list_images(struct zfs_image ***images, int *nimages)
 	 *   1. Call 'zfs list -t filesystem -H -o name,used,quota,
 	 *      mountpoint,creation' to enumerate all ZFS filesystems
 	 *   2. Filter to only those under the ocifbsd dataset prefix
-	 *      (e.g., tank/ocifbsd/images/*)
+	 *      (e.g., tank/ocifbsd/images/<asterisk>)
 	 *   3. For each, parse the name into registry/repo/tag
 	 *   4. Optionally call 'zfs get -H digest' to get manifest digest
 	 *   5. Allocate zfs_image array, populate, return
@@ -829,7 +832,6 @@ int
 zfs_store_snapshot(const char *dataset, const char *snapshot)
 {
 	char snap[PATH_MAX * 2];
-	char *output = NULL;
 	int ret;
 
 	snprintf(snap, sizeof(snap), "%s@%s", dataset, snapshot);
@@ -969,7 +971,6 @@ zfs_volume_create(const char *name, uint64_t size, bool encrypted)
 {
 	char dataset[PATH_MAX];
 	char volsize[32];
-	char cmd[PATH_MAX];
 	int ret;
 
 	make_dataset_name(zfs_get_volumes_dataset(), name, dataset,
