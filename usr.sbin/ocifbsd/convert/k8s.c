@@ -442,7 +442,6 @@ k8s_convert_multi(const char *yaml, char **output,
 	size_t result_len = 0;
 	const char *doc_start;
 	const char *p;
-	int doc_num = 0;
 	
 	/* Add header */
 	asprintf(&result,
