@@ -74,6 +74,12 @@ CFLAGS+=	-I${.CURDIR}
 CFLAGS+=	-Wall -Wextra
 CFLAGS+=	-D__BSD_VISIBLE=1
 CFLAGS+=	-D_POSIX_C_SOURCE=200809L
+# FreeBSD 16's <signal.h> has a function prototype (sigstack) that
+# forward-declares 'struct sigstack' in the prototype itself, which
+# Clang -Werror -Wvisibility turns into an error when we include
+# <signal.h>. We don't use sigstack, so silence the system-header
+# warning rather than disable -Werror globally.
+CFLAGS+=	-Wno-error=visibility
 
 LIBADD=	\
 	jail \

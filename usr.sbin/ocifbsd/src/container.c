@@ -58,6 +58,11 @@
  * it locally to avoid the implicit-function-declaration -Werror. */
 extern void setproctitle(const char *fmt, ...);
 
+/* putenv(3) is in <stdlib.h> but on FreeBSD 16 it is gated on
+ * __XSI_VISIBLE, which we don't enable (we use __POSIX_VISIBLE=200809
+ * via _POSIX_C_SOURCE). Declare it locally. */
+extern int putenv(char *string);
+
 /* Global container registry */
 static struct ocifbsd_container **container_registry = NULL;
 static int container_registry_size = 0;
