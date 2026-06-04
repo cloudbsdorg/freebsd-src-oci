@@ -72,6 +72,9 @@ state_init(void)
  */
 int
 state_lock(void)
+__attribute__((no_thread_safety_analysis));
+int
+state_lock(void)
 {
 	pthread_mutex_lock(&state_mutex);
 	return (0);
@@ -80,6 +83,9 @@ state_lock(void)
 /*
  * Unlock the state file
  */
+void
+state_unlock(void)
+__attribute__((no_thread_safety_analysis));
 void
 state_unlock(void)
 {
@@ -104,7 +110,6 @@ state_save(const struct ocifbsd_container *c)
 	char path[PATH_MAX];
 	char *json_str;
 	int fd;
-	int ret = -1;
 	struct json_object *obj;
 
 	if (c == NULL || c->id == NULL) {
@@ -176,7 +181,6 @@ state_load(const char *id)
 	char *json_str;
 	size_t json_len;
 	struct json_object *root;
-	struct json_object *obj;
 	struct ocifbsd_container *c;
 
 	if (id == NULL)
