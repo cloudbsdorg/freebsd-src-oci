@@ -405,7 +405,7 @@ docker_compose_convert_v3(const char *compose, char **output,
 		    "  - name: %s\n"
 		    "    image: %s\n"
 		    "    replicas: %d\n"
-		    "%s%s%s%s%s%s%s%s%s\n",
+		    "%s%s%s%s%s%s%s%s%s%s\n",
 		    result,
 		    services[i],
 		    image ? image : services[i],
