@@ -796,8 +796,24 @@ banner:
 	@echo "  └─────────────────────────────────────────────────────────────┘"
 	@echo ""
 
-.if exists(/usr/share/mk/src.opts.mk)
-.include "/usr/share/mk/src.opts.mk"
+# Try to include src.opts.mk from standard locations.
+# On a FreeBSD install with /usr/src present, it's at /usr/src/share/mk/.
+# On a minimal install (no /usr/src), it may be at /usr/share/mk/ or
+# absent entirely. If absent, we define the MK_* variables we need
+# below (currently only MK_TESTS) so the build still works.
+.for _srcopts_path in /usr/src/share/mk /usr/share/mk
+.if exists(${_srcopts_path}/src.opts.mk) && !defined(_OCIFBSD_SRC_OPTS_INCLUDED)
+.include "${_srcopts_path}/src.opts.mk"
+_OCIFBSD_SRC_OPTS_INCLUDED=1
+.endif
+.endfor
+
+.if !defined(_OCIFBSD_SRC_OPTS_INCLUDED)
+# src.opts.mk not found — define what we need for a minimal build.
+# The FreeBSD base system doesn't ship src.opts.mk without /usr/src.
+# For a standalone build, this is fine; we don't need the full set
+# of MK_* knobs.
+MK_TESTS?=	no
 .endif
 
 .if exists(/usr/share/mk/bsd.prog.mk)
