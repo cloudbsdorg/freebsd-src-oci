@@ -32,6 +32,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/types.h>
 #include <sys/jail.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -57,7 +58,6 @@ static char *
 json_get_string(struct json_object *val, const char *key)
 {
 	struct json_object *obj;
-	struct json_object *s;
 
 	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
@@ -70,15 +70,13 @@ json_get_string(struct json_object *val, const char *key)
 	if (val == NULL || json_object_get_type(val) != json_type_string)
 		return (NULL);
 
-	s = json_object_get_string(val);
-	return (strdup(json_object_get_string(s)));
+	return (strdup(json_object_get_string(val)));
 }
 
 static int
 json_get_bool(struct json_object *val, const char *key, bool defval)
 {
 	struct json_object *obj;
-	struct json_object *b;
 
 	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (defval);
@@ -91,15 +89,13 @@ json_get_bool(struct json_object *val, const char *key, bool defval)
 	if (val == NULL || json_object_get_type(val) != json_type_boolean)
 		return (defval);
 
-	b = json_object_get_boolean(val);
-	return (json_object_get_boolean(b) ? 1 : 0);
+	return (json_object_get_boolean(val) ? 1 : 0);
 }
 
 static int
 json_get_int(struct json_object *val, const char *key, int defval)
 {
 	struct json_object *obj;
-	struct json_object *n;
 
 	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (defval);
@@ -112,19 +108,16 @@ json_get_int(struct json_object *val, const char *key, int defval)
 	if (val == NULL || json_object_get_type(val) != json_type_int)
 		return (defval);
 
-	n = json_object_get_int(val);
-	return ((int)json_object_get_int(n));
+	return (json_object_get_int(val));
 }
 
 static char **
 json_get_string_array(struct json_object *val, const char *key, int *nitems)
 {
 	struct json_object *obj;
-	struct json_object *arr;
 	struct json_object *elem;
-	struct json_object *s;
 	char **result;
-	size_t i;
+	size_t i, len;
 
 	*nitems = 0;
 
@@ -139,22 +132,20 @@ json_get_string_array(struct json_object *val, const char *key, int *nitems)
 	if (val == NULL || json_object_get_type(val) != json_type_array)
 		return (NULL);
 
-	arr = (val);
-	result = malloc((json_object_array_length(arr) + 1) * sizeof(char *));
+	len = json_object_array_length(val);
+	result = malloc((len + 1) * sizeof(char *));
 	if (result == NULL)
 		return (NULL);
 
-	for (i = 0; i < json_object_array_length(arr); i++) {
-		elem = json_object_array_get_idx(arr, i);
-		if (json_object_get_type(elem) == json_type_string) {
-			s = json_object_get_string(elem);
-			result[i] = strdup(json_object_get_string(s));
-		} else {
+	for (i = 0; i < len; i++) {
+		elem = json_object_array_get_idx(val, i);
+		if (json_object_get_type(elem) == json_type_string)
+			result[i] = strdup(json_object_get_string(elem));
+		else
 			result[i] = NULL;
-		}
 	}
-	result[json_object_array_length(arr)] = NULL;
-	*nitems = (int)json_object_array_length(arr);
+	result[len] = NULL;
+	*nitems = (int)len;
 
 	return (result);
 }

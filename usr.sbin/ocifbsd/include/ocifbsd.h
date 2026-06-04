@@ -125,18 +125,25 @@ struct oci_hooks {
 struct oci_freebsd {
 	bool	vnet;			/* Enable VNET (network isolation) */
 	char	**ip4;			/* IPv4 addresses */
+	int	n_ip4;			/* Count of IPv4 addresses */
 	char	**ip6;			/* IPv6 addresses */
+	int	n_ip6;			/* Count of IPv6 addresses */
 	char	*hostname;		/* Hostname */
 	char	*domainname;		/* Domainname */
 	char	**dns;			/* DNS nameservers */
+	int	n_dns;			/* Count of DNS nameservers */
 	char	**default_gateway4;	/* Default IPv4 gateway */
+	int	n_default_gateway4;	/* Count of default IPv4 gateways */
 	char	**default_gateway6;	/* Default IPv6 gateway */
+	int	n_default_gateway6;	/* Count of default IPv6 gateways */
 	char	*mac_label;		/* MAC label */
 	char	**rctl_rules;		/* RCTL rules */
+	int	n_rctl_rules;		/* Count of RCTL rules */
 	int	vnet_memory_limit;	/* VNET memory limit */
 	int	allow_raw_sockets;	/* Allow raw sockets */
 	int	allow_socket_af;	/* Allow socket address families */
 	char	**securelevel;		/* Securelevel */
+	int	n_securelevel;		/* Count of securelevel entries */
 };
 
 struct oci_runtime_spec {
