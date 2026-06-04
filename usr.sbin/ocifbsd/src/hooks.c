@@ -156,9 +156,8 @@ cleanup:
 /*
  * Run a set of hooks
  */
-int
 static int
-hooks_run(const struct oci_hook * const *hooks, int nhooks, const char *state_file)
+hooks_run(const struct oci_hook **hooks, int nhooks, const char *state_file)
 {
 	int i;
 	int ret = 0;
@@ -194,12 +193,8 @@ hooks_run_prestart(const struct ocifbsd_container *c)
 	snprintf(state_file, sizeof(state_file), "%s/state.json",
 	    c->bundle_path ? c->bundle_path : "/tmp");
 
-	{
-		const struct oci_hook *const *prestart =
-		    c->spec->hooks->prestart;
-		return (hooks_run(prestart, c->spec->hooks->n_prestart,
-		    state_file));
-	}
+	return (hooks_run(c->spec->hooks->prestart,
+	    c->spec->hooks->n_prestart, state_file));
 }
 
 /*
@@ -216,12 +211,8 @@ hooks_run_poststart(const struct ocifbsd_container *c)
 	snprintf(state_file, sizeof(state_file), "%s/state.json",
 	    c->bundle_path ? c->bundle_path : "/tmp");
 
-	{
-		const struct oci_hook *const *poststart =
-		    c->spec->hooks->poststart;
-		return (hooks_run(poststart, c->spec->hooks->n_poststart,
-		    state_file));
-	}
+	return (hooks_run(c->spec->hooks->poststart,
+	    c->spec->hooks->n_poststart, state_file));
 }
 
 /*
@@ -238,10 +229,6 @@ hooks_run_poststop(const struct ocifbsd_container *c)
 	snprintf(state_file, sizeof(state_file), "%s/state.json",
 	    c->bundle_path ? c->bundle_path : "/tmp");
 
-	{
-		const struct oci_hook *const *poststop =
-		    c->spec->hooks->poststop;
-		return (hooks_run(poststop, c->spec->hooks->n_poststop,
-		    state_file));
-	}
+	return (hooks_run(c->spec->hooks->poststop,
+	    c->spec->hooks->n_poststop, state_file));
 }

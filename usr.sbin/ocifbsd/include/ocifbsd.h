@@ -194,8 +194,7 @@ void	state_unlock(void);
 int	hooks_run_prestart(const struct ocifbsd_container *c);
 int	hooks_run_poststart(const struct ocifbsd_container *c);
 int	hooks_run_poststop(const struct ocifbsd_container *c);
-int	hooks_run(const struct oci_hook **hooks, int nhooks,
-	    const char *state_file);
+/* hooks_run() is file-local static in src/hooks.c -- no header decl */
 
 /* Utility functions */
 char   *generate_container_id(void);
