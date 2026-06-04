@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 #include "include/ocifbsd.h"
@@ -100,7 +101,7 @@ cmd_create(int argc, char **argv)
 	const char *name = NULL;
 	struct ocifbsd_container *c;
 	char *bundle_path;
-	char *canonical_name;
+	char *cname;
 	char *id;
 	int ret;
 
@@ -146,26 +147,26 @@ cmd_create(int argc, char **argv)
 
 	/* Canonicalize name if provided */
 	if (name != NULL) {
-		canonical_name = canonical_name(name);
-		if (canonical_name == NULL) {
+		cname = canonical_name(name);
+		if (cname == NULL) {
 			fprintf(stderr, "error: invalid container name: %s\n", name);
 			free(bundle_path);
 			return (1);
 		}
 	} else {
-		canonical_name = NULL;
+		cname = NULL;
 	}
 
 	/* Create container */
 	if (verbose) {
 		fprintf(stderr, "Creating container from bundle: %s\n", bundle_path);
-		if (canonical_name)
-			fprintf(stderr, "Container name: %s\n", canonical_name);
+		if (cname)
+			fprintf(stderr, "Container name: %s\n", cname);
 	}
 
-	ret = container_create(&c, bundle_path, canonical_name);
+	ret = container_create(&c, bundle_path, cname);
 	free(bundle_path);
-	free(canonical_name);
+	free(cname);
 
 	if (ret != 0) {
 		fprintf(stderr, "error: failed to create container: %s\n",
@@ -554,7 +555,7 @@ cmd_run(int argc, char **argv)
 	const char *name = NULL;
 	struct ocifbsd_container *c;
 	char *bundle_path;
-	char *canonical_name;
+	char *cname;
 	int ret;
 
 	/* Parse run-specific options */
@@ -599,26 +600,26 @@ cmd_run(int argc, char **argv)
 
 	/* Canonicalize name if provided */
 	if (name != NULL) {
-		canonical_name = canonical_name(name);
-		if (canonical_name == NULL) {
+		cname = canonical_name(name);
+		if (cname == NULL) {
 			fprintf(stderr, "error: invalid container name: %s\n", name);
 			free(bundle_path);
 			return (1);
 		}
 	} else {
-		canonical_name = NULL;
+		cname = NULL;
 	}
 
 	/* Create container */
 	if (verbose) {
 		fprintf(stderr, "Creating container from bundle: %s\n", bundle_path);
-		if (canonical_name)
-			fprintf(stderr, "Container name: %s\n", canonical_name);
+		if (cname)
+			fprintf(stderr, "Container name: %s\n", cname);
 	}
 
-	ret = container_create(&c, bundle_path, canonical_name);
+	ret = container_create(&c, bundle_path, cname);
 	free(bundle_path);
-	free(canonical_name);
+	free(cname);
 
 	if (ret != 0) {
 		fprintf(stderr, "error: failed to create container: %s\n",
@@ -667,7 +668,6 @@ int
 main(int argc, char **argv)
 {
 	struct command *cmd;
-	int i;
 
 	/* Parse global options */
 	static struct option longopts[] = {
