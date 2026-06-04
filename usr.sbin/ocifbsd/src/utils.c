@@ -42,6 +42,7 @@
 #include <limits.h>
 #include <paths.h>
 #include <sha256.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -180,7 +181,7 @@ resolve_bundle_path(const char *bundle)
 		/* Home directory */
 		path = getenv("HOME");
 		if (path == NULL)
-			path = _PATH_ROOT;
+			path = "/";
 		resolved = malloc(PATH_MAX);
 		if (resolved == NULL)
 			return (NULL);
