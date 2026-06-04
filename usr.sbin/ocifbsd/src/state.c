@@ -49,7 +49,7 @@
 #include "ocifbsd.h"
 
 static const char *state_dir = OCIFBSD_STATE_DIR;
-static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int state_fd = -1;
 
 /*
@@ -73,7 +73,7 @@ state_init(void)
 int
 state_lock(void)
 {
-	pthread_mutex_lock(&state_lock);
+	pthread_mutex_lock(&state_mutex);
 	return (0);
 }
 
@@ -83,7 +83,7 @@ state_lock(void)
 void
 state_unlock(void)
 {
-	pthread_mutex_unlock(&state_lock);
+	pthread_mutex_unlock(&state_mutex);
 }
 
 /*
@@ -127,9 +127,9 @@ state_save(const struct ocifbsd_container *c)
 	    ocifbsd_state_to_string(c->state)));
 	json_object_object_add(obj, "jid", json_object_new_int(c->jid));
 	json_object_object_add(obj, "init_pid", json_object_new_int((int)c->init_pid));
-	json_object_object_add(obj, "created_at", json_object_new_int64((json_int_t)c->created_at));
-	json_object_object_add(obj, "started_at", json_object_new_int64((json_int_t)c->started_at));
-	json_object_object_add(obj, "finished_at", json_object_new_int64((json_int_t)c->finished_at));
+	json_object_object_add(obj, "created_at", json_object_new_int64((int64_t)c->created_at));
+	json_object_object_add(obj, "started_at", json_object_new_int64((int64_t)c->started_at));
+	json_object_object_add(obj, "finished_at", json_object_new_int64((int64_t)c->finished_at));
 	json_object_object_add(obj, "exit_code", json_object_new_int(c->exit_code));
 	json_object_object_add(obj, "bundle_path", json_object_new_string(
 	    c->bundle_path ? c->bundle_path : ""));
@@ -139,7 +139,7 @@ state_save(const struct ocifbsd_container *c)
 	    c->config_path ? c->config_path : ""));
 
 	json_str = strdup(json_object_to_json_string_ext(obj,
-	    JSON_C_OBJECT_TO_STRING_PRETTY));
+	    JSON_C_TO_STRING_PRETTY));
 	json_object_put(obj);
 
 	if (json_str == NULL) {
@@ -190,7 +190,7 @@ state_load(const char *id)
 		return (NULL);
 
 	/* Parse JSON */
-	root = json_parse_string(json_str);
+	root = json_tokener_parse(json_str);
 	free(json_str);
 
 	if (root == NULL || json_object_get_type(root) != json_type_object) {
@@ -244,8 +244,21 @@ state_load(const char *id)
 	GET_INT64(finished_at, "finished_at");
 	GET_INT(exit_code, "exit_code");
 
-	/* Parse state string */
-	GET_STRING(state_str, "state");
+	/* Parse state string -> enum */
+	{
+		struct json_object *_state_v = json_object_object_get(root, "state");
+		if (_state_v && json_object_get_type(_state_v) == json_type_string) {
+			const char *_s = json_object_get_string(_state_v);
+			if (strcmp(_s, "created") == 0)
+				c->state = OCIFBSD_STATE_CREATED;
+			else if (strcmp(_s, "running") == 0)
+				c->state = OCIFBSD_STATE_RUNNING;
+			else if (strcmp(_s, "stopped") == 0)
+				c->state = OCIFBSD_STATE_STOPPED;
+			else if (strcmp(_s, "paused") == 0)
+				c->state = OCIFBSD_STATE_PAUSED;
+		}
+	}
 
 	json_object_put(root);
 
