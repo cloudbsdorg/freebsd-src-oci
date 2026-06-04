@@ -57,12 +57,16 @@ typedef enum {
 	OCIFBSD_STATE_PAUSED_HIGH,
 } ocifbsd_state_t;
 
+/* Forward declaration for the OCI runtime spec (defined below). */
+struct oci_runtime_spec;
+
 /* Container structure */
 struct ocifbsd_container {
 	char			*id;		/* Container ID (UUID) */
 	char			*name;		/* Human-readable name */
 	char			*rootfs;	/* Root filesystem path */
 	char			*bundle_path;	/* OCI bundle directory */
+	struct oci_runtime_spec	*spec;		/* Parsed OCI runtime spec */
 	int			jid;		/* Jail ID */
 	pid_t			init_pid;	/* Init process PID */
 	ocifbsd_state_t		state;		/* Current state */

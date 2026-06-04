@@ -41,13 +41,16 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <jail.h>
+#include <libutil.h>
 #include <paths.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
+#include <bsd/stdio.h>
 
 #include "ocifbsd.h"
 
@@ -482,7 +485,10 @@ container_start(struct ocifbsd_container *c)
 	c->started_at = time(NULL);
 
 	/* Wait briefly to check if process starts */
-	usleep(100000);  /* 100ms */
+	{
+		struct timespec ts = { 0, 100 * 1000 * 1000 }; /* 100ms */
+		nanosleep(&ts, NULL);
+	}
 	if (waitpid(pid, &status, WNOHANG) == 0) {
 		/* Process is still running */
 	} else if (WIFEXITED(status)) {
