@@ -60,10 +60,21 @@ SUBDIR.${MK_TESTS}+=	tests
 # `all` target, NOT the first explicit target (which is now `cross-bootstrap`).
 .MAIN: all
 
+# Tell bmake where to find system include files (bsd.prog.mk, src.opts.mk).
+# On a standard FreeBSD install this is /usr/share/mk, but some VM/bmake
+# configurations leave .PATH.sys empty. Setting it explicitly here makes
+# the build work in any environment.
+.PATH.sys: /usr/share/mk
+
 # Tell bmake where to find .c files in subdirectories.
 # SRCS contains paths like 'src/container.c' — bmake needs .PATH to resolve
 # them when generating the .o -> .c dependency rules.
 .PATH: ${.CURDIR}/src
+
+# Disable the default /usr/obj objdir. The ocifbsd build is a standalone
+# checkout (not in /usr/src), so we put .o files in the current directory.
+# Set MAKEOBJDIRPREFIX in the environment to override (e.g., for ccache).
+MAKEOBJDIRPREFIX=
 
 # === Cross-build (OPT-IN, for macOS/Linux hosts) ===
 # =============================================================================
