@@ -212,25 +212,23 @@ state_load(const char *id)
 
 	/* Parse fields */
 #define GET_STRING(field, json_key) do { \
-	char *val = json_get_string(root, json_key); \
-	if (val) c->field = val; \
+	struct json_object *_v = json_object_object_get(root, json_key); \
+	if (_v && json_object_get_type(_v) == json_type_string) { \
+		c->field = strdup(json_object_get_string(_v)); \
+	} \
 } while (0)
 
 #define GET_INT(field, json_key) do { \
-	struct json_object *o = (root); \
-	struct json_object *v = json_object_object_get(o, json_key); \
-	if (v && json_object_get_type(v) == json_type_int) { \
-		struct json_object *n = json_object_get_int(v); \
-		c->field = (int)json_object_get_int(n); \
+	struct json_object *_v = json_object_object_get(root, json_key); \
+	if (_v && json_object_get_type(_v) == json_type_int) { \
+		c->field = json_object_get_int(_v); \
 	} \
 } while (0)
 
 #define GET_INT64(field, json_key) do { \
-	struct json_object *o = (root); \
-	struct json_object *v = json_object_object_get(o, json_key); \
-	if (v && json_object_get_type(v) == json_type_int) { \
-		struct json_object *n = json_object_get_int(v); \
-		c->field = (int64_t)json_object_get_int(n); \
+	struct json_object *_v = json_object_object_get(root, json_key); \
+	if (_v && json_object_get_type(_v) == json_type_int) { \
+		c->field = (int64_t)json_object_get_int(_v); \
 	} \
 } while (0)
 
