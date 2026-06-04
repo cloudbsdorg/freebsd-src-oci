@@ -140,6 +140,35 @@ env gets sourced. No other target depends on `XCC`/`XLD`/`XAS`.
 | SSH key       | `~mlapointe/.ssh/revhelix` (local)           |
 | Build dir     | `~/ocifbsd-build` (cloned from origin)       |
 
+### /etc/sysctl.conf (permanent, panic auto-recovery for VM host)
+
+```sysctl
+# /etc/sysctl.conf on pppoe2.cloudbsd.org
+#
+# These ensure a kernel panic reboots the VM instead of halting.
+# Bare metal would use halt(8); a VM host has no console attached,
+# so a halt = permanent outage until manual intervention.
+
+vfs.zfs.vdev.min_auto_ashift=12   # 4K sector alignment for ZFS vdevs
+sysctl net.inet.ip.forwarding=1    # required for jail/VNET networking
+
+debug.debugger_on_panic=0          # do NOT enter debugger (no console)
+kern.sync_on_panic=0               # do NOT sync fs (faster reboot)
+kern.powercycle_on_panic=1         # ACPI power-cycle on panic = VM reboot
+```
+
+**Why these matter for a build VM**:
+
+- `debug.debugger_on_panic=0` + `kern.powercycle_on_panic=1` together make
+  the VM auto-reboot if a kernel panic occurs. Without these, the VM halts
+  and stays offline until someone manually restarts it from the hypervisor
+  console — a multi-hour outage for CI runs.
+- `vfs.zfs.vdev.min_auto_ashift=12` ensures all ZFS vdevs use 4K sectors
+  even if the underlying provider uses 512e emulation. Prevents the
+  write-amplification penalty and the "ashift=9" warning at pool import.
+- `net.inet.ip.forwarding=1` is required for VNET jails (which is what
+  `ocifbsd` uses). Without it, jailed networking is one-way.
+
 ### /etc/make.conf (permanent, empty by design)
 
 ```makeconf
