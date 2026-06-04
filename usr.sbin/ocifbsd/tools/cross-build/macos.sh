@@ -1,25 +1,32 @@
 #!/bin/sh
-# darwin-bootstrap.sh - Set up a clean macOS host for ocifbsd cross-build
+# macos.sh - Set up a clean macOS host for ocifbsd cross-build
 #
-# This script automates the toolchain setup documented in
-# .plan/020.0-Developer-Setup.md so the cross-build process is
-# repeatable on a fresh macOS install. It is idempotent: safe to
+# This script automates the toolchain setup so the cross-build process
+# is repeatable on a fresh macOS install. It is idempotent: safe to
 # run multiple times.
 #
 # Usage:
-#   ./darwin-bootstrap.sh              # Check + setup env (no installs)
-#   ./darwin-bootstrap.sh --install    # Auto-install ALL missing tools
-#   ./darwin-bootstrap.sh --check      # Just check, don't set env
-#   ./darwin-bootstrap.sh --yes        # Skip confirmations
+#   ./macos.sh              # Check + setup env (no installs)
+#   ./macos.sh --install    # Auto-install ALL missing tools
+#   ./macos.sh --check      # Just check, don't set env
+#   ./macos.sh --yes        # Skip confirmations
 #
 # After running, source the generated env file:
 #   . /tmp/ocifbsd-cross-build-env
 #
 # Then build:
+#   make cross-build        # from the repo root, OR
 #   bmake -C usr.sbin/ocifbsd TARGET=amd64 TARGET_ARCH=amd64
 #
 # Tested on a clean macOS install: Xcode CLT -> brew -> bmake -> llvm.
 # Each step is skipped if already present.
+#
+# === IMPORTANT ===
+# This is a CROSS-BUILD helper. The primary, tier-1 build target is
+# FreeBSD native (`bmake -C usr.sbin/ocifbsd` on a FreeBSD host).
+# This script exists only so that developers on macOS workstations
+# can cross-build to FreeBSD without needing a FreeBSD VM for the
+# compile step. See tools/cross-build/README.md.
 
 set -eu
 
@@ -316,7 +323,7 @@ echo "  2. Cross-build userland:   python3 tools/build/make.py TARGET=$TARGET TA
 echo "  3. Build ocifbsd:          bmake -C usr.sbin/ocifbsd TARGET=$TARGET TARGET_ARCH=$TARGET_ARCH"
 echo "  4. Build tests:            bmake -C tests/usr.sbin/ocifbsd TARGET=$TARGET TARGET_ARCH=$TARGET_ARCH"
 echo ""
-echo "Or run the all-in-one build:"
-echo "  . $ENV_FILE && bmake -C usr.sbin/ocifbsd darwin-build"
+echo "Or run the all-in-one build (preferred):"
+echo "  . $ENV_FILE && make -C usr.sbin/ocifbsd cross-build"
 echo ""
 warn "Remember: push to feature/oci-bootstrap requires explicit user approval."
