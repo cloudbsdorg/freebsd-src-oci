@@ -50,7 +50,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <bsd/stdio.h>
 
 #include "ocifbsd.h"
 
