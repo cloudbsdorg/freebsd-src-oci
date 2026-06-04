@@ -43,8 +43,21 @@ LIBADD=	\
 	zfs \
 	m \
 	pthread \
-	crypto \
-	json-c
+	crypto
+
+# json-c is NOT in FreeBSD base (it's a port: devel/json-c). The
+# standard FreeBSD approach for port dependencies is to use LDADD with
+# the port's library path, NOT LIBADD (which is validated against
+# src.libnames.mk and would fail). The CFLAGS/LDFLAGS additions point
+# at /usr/local (the FreeBSD port prefix).
+#
+# Install with:  sudo pkg install json-c
+#
+# This is a known migration target (see .omo/drafts/MIGRATION.md):
+# long-term, ocifbsd should use libxo(3) which IS in FreeBSD base.
+CFLAGS+=	-I/usr/local/include/json-c
+LDFLAGS+=	-L/usr/local/lib
+LDADD+=		-ljson-c
 
 # Enable test suite
 HAS_TESTS=
