@@ -181,7 +181,7 @@ resolve_bundle_path(const char *bundle)
 		/* Home directory */
 		path = getenv("HOME");
 		if (path == NULL)
-			path = "/";
+			path = (char *)"/";
 		resolved = malloc(PATH_MAX);
 		if (resolved == NULL)
 			return (NULL);
