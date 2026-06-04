@@ -546,7 +546,8 @@ oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
 			return (NULL);						\
 	}									\
 	jailparam_init(&params[n], name);					\
-	jailparam_import_raw(&params[n], value, strlen(value) + 1);	\
+	jailparam_import_raw(&params[n], (void *)(uintptr_t)value,		\
+	    strlen(value) + 1);						\
 	n++;									\
 } while (0)
 
