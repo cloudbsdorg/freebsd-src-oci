@@ -53,6 +53,11 @@
 
 #include "ocifbsd.h"
 
+/* setproctitle(3) is in <libutil.h> on FreeBSD but the declaration is
+ * not visible with the strict feature-test macros used here. Declare
+ * it locally to avoid the implicit-function-declaration -Werror. */
+extern void setproctitle(const char *fmt, ...);
+
 /* Global container registry */
 static struct ocifbsd_container **container_registry = NULL;
 static int container_registry_size = 0;
@@ -265,7 +270,6 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 	size_t nparams;
 	char config_path[PATH_MAX];
 	char *canonical;
-	int ret;
 
 	if (cp == NULL || bundle_path == NULL) {
 		errno = EINVAL;
@@ -469,7 +473,7 @@ container_start(struct ocifbsd_container *c)
 			execvp(c->spec->process.args[0], c->spec->process.args);
 		} else {
 			/* Default: run sh */
-			char *sh_args[] = { "/bin/sh", NULL };
+			char *sh_args[] = { (char *)"/bin/sh", NULL };
 			execvp("/bin/sh", sh_args);
 		}
 
@@ -693,7 +697,40 @@ container_inspect(struct ocifbsd_container *c, char **json_out)
 		return (-1);
 	}
 
-	len = asprintf(&json,
+	/* asprintf() is hidden by -D_XOPEN_SOURCE=700. Use a two-pass
+	 * snprintf(NULL, 0) to size, malloc, then snprintf again to fill.
+	 * Verbose but avoids the feature-test-macro dance. */
+	len = snprintf(NULL, 0,
+	    "{"
+	    "\"id\": \"%s\","
+	    "\"name\": \"%s\","
+	    "\"state\": \"%s\","
+	    "\"created\": %ld,"
+	    "\"started\": %ld,"
+	    "\"finished\": %ld,"
+	    "\"exit_code\": %d,"
+	    "\"bundle\": \"%s\","
+	    "\"rootfs\": \"%s\","
+	    "\"config\": \"%s\""
+	    "}",
+	    c->id ? c->id : "",
+	    c->name ? c->name : "",
+	    ocifbsd_state_to_string(c->state),
+	    (long)c->created_at,
+	    (long)c->started_at,
+	    (long)c->finished_at,
+	    c->exit_code,
+	    c->bundle_path ? c->bundle_path : "",
+	    c->rootfs ? c->rootfs : "",
+	    c->config_path ? c->config_path : "");
+	if (len < 0)
+		return (-1);
+	json = malloc(len + 1);
+	if (json == NULL) {
+		errno = ENOMEM;
+		return (-1);
+	}
+	snprintf(json, len + 1,
 	    "{"
 	    "\"id\": \"%s\","
 	    "\"name\": \"%s\","
