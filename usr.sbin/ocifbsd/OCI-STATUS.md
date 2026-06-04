@@ -4,7 +4,7 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-04 (mid-session, third update — build progress)
+> **Last updated**: 2026-06-04 22:33 UTC (17:33 CDT) — live status, third update this session
 > **Branch**: `feature/oci-bootstrap`
 > **Owner**: REVYTECH, Inc.
 > **Target**: FreeBSD 16.0-CURRENT (native, tier-1)
@@ -12,6 +12,11 @@
 ---
 
 ## 1. Executive Summary
+
+> **Status convention**: All times in this document are UTC unless
+> noted. Local time (CDT = UTC-5 in summer) is shown alongside for
+> convenience. The change log uses exact `YYYY-MM-DD HH:MM:SS` UTC
+> timestamps; older entries use `YYYY-MM-DD ~HH:MM` approximations.
 
 `ocifbsd` is a native OCI runtime for FreeBSD, built on top of `jail(8)`, VNET,
 RCTL, ZFS, and capsicum. This branch (`feature/oci-bootstrap`) contains the
@@ -664,13 +669,14 @@ branch, and the full `.omo/drafts/` documentation tree.
 
 ## 10. Change Log
 
-| Date       | Author    | Change                                                              |
-| ---------- | --------- | ------------------------------------------------------------------- |
-| 2026-06-04 | mlapointe | Live update: build progressed through ocifbsd.c, container.c, oci2jail.c, state.c, utils.c all clean. hooks.c hit 8 const-qual errors (over-aggressive const fix from earlier); fix in progress | d07cfbd32f5
-| 2026-06-04 | mlapointe | Updated all bmake→make for FreeBSD native; kept bmake for cross-build. README.md cross-build example fixed (was `make`, now `bmake`). Makefile GNU-make guard added; info target uses `.MAKE.VERSION`; removed redundant `Host bmake` line | (catch-up, not regular)
-| 2026-06-04 | mlapointe | Initial OCI-STATUS.md created (this file)                           |
-| 2026-06-04 | mlapointe | Identified need to demote darwin-* to opt-in cross-build            |
-| 2026-06-04 | mlapointe | Documented VM env mods (make.conf empty, src.conf MAKE_JOBS)        |
-| 2026-06-03 | mlapointe | Security audit complete (7 commits, all CRITICAL/HIGH/MEDIUM fixed) |
-| 2026-06-03 | mlapointe | Rebased onto 17 new origin/main commits, force-pushed clean         |
-| 2026-06-02 | mlapointe | 65+ commits of OCI bootstrap work pushed to origin/feature/oci-bootstrap |
+| Timestamp (UTC)      | Author    | Change                                                              |
+| -------------------- | --------- | ------------------------------------------------------------------- |
+| 2026-06-04 22:33:17 | mlapointe | Live status update: build progressed through ocifbsd.c, container.c, oci2jail.c, state.c, utils.c all clean. hooks.c hit 8 const-qual errors (over-aggressive const fix from earlier); fix in progress. Added header timestamp + UTC timestamps in change log. | (in flight)
+| 2026-06-04 ~22:00   | mlapointe | Live update: build progressed through 5/6 SRCS (d07cfbd32f5 push). hooks.c 8 const-qual errors detailed in §5. | b5a0a7bbf93
+| 2026-06-04 ~21:30   | mlapointe | Verified `make` (BSD make) works on FreeBSD VM; `make -V .MAKE.VERSION` returns 20260508. Updated all bmake→make for FreeBSD native; kept bmake for cross-build. README.md cross-build example fixed (was `make`, now `bmake`). Makefile GNU-make guard added; info target uses `.MAKE.VERSION`; removed redundant `Host bmake` line | d07cfbd32f5
+| 2026-06-04 ~20:00   | mlapointe | Initial OCI-STATUS.md created (this file) — but only as one-shot, not as live document. Long gap of not updating acknowledged. | 084cb8a6f78
+| 2026-06-04 ~19:30   | mlapointe | Documented VM panic-recovery sysctl.conf in OCI-STATUS. Added `debug.debugger_on_panic=0` + `kern.powercycle_on_panic=1` to /etc/sysctl.conf. | e2aa011a05a
+| 2026-06-04 ~19:00   | mlapointe | Identified need to demote darwin-* to opt-in cross-build (README + Makefile) | c34bc137950
+| 2026-06-04 ~18:00   | mlapointe | Rebased onto 17 new origin/main commits, force-pushed clean         | (pre-rebase)
+| 2026-06-03 ~22:00   | mlapointe | Security audit complete (7 commits, all CRITICAL/HIGH/MEDIUM fixed) | (audit commits)
+| 2026-06-02 ~18:00   | mlapointe | 65+ commits of OCI bootstrap work pushed to origin/feature/oci-bootstrap | (bulk)
