@@ -2921,7 +2921,7 @@ unp_connectat(int fd, struct socket *so, struct sockaddr *nam,
 		sa = malloc(sizeof(struct sockaddr_un), M_SONAME, M_WAITOK);
 	else
 		sa = NULL;
-	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | LOCKSHARED | LOCKLEAF,
+	NDINIT_ATRIGHTS(&nd, LOOKUP, FOLLOW | LOCKSHARED | LOCKLEAF | EMPTYPATH,
 	    UIO_SYSSPACE, buf, fd, cap_rights_init_one(&rights, CAP_CONNECTAT));
 	error = namei(&nd);
 	if (error)
