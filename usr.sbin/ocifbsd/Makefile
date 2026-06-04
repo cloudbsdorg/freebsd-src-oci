@@ -1,6 +1,18 @@
 # $Id$
 # $FreeBSD$
 # SPDX-License-Identifier: BSD-2-Clause
+#
+# This Makefile uses BSD make syntax (.PATH, .MAIN, :=, etc.). It MUST be
+# built with BSD make — on FreeBSD that's /usr/bin/make (which is BSD make,
+# also called bmake), on macOS/Linux install the bmake port first.
+#
+# We detect GNU make early and fail fast with a clear error, otherwise
+# GNU make will barf on the first BSD-specific directive and the user
+# will get a confusing parse error deep in the file.
+
+.if !defined(.MAKE.VERSION) || ${.MAKE.VERSION:MGNUmake*}
+.error *** GNU make is not supported. Use BSD make (bmake). On FreeBSD: 'make' (base system). On macOS: 'brew install bmake' then 'bmake'. On Linux: 'apt install bmake' then 'bmake'. ***
+.endif
 
 PROG=	ocifbsd
 VERSION=	0.1.0
@@ -15,7 +27,7 @@ SRCS=	\
 	src/utils.c
 
 # === Include src.opts.mk BEFORE any SUBDIR.${MK_FOO} usage ===
-# bmake processes the Makefile top-to-bottom. The SUBDIR.${MK_TESTS}
+# BSD make processes the Makefile top-to-bottom. The SUBDIR.${MK_TESTS}
 # conditional below requires MK_TESTS to be defined (via src.opts.mk).
 # If src.opts.mk is included after the conditional, the variable is
 # undefined and bsd.subdir.mk errors out with 'Found variable SUBDIR.'.
@@ -90,7 +102,7 @@ HAS_TESTS=
 SUBDIR.${MK_TESTS}+=	tests
 
 # === Default target: FreeBSD native build ===
-# bmake uses the FIRST explicit target as the default. Without an explicit
+# BSD make uses the FIRST explicit target as the default. Without an explicit
 # `all` here, bsd.prog.mk provides its own `all: ${PROG} ${SCRIPTS}` which
 # chains through ${PROG_FULL} -> ${OBJS} (derived from ${SRCS}). The cross-*
 # targets below are opt-in and must be invoked explicitly.
@@ -99,8 +111,8 @@ SUBDIR.${MK_TESTS}+=	tests
 # `all` target, NOT the first explicit target (which is now `cross-bootstrap`).
 .MAIN: all
 
-# Tell bmake where to find .c files in subdirectories.
-# SRCS contains paths like 'src/container.c' — bmake needs .PATH to resolve
+# Tell BSD make where to find .c files in subdirectories.
+# SRCS contains paths like 'src/container.c' — make needs .PATH to resolve
 # them when generating the .o -> .c dependency rules.
 .PATH: ${.CURDIR}/src
 
@@ -114,17 +126,18 @@ MAKEOBJDIRPREFIX=
 # If you are reading this, the FIRST thing to know is: this is the
 # cross-build path. It is NOT the primary build path.
 #
-# The primary, tier-1 build path is the default `bmake` invocation in a
-# FreeBSD source tree (with bsd.prog.mk, src.opts.mk, etc.). The C code
-# in usr.sbin/ocifbsd/ is FreeBSD-native: it uses jail(2), capsicum(4),
+# The primary, tier-1 build path is the default `make` invocation in a
+# FreeBSD source tree (with bsd.prog.mk, src.opts.mk, etc.). On FreeBSD
+# /usr/bin/make IS BSD make — no install needed. The C code in
+# usr.sbin/ocifbsd/ is FreeBSD-native: it uses jail(2), capsicum(4),
 # rctl(8), zfs(8), and other FreeBSD-specific syscalls.
 #
 # This cross-build section exists only so that developers on macOS/Linux
 # can build FreeBSD binaries from their native host. It uses
 # tools/build/make.py from a FreeBSD source tree to build the userland
-# libraries that ocifbsd depends on, then bmake to link ocifbsd against
-# them. The resulting binary will NOT run on macOS/Linux - it must be
-# deployed to a FreeBSD host.
+# libraries that ocifbsd depends on, then bmake (the BSD make port) to
+# link ocifbsd against them. The resulting binary will NOT run on
+# macOS/Linux — it must be deployed to a FreeBSD host.
 #
 # See tools/cross-build/README.md for the full workflow.
 # =============================================================================
@@ -132,8 +145,8 @@ MAKEOBJDIRPREFIX=
 # Usage (from repo root, on a macOS/Linux host):
 #   1. Bootstrap the toolchain:  ./tools/cross-build/macos.sh --install --yes
 #   2. Source the env file:      . /tmp/ocifbsd-cross-build-env
-#   3. Cross-build:              make -C usr.sbin/ocifbsd cross-build
-#   4. Cross-build + VM test:    make -C usr.sbin/ocifbsd cross-test
+#   3. Cross-build:              bmake -C usr.sbin/ocifbsd cross-build
+#   4. Cross-build + VM test:    bmake -C usr.sbin/ocifbsd cross-test
 #
 # All targets accept these env vars (with defaults):
 #   TARGET=amd64, TARGET_ARCH=amd64
@@ -188,6 +201,8 @@ help:
 	@echo "  (default)         Build ocifbsd + subdirs (BSD make required)"
 	@echo "  install           Install to \$${DESTDIR}/usr/sbin"
 	@echo "  clean             Remove build artifacts"
+	@echo "  On FreeBSD:       make            # /usr/bin/make is BSD make"
+	@echo "  Cross-build host: brew install bmake   # then 'bmake' instead of 'make'"
 	@echo ""
 	@echo "Cross-build (OPT-IN, macOS/Linux hosts only) -- see tools/cross-build/README.md:"
 	@echo "  cross-bootstrap   Install toolchain via tools/cross-build/macos.sh"
@@ -219,8 +234,7 @@ info:
 	@echo "--- Native build (FreeBSD, tier-1) ---"
 	@echo "Host OS:    $$(uname -s) $$(uname -r) $$(uname -m)"
 	@echo "CPUs:       $$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 'unknown')"
-	@echo "Host make:  $$(which make) ($$(make --version 2>/dev/null | head -1 || echo 'unknown'))"
-	@echo "Host bmake: $$(which bmake 2>/dev/null || echo 'NOT FOUND')"
+	@echo "BSD make:   $$(which make) (version $$(make -V .MAKE.VERSION 2>/dev/null || echo 'unknown'))"
 	@if command -v cc >/dev/null 2>&1; then \
 		echo "Native cc:    $$(which cc) ($$(cc --version 2>/dev/null | head -1))"; \
 	else \
@@ -305,7 +319,7 @@ smoke:
 	done
 	@echo ""
 	@echo "--- Makefile syntax ---"
-	@if bmake -n -C ${OCIFBSD_ROOT} >/dev/null 2>&1; then \
+	@if make -n -C ${OCIFBSD_ROOT} >/dev/null 2>&1; then \
 		echo "  [OK] usr.sbin/ocifbsd/Makefile"; \
 	else \
 		echo "  [WARN] usr.sbin/ocifbsd/Makefile (src.opts.mk not found; this is normal on a cross-build host, not on FreeBSD)"; \
@@ -448,7 +462,7 @@ test-cross-build:
 	@echo ""
 	@echo "Note: cross-build is for macOS/Linux developers who want to build"
 	@echo "FreeBSD binaries from their native host. The primary build path is"
-	@echo "the default 'bmake -C usr.sbin/ocifbsd' on a FreeBSD host."
+	@echo "the default 'make -C usr.sbin/ocifbsd' on a FreeBSD host."
 	@echo ""
 	@echo "--- Required tools ---"
 	@for tool in bmake clang lld python3; do \
@@ -517,7 +531,7 @@ release-manifest:
 check-deps:
 	@echo "=== Dependency Check ==="
 	@MISSING=0; \
-	for tool in bmake clang lld python3 git; do \
+	for tool in make clang lld python3 git; do \
 		if command -v $$tool >/dev/null 2>&1; then \
 			VER=$$($$tool --version 2>&1 | head -1 | sed 's/^[^0-9]*//'); \
 			printf "  [OK]   %-10s %s\n" "$$tool" "$$VER"; \
@@ -527,11 +541,9 @@ check-deps:
 		fi; \
 	done; \
 	echo ""; \
-	echo "  For macOS:"; \
-	echo "    brew install bmake llvm lld"; \
-	echo ""; \
-	echo "  For Linux:"; \
-	echo "    sudo apt install bmake clang lld python3"; \
+	echo "  On FreeBSD: all tools are in the base system (or 'pkg install')."; \
+	echo "  For macOS cross-build:  brew install bmake llvm lld"; \
+	echo "  For Linux cross-build:  sudo apt install bmake clang lld python3"; \
 	echo ""; \
 	if [ $$MISSING -gt 0 ]; then \
 		echo "  $$MISSING tools missing. Install them and re-run."; \
@@ -546,10 +558,10 @@ dev: check-deps
 	@echo "=== Developer Setup ==="
 	@if [ "$$(uname -s)" = "FreeBSD" ]; then \
 		echo "Detected FreeBSD host. Native build is the default."; \
-		echo "Run: bmake -C usr.sbin/ocifbsd"; \
+		echo "Run: make -C usr.sbin/ocifbsd"; \
 	elif [ "$$(uname -s)" = "Darwin" ]; then \
 		echo "Detected macOS host. Cross-build helpers available."; \
-		echo "Run: make -C usr.sbin/ocifbsd cross-bootstrap"; \
+		echo "Run: bmake -C usr.sbin/ocifbsd cross-bootstrap"; \
 		echo "     (or see tools/cross-build/README.md)"; \
 	elif [ "$$(uname -s)" = "Linux" ]; then \
 		echo "Detected Linux host. Cross-build helpers available."; \
@@ -565,12 +577,12 @@ dev: check-deps
 	@echo "=== Developer setup complete ==="
 	@echo ""
 	@echo "Next steps:"
-	@echo "  bmake -C usr.sbin/ocifbsd help       # see all targets"
-	@echo "  bmake -C usr.sbin/ocifbsd audit      # see AI slop markers"
-	@echo "  bmake -C usr.sbin/ocifbsd info       # see build env"
+	@echo "  make -C usr.sbin/ocifbsd help       # see all targets"
+	@echo "  make -C usr.sbin/ocifbsd audit      # see AI slop markers"
+	@echo "  make -C usr.sbin/ocifbsd info       # see build env"
 	@echo ""
 	@echo "For FreeBSD native build:"
-	@echo "  bmake -C usr.sbin/ocifbsd"
+	@echo "  make -C usr.sbin/ocifbsd"
 	@echo ""
 	@echo "For VM testing:"
 	@echo "  See .omo/drafts/vm-provisioning.md"
@@ -723,7 +735,7 @@ review:
 	@DEAD=$$(grep -rE 'strlcpy\(\(char\[\]\)\{0\}' ${OCIFBSD_ROOT} --include="*.c" 2>/dev/null | wc -l | tr -d ' '); \
 	echo "  Compound-literal HACKs: $$DEAD (should be 0)"
 	@echo ""
-	@echo "Self-review complete. Run 'bmake audit' for AI slop markers."
+	@echo "Self-review complete. Run 'make audit' for AI slop markers."
 
 # Print version information
 version:
@@ -815,9 +827,9 @@ banner:
 	@echo "  │   $$(printf '%-59s' "$$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $$1}') lines") │"
 	@echo "  │                                                             │"
 	@echo "  │   Quick start:                                              │"
-	@echo "  │     bmake -C usr.sbin/ocifbsd help                          │"
-	@echo "  │     bmake -C usr.sbin/ocifbsd dev                           │"
-	@echo "  │     bmake -C usr.sbin/ocifbsd all-meta                      │"
+	@echo "  │     make -C usr.sbin/ocifbsd help                           │"
+	@echo "  │     make -C usr.sbin/ocifbsd dev                            │"
+	@echo "  │     make -C usr.sbin/ocifbsd all-meta                       │"
 	@echo "  │                                                             │"
 	@echo "  └─────────────────────────────────────────────────────────────┘"
 	@echo ""

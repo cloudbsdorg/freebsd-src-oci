@@ -23,17 +23,22 @@
 cd /usr/src/usr.sbin/ocifbsd    # if you have the source tree
 # OR
 cd usr.sbin/ocifbsd            # if you have a standalone clone
-bmake
+make
 ```
 
-That's it. The default `bmake` target builds `ocifbsd` and all 15 subdir
+That's it. The default `make` target builds `ocifbsd` and all 15 subdir
 modules. No environment variables required, no cross-toolchain, no
 sysroot. This is the build path that produces the binary that actually
 runs on FreeBSD.
 
+**Note**: On FreeBSD, `/usr/bin/make` IS bmake (BSD make has been the
+base `make` on FreeBSD since FreeBSD 9). You do not need to install
+anything. If you see references to `bmake` in older docs, that means
+the same thing on FreeBSD.
+
 ```bash
-sudo bmake install              # installs /usr/sbin/ocifbsd
-sudo bmake install-man          # installs /usr/share/man/man8/ocifbsd.8
+sudo make install              # installs /usr/sbin/ocifbsd
+sudo make install-man          # installs /usr/share/man/man8/ocifbsd.8
 ```
 
 ### Run a Container
@@ -230,9 +235,9 @@ The short version:
 git clone git@github.com:cloudbsdorg/freebsd-src-oci.git
 cd freebsd-src-oci
 git checkout feature/oci-bootstrap
-./tools/cross-build/macos.sh --install --yes
+./tools/cross-build/macos.sh --install --yes   # installs bmake, llvm, lld
 . /tmp/ocifbsd-cross-build-env
-make -C usr.sbin/ocifbsd cross-build
+bmake -C usr.sbin/ocifbsd cross-build
 ```
 
 The resulting `usr.sbin/ocifbsd/ocifbsd` is a FreeBSD amd64 binary. Deploy
