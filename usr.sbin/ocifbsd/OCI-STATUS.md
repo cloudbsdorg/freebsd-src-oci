@@ -78,7 +78,11 @@ freebsd-src-oci/
 ├── usr.sbin/ocifbsd/              # The runtime (C code, FreeBSD-native)
 │   ├── Makefile                   # Native build (default) + cross-build subsection
 │   ├── README.md                  # FreeBSD-native first; cross-build in §6
-│   ├── darwin-bootstrap.sh        # → tools/cross-build/macos.sh
+│   ├── OCI-STATUS.md              # ← THIS FILE (live status doc)
+│   ├── tools/                     # Build helpers
+│   │   └── cross-build/           # OPT-IN cross-build helpers (macOS, Linux)
+│   │       ├── macos.sh           # Bootstrap a macOS host for cross-build
+│   │       └── README.md          # When to use cross-build, who needs it
 │   ├── src/                       # Core runtime (jail lifecycle, OCI translation)
 │   ├── image/                     # Pull/push, ZFS storage
 │   ├── network/                   # Bridge, VNET, CNI
@@ -304,9 +308,9 @@ Completed in one session; 7 commits, all pushed.
 
 ## 6. Plan: Make Native the Default
 
-### 6.1 Makefile refactor
+### 6.1 Makefile refactor ✅ DONE
 
-**Before** (current, problematic):
+**Before** (problematic):
 ```make
 # === macOS host convenience targets ===
 darwin-bootstrap:
@@ -315,29 +319,35 @@ darwin-build: darwin-bootstrap
 	@. $${OCIFBSD_ENV_FILE:-/tmp/ocifbsd-cross-build-env} && ...
 ```
 
-**After** (target):
+**After** (now in tree):
 ```make
-# Native build (FreeBSD) is the default.
-# Just run: bmake -C usr.sbin/ocifbsd
-# or:     make -C usr.sbin/ocifbsd
-#
-# === Cross-build (OPT-IN, for macOS/Linux developers) ===
-# Most developers should not need this. If you ARE on macOS/Linux and
-# want to cross-build to FreeBSD, see tools/cross-build/README.md.
-#
-#   make cross-build           # cross-build userland + ocifbsd + tests
-#   make cross-test            # cross-build + deploy to VM + run kyua tests
+# === Cross-build (OPT-IN, for macOS/Linux hosts) ===
+# =============================================================================
+# If you are reading this, the FIRST thing to know is: this is the
+# cross-build path. It is NOT the primary build path.
+# ...
+# =============================================================================
+
+cross-bootstrap:
+	@./tools/cross-build/macos.sh --install --yes
+
+cross-build: cross-bootstrap
+	@. $${OCIFBSD_ENV_FILE:-/tmp/ocifbsd-cross-build-env} && ...
 ```
 
-The `darwin-bootstrap.sh` script moves to `tools/cross-build/macos.sh`.
-The `darwin-build` / `darwin-test` targets become `cross-build` /
+The `darwin-bootstrap.sh` script moved to `tools/cross-build/macos.sh`.
+The `darwin-build` / `darwin-test` targets became `cross-build` /
 `cross-test`, and they are listed in a separate section of `make help`,
-clearly labeled "Cross-build (macOS/Linux hosts)".
+clearly labeled "Cross-build (OPT-IN, macOS/Linux hosts only) -- see
+tools/cross-build/README.md".
 
-### 6.2 README.md updates
+The default `bmake` target is unchanged — it's the FreeBSD native build.
+No new env vars required for native.
+
+### 6.2 README.md updates 🔄 IN PROGRESS
 
 The "Quick Start" section currently leads with `cd usr.sbin/ocifbsd && make`.
-That stays. A new section §6 "Building from macOS or Linux" appears at the
+That stays. A new section §6 "Building from macOS or Linux" will appear at the
 bottom with a clear cross-reference to `tools/cross-build/README.md`.
 
 ### 6.3 `info` target updates
@@ -347,7 +357,7 @@ output adds an explicit "Native build" section that shows host OS, native
 `bmake` path, native `cc` path, and core count. The first thing a reviewer
 of this branch should see is "this is a FreeBSD-native build".
 
-### 6.4 Code fixes for native build
+### 6.4 Code fixes for native build 🔄 IN PROGRESS
 
 Required to unblock native build on FreeBSD 16.0-CURRENT:
 

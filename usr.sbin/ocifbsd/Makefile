@@ -50,30 +50,46 @@ LIBADD=	\
 HAS_TESTS=
 SUBDIR.${MK_TESTS}+=	tests
 
-# === macOS host convenience targets ===
-# These targets help developers on macOS hosts build ocifbsd without
-# manually setting up the cross-build environment. See
-# ./darwin-bootstrap.sh for the underlying logic.
+# === Cross-build (OPT-IN, for macOS/Linux hosts) ===
+# =============================================================================
+# If you are reading this, the FIRST thing to know is: this is the
+# cross-build path. It is NOT the primary build path.
 #
-# Usage from repo root:
-#   bmake -C usr.sbin/ocifbsd darwin-bootstrap   # install toolchain
-#   bmake -C usr.sbin/ocifbsd darwin-build       # bootstrap + build
-#   bmake -C usr.sbin/ocifbsd darwin-test        # bootstrap + build + VM test
+# The primary, tier-1 build path is the default `bmake` invocation in a
+# FreeBSD source tree (with bsd.prog.mk, src.opts.mk, etc.). The C code
+# in usr.sbin/ocifbsd/ is FreeBSD-native: it uses jail(2), capsicum(4),
+# rctl(8), zfs(8), and other FreeBSD-specific syscalls.
+#
+# This cross-build section exists only so that developers on macOS/Linux
+# can build FreeBSD binaries from their native host. It uses
+# tools/build/make.py from a FreeBSD source tree to build the userland
+# libraries that ocifbsd depends on, then bmake to link ocifbsd against
+# them. The resulting binary will NOT run on macOS/Linux - it must be
+# deployed to a FreeBSD host.
+#
+# See tools/cross-build/README.md for the full workflow.
+# =============================================================================
+#
+# Usage (from repo root, on a macOS/Linux host):
+#   1. Bootstrap the toolchain:  ./tools/cross-build/macos.sh --install --yes
+#   2. Source the env file:      . /tmp/ocifbsd-cross-build-env
+#   3. Cross-build:              make -C usr.sbin/ocifbsd cross-build
+#   4. Cross-build + VM test:    make -C usr.sbin/ocifbsd cross-test
 #
 # All targets accept these env vars (with defaults):
 #   TARGET=amd64, TARGET_ARCH=amd64
-#   VM_HOST=freebsd-oci  (for darwin-test)
+#   VM_HOST=freebsd-oci  (for cross-test)
 #   OCIFBSD_ENV_FILE=/tmp/ocifbsd-cross-build-env
 
-darwin-bootstrap:
-	@./darwin-bootstrap.sh --install --yes
+cross-bootstrap:
+	@./tools/cross-build/macos.sh --install --yes
 
-darwin-build: darwin-bootstrap
+cross-build: cross-bootstrap
 	@. $${OCIFBSD_ENV_FILE:-/tmp/ocifbsd-cross-build-env} && \
 	echo "==> Cross-build userland libraries (this may take 5-15 min)..." && \
 	python3 $${TOOLS_DIR:-../../tools}/build/make.py \
 		TARGET=$${TARGET:-amd64} TARGET_ARCH=$${TARGET_ARCH:-amd64} \
-		-j$$(sysctl -n hw.ncpu) libraries && \
+		-j$$(sysctl -n hw.ncpu 2>/dev/null || nproc) libraries && \
 	echo "==> Build ocifbsd..." && \
 	env TARGET=$${TARGET:-amd64} TARGET_ARCH=$${TARGET_ARCH:-amd64} \
 		bmake -C $${OCIFBSD_DIR:-.} && \
@@ -84,7 +100,7 @@ darwin-build: darwin-bootstrap
 	ls -lh $${OCIFBSD_DIR:-.}/ocifbsd 2>/dev/null || true && \
 	ls -lh $${TESTS_DIR:-../../tests/usr.sbin/ocifbsd}/ocifbsd_test 2>/dev/null || true
 
-darwin-test: darwin-build
+cross-test: cross-build
 	@. $${OCIFBSD_ENV_FILE:-/tmp/ocifbsd-cross-build-env} && \
 	VM=$${VM_HOST:-freebsd-oci} && \
 	echo "==> Deploying to VM $$VM..." && \
@@ -109,17 +125,17 @@ REPO_ROOT != cd ${.CURDIR}/../.. 2>/dev/null && pwd
 help:
 	@echo "ocifbsd Makefile targets:"
 	@echo ""
-	@echo "Build (FreeBSD native):"
+	@echo "Build (FreeBSD native) -- tier-1, the primary build path:"
 	@echo "  (default)         Build ocifbsd + subdirs (BSD make required)"
 	@echo "  install           Install to \$${DESTDIR}/usr/sbin"
 	@echo "  clean             Remove build artifacts"
 	@echo ""
-	@echo "macOS host (cross-build):"
-	@echo "  darwin-bootstrap  Install toolchain via darwin-bootstrap.sh"
-	@echo "  darwin-build      Bootstrap + cross-build userland + ocifbsd + tests"
-	@echo "  darwin-test       darwin-build + deploy to VM + run kyua tests"
+	@echo "Cross-build (OPT-IN, macOS/Linux hosts only) -- see tools/cross-build/README.md:"
+	@echo "  cross-bootstrap   Install toolchain via tools/cross-build/macos.sh"
+	@echo "  cross-build       Bootstrap + cross-build userland + ocifbsd + tests"
+	@echo "  cross-test        cross-build + deploy to VM + run kyua tests"
 	@echo ""
-	@echo "Inspection:"
+	@echo "Inspection (works on any host):"
 	@echo "  help              Show this help (you are here)"
 	@echo "  info              Print build environment info"
 	@echo "  audit             Run AI slop audit (TODO/FIXME/stub markers)"
@@ -129,7 +145,7 @@ help:
 	@echo "  sources           List all OCI source files with LOC"
 	@echo "  size              Show size of source tree and key files"
 	@echo ""
-	@echo "VM management:"
+	@echo "VM management (requires FreeBSD VM with SSH access):"
 	@echo "  vm-snapshot       Take a snapshot of the FreeBSD VM"
 	@echo "  vm-restore        Restore VM to last snapshot"
 	@echo "  vm-status         Show VM status"
@@ -140,33 +156,30 @@ help:
 # Print build environment info (host, target, tools)
 info:
 	@echo "=== ocifbsd Build Environment ==="
+	@echo ""
+	@echo "--- Native build (FreeBSD, tier-1) ---"
 	@echo "Host OS:    $$(uname -s) $$(uname -r) $$(uname -m)"
+	@echo "CPUs:       $$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 'unknown')"
 	@echo "Host make:  $$(which make) ($$(make --version 2>/dev/null | head -1 || echo 'unknown'))"
 	@echo "Host bmake: $$(which bmake 2>/dev/null || echo 'NOT FOUND')"
-	@if [ -x "/opt/homebrew/opt/llvm/bin/clang" ]; then \
-		echo "Homebrew llvm: /opt/homebrew/opt/llvm/bin/clang ($$(/opt/homebrew/opt/llvm/bin/clang --version | head -1))"; \
-	elif command -v clang >/dev/null 2>&1; then \
-		echo "System clang:  $$(which clang) ($$(clang --version | head -1))"; \
+	@if command -v cc >/dev/null 2>&1; then \
+		echo "Native cc:    $$(which cc) ($$(cc --version 2>/dev/null | head -1))"; \
 	else \
-		echo "clang:         NOT FOUND"; \
+		echo "Native cc:    NOT FOUND"; \
 	fi
-	@if [ -x "/opt/homebrew/bin/lld" ]; then \
-		echo "Homebrew lld:  /opt/homebrew/bin/lld (separate package)"; \
-	elif [ -x "/opt/homebrew/opt/llvm/bin/lld" ]; then \
-		echo "Homebrew lld:  /opt/homebrew/opt/llvm/bin/lld (in llvm prefix)"; \
-	else \
-		echo "lld:           NOT FOUND (brew install lld)"; \
+	@if command -v clang >/dev/null 2>&1; then \
+		echo "Native clang: $$(which clang) ($$(clang --version 2>/dev/null | head -1))"; \
 	fi
 	@echo "Python 3:     $$(which python3 2>/dev/null || echo 'NOT FOUND')"
 	@echo ""
-	@echo "=== Cross-build env (if sourced) ==="
+	@echo "--- Cross-build env (OPT-IN, only set if you sourced tools/cross-build/macos.sh) ---"
 	@echo "XCC:          $${XCC:-not set}"
 	@echo "XLD:          $${XLD:-not set}"
 	@echo "TARGET:       $${TARGET:-not set}"
 	@echo "TARGET_ARCH:  $${TARGET_ARCH:-not set}"
 	@echo "MAKEOBJDIR:   $${MAKEOBJDIRPREFIX:-not set}"
 	@echo ""
-	@echo "=== OCI source tree ==="
+	@echo "--- OCI source tree ---"
 	@echo "Root:         ${OCIFBSD_ROOT}"
 	@echo "Source files: $$(find ${OCIFBSD_ROOT} -name '*.c' -o -name '*.h' 2>/dev/null | wc -l | tr -d ' ')"
 	@echo "Subdirs:      $$(find ${OCIFBSD_ROOT} -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
@@ -236,7 +249,7 @@ smoke:
 	@if bmake -n -C ${OCIFBSD_ROOT} >/dev/null 2>&1; then \
 		echo "  [OK] usr.sbin/ocifbsd/Makefile"; \
 	else \
-		echo "  [WARN] usr.sbin/ocifbsd/Makefile (src.opts.mk not found, expected on macOS host)"; \
+		echo "  [WARN] usr.sbin/ocifbsd/Makefile (src.opts.mk not found; this is normal on a cross-build host, not on FreeBSD)"; \
 	fi
 	@echo ""
 	@echo "--- License header coverage (SPDX OR traditional copyright) ---"
@@ -372,7 +385,11 @@ find-todos:
 
 # Test cross-build and report blockers (does not attempt full build)
 test-cross-build:
-	@echo "=== Cross-Build Diagnostic ==="
+	@echo "=== Cross-Build Diagnostic (OPT-IN) ==="
+	@echo ""
+	@echo "Note: cross-build is for macOS/Linux developers who want to build"
+	@echo "FreeBSD binaries from their native host. The primary build path is"
+	@echo "the default 'bmake -C usr.sbin/ocifbsd' on a FreeBSD host."
 	@echo ""
 	@echo "--- Required tools ---"
 	@for tool in bmake clang lld python3; do \
@@ -399,19 +416,19 @@ test-cross-build:
 	@echo "  XAS:  $${XAS:-not set}"
 	@if [ -n "$$XCC" ] && [ -n "$$XLD" ]; then \
 		echo ""; \
-		echo "  [OK] Env is set. Run: bmake -C usr.sbin/ocifbsd darwin-build"; \
+		echo "  [OK] Env is set. Run: make -C usr.sbin/ocifbsd cross-build"; \
 	else \
 		echo ""; \
-		echo "  [WARN] Env not set. Run: bmake -C usr.sbin/ocifbsd darwin-bootstrap"; \
+		echo "  [WARN] Env not set. Run: ./tools/cross-build/macos.sh --install --yes"; \
 		echo "         Or:  . /tmp/ocifbsd-cross-build-env"; \
 	fi
 	@echo ""
-	@echo "--- Known blockers ---"
+	@echo "--- Known blockers (cross-build only, none block native build) ---"
 	@echo "  1. macOS SDK header leak in lib/libgcc_eh (needs FreeBSD sysroot or VM)"
-	@echo "  2. json-c dependency (not in FreeBSD base)"
-	@echo "  3. seccomp → capsicum translation (3 files)"
+	@echo "  2. json-c dependency (not in FreeBSD base, may need pkg install)"
+	@echo "  3. seccomp → capsicum translation (3 files; deferred, see MIGRATION.md)"
 	@echo ""
-	@echo "See TROUBLESHOOTING.md for full details."
+	@echo "Native build has none of these issues. See OCI-STATUS.md for details."
 
 # Generate a release manifest (what would go in a release tarball)
 release-manifest:
@@ -468,12 +485,19 @@ check-deps:
 dev: check-deps
 	@echo ""
 	@echo "=== Developer Setup ==="
-	@if [ "$$(uname -s)" = "Darwin" ]; then \
-		echo "Detected macOS host. Running darwin-bootstrap..."; \
-		${MAKE} -C ${OCIFBSD_ROOT} darwin-bootstrap; \
+	@if [ "$$(uname -s)" = "FreeBSD" ]; then \
+		echo "Detected FreeBSD host. Native build is the default."; \
+		echo "Run: bmake -C usr.sbin/ocifbsd"; \
+	elif [ "$$(uname -s)" = "Darwin" ]; then \
+		echo "Detected macOS host. Cross-build helpers available."; \
+		echo "Run: make -C usr.sbin/ocifbsd cross-bootstrap"; \
+		echo "     (or see tools/cross-build/README.md)"; \
+	elif [ "$$(uname -s)" = "Linux" ]; then \
+		echo "Detected Linux host. Cross-build helpers available."; \
+		echo "See tools/cross-build/README.md (linux.sh is TODO)."; \
 	else \
-		echo "Non-macOS host. Skipping darwin-bootstrap."; \
-		echo "For FreeBSD build, run: bmake -C usr.sbin/ocifbsd"; \
+		echo "Unknown host: $$(uname -s)"; \
+		echo "FreeBSD is the tier-1 target. Build there if possible."; \
 	fi
 	@echo ""
 	@echo "=== Running smoke test ==="
@@ -486,7 +510,7 @@ dev: check-deps
 	@echo "  bmake -C usr.sbin/ocifbsd audit      # see AI slop markers"
 	@echo "  bmake -C usr.sbin/ocifbsd info       # see build env"
 	@echo ""
-	@echo "For FreeBSD build:"
+	@echo "For FreeBSD native build:"
 	@echo "  bmake -C usr.sbin/ocifbsd"
 	@echo ""
 	@echo "For VM testing:"
