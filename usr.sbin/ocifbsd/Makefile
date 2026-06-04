@@ -60,12 +60,6 @@ SUBDIR.${MK_TESTS}+=	tests
 # `all` target, NOT the first explicit target (which is now `cross-bootstrap`).
 .MAIN: all
 
-# Tell bmake where to find system include files (bsd.prog.mk, src.opts.mk).
-# On a standard FreeBSD install this is /usr/share/mk, but some VM/bmake
-# configurations leave .PATH.sys empty. Setting it explicitly here makes
-# the build work in any environment.
-.PATH.sys: /usr/share/mk
-
 # Tell bmake where to find .c files in subdirectories.
 # SRCS contains paths like 'src/container.c' — bmake needs .PATH to resolve
 # them when generating the .o -> .c dependency rules.
@@ -789,10 +783,10 @@ banner:
 	@echo "  └─────────────────────────────────────────────────────────────┘"
 	@echo ""
 
-.if exists(src.opts.mk)
-.include <src.opts.mk>
+.if exists(/usr/share/mk/src.opts.mk)
+.include "/usr/share/mk/src.opts.mk"
 .endif
 
-.if exists(bsd.prog.mk)
-.include <bsd.prog.mk>
+.if exists(/usr/share/mk/bsd.prog.mk)
+.include "/usr/share/mk/bsd.prog.mk"
 .endif
