@@ -344,11 +344,12 @@ tools/cross-build/README.md".
 The default `bmake` target is unchanged — it's the FreeBSD native build.
 No new env vars required for native.
 
-### 6.2 README.md updates 🔄 IN PROGRESS
+### 6.2 README.md updates ✅ DONE
 
-The "Quick Start" section currently leads with `cd usr.sbin/ocifbsd && make`.
-That stays. A new section §6 "Building from macOS or Linux" will appear at the
-bottom with a clear cross-reference to `tools/cross-build/README.md`.
+The "Quick Start" section now leads with explicit `bmake` invocation on a
+FreeBSD host (no env vars, no cross-toolchain). The trailing section "Building
+from macOS or Linux (cross-build — opt-in)" explicitly says it is NOT the
+primary build path and points to `tools/cross-build/README.md` for details.
 
 ### 6.3 `info` target updates
 

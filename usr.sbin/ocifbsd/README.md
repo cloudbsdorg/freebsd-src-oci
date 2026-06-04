@@ -16,11 +16,24 @@
 
 ## Quick Start
 
-### Build
+### Build (FreeBSD native — tier-1, the primary build path)
 
 ```bash
-cd usr.sbin/ocifbsd
-make
+# On a FreeBSD host with /usr/src and /usr/obj available
+cd /usr/src/usr.sbin/ocifbsd    # if you have the source tree
+# OR
+cd usr.sbin/ocifbsd            # if you have a standalone clone
+bmake
+```
+
+That's it. The default `bmake` target builds `ocifbsd` and all 15 subdir
+modules. No environment variables required, no cross-toolchain, no
+sysroot. This is the build path that produces the binary that actually
+runs on FreeBSD.
+
+```bash
+sudo bmake install              # installs /usr/sbin/ocifbsd
+sudo bmake install-man          # installs /usr/share/man/man8/ocifbsd.8
 ```
 
 ### Run a Container
@@ -196,3 +209,34 @@ make test
 ## License
 
 This software is provided under the BSD 2-Clause License. See the source file headers for details.
+
+## Building from macOS or Linux (cross-build — opt-in)
+
+`ocifbsd` is a FreeBSD-native runtime. It uses `jail(2)`, `capsicum(4)`,
+`rctl(8)`, `zfs(8)`, and other FreeBSD-specific syscalls that do not exist
+on macOS or Linux. **You cannot build `ocifbsd` as a native binary on
+macOS or Linux** — the C code will not compile.
+
+If you are on a macOS or Linux host and want to cross-build FreeBSD
+binaries from there, see [`tools/cross-build/README.md`](tools/cross-build/README.md).
+This is an opt-in helper for developers on non-FreeBSD workstations; it is
+NOT the primary build path and it produces binaries that will not run on
+macOS/Linux — they must be deployed to a FreeBSD host to run.
+
+The short version:
+
+```sh
+# On macOS, with Homebrew installed:
+git clone git@github.com:cloudbsdorg/freebsd-src-oci.git
+cd freebsd-src-oci
+git checkout feature/oci-bootstrap
+./tools/cross-build/macos.sh --install --yes
+. /tmp/ocifbsd-cross-build-env
+make -C usr.sbin/ocifbsd cross-build
+```
+
+The resulting `usr.sbin/ocifbsd/ocifbsd` is a FreeBSD amd64 binary. Deploy
+it with `scp` to a FreeBSD host.
+
+If you are doing a release build, do it on FreeBSD native. The cross-build
+path is for development iteration only.
