@@ -14,6 +14,31 @@ SRCS=	\
 	src/hooks.c \
 	src/utils.c
 
+# === Include src.opts.mk BEFORE any SUBDIR.${MK_FOO} usage ===
+# bmake processes the Makefile top-to-bottom. The SUBDIR.${MK_TESTS}
+# conditional below requires MK_TESTS to be defined (via src.opts.mk).
+# If src.opts.mk is included after the conditional, the variable is
+# undefined and bsd.subdir.mk errors out with 'Found variable SUBDIR.'.
+#
+# Try standard locations:
+#   - /usr/src/share/mk/src.opts.mk  (FreeBSD with /usr/src)
+#   - /usr/share/mk/src.opts.mk      (FreeBSD with src.opts.mk installed)
+#   - fallback MK_TESTS=no           (minimal FreeBSD without src.opts.mk)
+_OCIFBSD_SRC_OPTS_INCLUDED=0
+.if exists(/usr/src/share/mk/src.opts.mk)
+.include "/usr/src/share/mk/src.opts.mk"
+_OCIFBSD_SRC_OPTS_INCLUDED=1
+.endif
+.if !${_OCIFBSD_SRC_OPTS_INCLUDED} && exists(/usr/share/mk/src.opts.mk)
+.include "/usr/share/mk/src.opts.mk"
+_OCIFBSD_SRC_OPTS_INCLUDED=1
+.endif
+.if !${_OCIFBSD_SRC_OPTS_INCLUDED}
+# Minimal FreeBSD without /usr/src and without src.opts.mk. Define
+# only the knobs we need; the rest get their bsd.prog.mk defaults.
+MK_TESTS?=	no
+.endif
+
 # Module subdirectories
 SUBDIR+=	api
 SUBDIR+=	cert
@@ -795,29 +820,6 @@ banner:
 	@echo "  │                                                             │"
 	@echo "  └─────────────────────────────────────────────────────────────┘"
 	@echo ""
-
-# Try to include src.opts.mk from standard locations.
-# On a FreeBSD install with /usr/src present, it's at /usr/src/share/mk/.
-# On a minimal install (no /usr/src), it may be at /usr/share/mk/ or
-# absent entirely. If absent, we define the MK_* variables we need
-# below (currently only MK_TESTS) so the build still works.
-_OCIFBSD_SRC_OPTS_INCLUDED=0
-.if exists(/usr/src/share/mk/src.opts.mk)
-.include "/usr/src/share/mk/src.opts.mk"
-_OCIFBSD_SRC_OPTS_INCLUDED=1
-.endif
-.if !${_OCIFBSD_SRC_OPTS_INCLUDED} && exists(/usr/share/mk/src.opts.mk)
-.include "/usr/share/mk/src.opts.mk"
-_OCIFBSD_SRC_OPTS_INCLUDED=1
-.endif
-
-.if !${_OCIFBSD_SRC_OPTS_INCLUDED}
-# src.opts.mk not found — define what we need for a minimal build.
-# The FreeBSD base system doesn't ship src.opts.mk without /usr/src.
-# For a standalone build, this is fine; we don't need the full set
-# of MK_* knobs.
-MK_TESTS?=	no
-.endif
 
 .if exists(/usr/share/mk/bsd.prog.mk)
 .include "/usr/share/mk/bsd.prog.mk"
