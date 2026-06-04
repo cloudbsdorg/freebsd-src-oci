@@ -50,6 +50,13 @@ LIBADD=	\
 HAS_TESTS=
 SUBDIR.${MK_TESTS}+=	tests
 
+# === Default target: FreeBSD native build ===
+# bmake uses the FIRST explicit target as the default. We put `all` first
+# so that a bare `bmake` invocation builds the native ocifbsd binary, not
+# the cross-build helpers below. The cross-* targets are opt-in and must
+# be invoked explicitly (`bmake cross-build`).
+all: ${PROG}
+
 # === Cross-build (OPT-IN, for macOS/Linux hosts) ===
 # =============================================================================
 # If you are reading this, the FIRST thing to know is: this is the
