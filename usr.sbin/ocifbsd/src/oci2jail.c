@@ -54,107 +54,107 @@
  */
 
 static char *
-json_get_string(struct json_value *val, const char *key)
+json_get_string(struct json_object *val, const char *key)
 {
 	struct json_object *obj;
-	struct json_string *s;
+	struct json_object *s;
 
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
 
-	obj = json_value_object(val);
+	obj = (val);
 	if (obj == NULL)
 		return (NULL);
 
-	val = json_object_property_value(obj, key);
-	if (val == NULL || val->type != JSON_TYPE_STRING)
+	val = json_object_object_get(obj, key);
+	if (val == NULL || json_object_get_type(val) != json_type_string)
 		return (NULL);
 
-	s = json_value_string(val);
-	return (strdup(s->string));
+	s = json_object_get_string(val);
+	return (strdup(json_object_get_string(s)));
 }
 
 static int
-json_get_bool(struct json_value *val, const char *key, bool defval)
+json_get_bool(struct json_object *val, const char *key, bool defval)
 {
 	struct json_object *obj;
-	struct json_bool *b;
+	struct json_object *b;
 
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (defval);
 
-	obj = json_value_object(val);
+	obj = (val);
 	if (obj == NULL)
 		return (defval);
 
-	val = json_object_property_value(obj, key);
-	if (val == NULL || val->type != JSON_TYPE_BOOL)
+	val = json_object_object_get(obj, key);
+	if (val == NULL || json_object_get_type(val) != json_type_boolean)
 		return (defval);
 
-	b = json_value_bool(val);
-	return (b->bool_value ? 1 : 0);
+	b = json_object_get_boolean(val);
+	return (json_object_get_boolean(b) ? 1 : 0);
 }
 
 static int
-json_get_int(struct json_value *val, const char *key, int defval)
+json_get_int(struct json_object *val, const char *key, int defval)
 {
 	struct json_object *obj;
-	struct json_number *n;
+	struct json_object *n;
 
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (defval);
 
-	obj = json_value_object(val);
+	obj = (val);
 	if (obj == NULL)
 		return (defval);
 
-	val = json_object_property_value(obj, key);
-	if (val == NULL || val->type != JSON_TYPE_NUMBER)
+	val = json_object_object_get(obj, key);
+	if (val == NULL || json_object_get_type(val) != json_type_int)
 		return (defval);
 
-	n = json_value_number(val);
-	return ((int)n->number);
+	n = json_object_get_int(val);
+	return ((int)json_object_get_int(n));
 }
 
 static char **
-json_get_string_array(struct json_value *val, const char *key, int *nitems)
+json_get_string_array(struct json_object *val, const char *key, int *nitems)
 {
 	struct json_object *obj;
-	struct json_array *arr;
-	struct json_value *elem;
-	struct json_string *s;
+	struct json_object *arr;
+	struct json_object *elem;
+	struct json_object *s;
 	char **result;
 	size_t i;
 
 	*nitems = 0;
 
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
 
-	obj = json_value_object(val);
+	obj = (val);
 	if (obj == NULL)
 		return (NULL);
 
-	val = json_object_property_value(obj, key);
-	if (val == NULL || val->type != JSON_TYPE_ARRAY)
+	val = json_object_object_get(obj, key);
+	if (val == NULL || json_object_get_type(val) != json_type_array)
 		return (NULL);
 
-	arr = json_value_array(val);
-	result = malloc((arr->length + 1) * sizeof(char *));
+	arr = (val);
+	result = malloc((json_object_array_length(arr) + 1) * sizeof(char *));
 	if (result == NULL)
 		return (NULL);
 
-	for (i = 0; i < arr->length; i++) {
-		elem = arr->values[i];
-		if (elem->type == JSON_TYPE_STRING) {
-			s = json_value_string(elem);
-			result[i] = strdup(s->string);
+	for (i = 0; i < json_object_array_length(arr); i++) {
+		elem = json_object_array_get_idx(arr, i);
+		if (json_object_get_type(elem) == json_type_string) {
+			s = json_object_get_string(elem);
+			result[i] = strdup(json_object_get_string(s));
 		} else {
 			result[i] = NULL;
 		}
 	}
-	result[arr->length] = NULL;
-	*nitems = (int)arr->length;
+	result[json_object_array_length(arr)] = NULL;
+	*nitems = (int)json_object_array_length(arr);
 
 	return (result);
 }
@@ -163,15 +163,15 @@ json_get_string_array(struct json_value *val, const char *key, int *nitems)
  * Parse FreeBSD-specific extension from OCI config
  */
 static struct oci_freebsd *
-parse_freebsd_ext(struct json_value *val)
+parse_freebsd_ext(struct json_object *val)
 {
 	struct oci_freebsd *fbsd;
 	struct json_object *obj;
 
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
 
-	obj = json_value_object(val);
+	obj = (val);
 	if (obj == NULL)
 		return (NULL);
 
@@ -194,48 +194,48 @@ parse_freebsd_ext(struct json_value *val)
  * Parse OCI mounts array
  */
 static struct oci_mount *
-parse_mounts(struct json_value *val, int *n_mounts)
+parse_mounts(struct json_object *val, int *n_mounts)
 {
 	struct json_object *obj;
-	struct json_array *arr;
-	struct json_value *elem, *dest_val;
-	struct json_string *s;
+	struct json_object *arr;
+	struct json_object *elem, *dest_val;
+	struct json_object *s;
 	struct oci_mount *mounts;
 	struct oci_mount *m;
 	size_t i;
 
 	*n_mounts = 0;
 
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
 
-	obj = json_value_object(val);
+	obj = (val);
 	if (obj == NULL)
 		return (NULL);
 
-	val = json_object_property_value(obj, "mounts");
-	if (val == NULL || val->type != JSON_TYPE_ARRAY)
+	val = json_object_object_get(obj, "mounts");
+	if (val == NULL || json_object_get_type(val) != json_type_array)
 		return (NULL);
 
-	arr = json_value_array(val);
-	mounts = calloc(arr->length + 1, sizeof(*mounts));
+	arr = (val);
+	mounts = calloc(json_object_array_length(arr) + 1, sizeof(*mounts));
 	if (mounts == NULL)
 		return (NULL);
 
-	for (i = 0; i < arr->length; i++) {
+	for (i = 0; i < json_object_array_length(arr); i++) {
 		m = &mounts[i];
-		elem = arr->values[i];
-		if (elem->type != JSON_TYPE_OBJECT)
+		elem = json_object_array_get_idx(arr, i);
+		if (json_object_get_type(elem) != json_type_object)
 			continue;
 
-		obj = json_value_object(elem);
+		obj = (elem);
 		m->source = json_get_string(elem, "source");
 		m->destination = json_get_string(elem, "destination");
-		m->type = json_get_string(elem, "type");
+		json_object_get_type(m) = json_get_string(elem, "type");
 		m->options = json_get_string(elem, "options");
 		m->readonly = json_get_bool(elem, "readonly", false);
 	}
-	*n_mounts = (int)arr->length;
+	*n_mounts = (int)json_object_array_length(arr);
 
 	return (mounts);
 }
@@ -244,24 +244,24 @@ parse_mounts(struct json_value *val, int *n_mounts)
  * Parse OCI hooks
  */
 static struct oci_hooks *
-parse_hooks(struct json_value *val)
+parse_hooks(struct json_object *val)
 {
 	struct oci_hooks *hooks;
 	struct json_object *obj;
-	struct json_array *arr;
-	struct json_value *elem;
+	struct json_object *arr;
+	struct json_object *elem;
 	struct oci_hook **h;
 	size_t i;
 
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
 
-	obj = json_value_object(val);
+	obj = (val);
 	if (obj == NULL)
 		return (NULL);
 
-	val = json_object_property_value(obj, "hooks");
-	if (val == NULL || val->type != JSON_TYPE_OBJECT)
+	val = json_object_object_get(obj, "hooks");
+	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
 
 	hooks = calloc(1, sizeof(*hooks));
@@ -269,16 +269,16 @@ parse_hooks(struct json_value *val)
 		return (NULL);
 
 #define PARSE_HOOK_ARRAY(hook_type, field, count_field) do {			\
-	val = json_object_property_value(val, hook_type);			\
-	if (val != NULL && val->type == JSON_TYPE_ARRAY) {			\
-		arr = json_value_array(val);					\
-		hooks->count_field = (int)arr->length;			\
-		hooks->field = calloc(arr->length + 1, sizeof(*h));	\
+	val = json_object_object_get(val, hook_type);			\
+	if (val != NULL && json_object_get_type(val) == json_type_array) {			\
+		arr = (val);					\
+		hooks->count_field = (int)json_object_array_length(arr);			\
+		hooks->field = calloc(json_object_array_length(arr) + 1, sizeof(*h));	\
 		if (hooks->field == NULL)					\
 			goto cleanup;						\
-		for (i = 0; i < arr->length; i++) {				\
-			elem = arr->values[i];					\
-			if (elem->type != JSON_TYPE_OBJECT)			\
+		for (i = 0; i < json_object_array_length(arr); i++) {				\
+			elem = json_object_array_get_idx(arr, i);					\
+			if (json_object_get_type(elem) != json_type_object)			\
 				continue;					\
 			h = &hooks->field[i];					\
 			*h = calloc(1, sizeof(**h));				\
@@ -320,7 +320,7 @@ struct oci_runtime_spec *
 oci_parse_config(const char *config_path)
 {
 	struct oci_runtime_spec *spec;
-	struct json_value *root;
+	struct json_object *root;
 	struct json_object *obj;
 	char *json_str;
 	size_t json_len;
@@ -360,26 +360,26 @@ oci_parse_config(const char *config_path)
 	root = json_parse_string(json_str);
 	free(json_str);
 
-	if (root == NULL || root->type != JSON_TYPE_OBJECT) {
+	if (root == NULL || json_object_get_type(root) != json_type_object) {
 		if (root)
-			json_value_free(root);
+			json_object_put(root);
 		errno = EINVAL;
 		return (NULL);
 	}
 
-	obj = json_value_object(root);
+	obj = (root);
 
 	/* Allocate spec */
 	spec = calloc(1, sizeof(*spec));
 	if (spec == NULL) {
-		json_value_free(root);
+		json_object_put(root);
 		return (NULL);
 	}
 
 	/* Parse root */
-	struct json_value *root_val = json_object_property_value(obj, "root");
-	if (root_val != NULL && root_val->type == JSON_TYPE_OBJECT) {
-		struct json_object *root_obj = json_value_object(root_val);
+	struct json_object *root_val = json_object_object_get(obj, "root");
+	if (root_val != NULL && json_object_get_type(root_val) == json_type_object) {
+		struct json_object *root_obj = (root_val);
 		spec->root.path = json_get_string(root_val, "path");
 		spec->root.readonly = json_get_bool(root_val, "readonly", false);
 	} else {
@@ -403,8 +403,8 @@ oci_parse_config(const char *config_path)
 	}
 
 	/* Parse process */
-	struct json_value *proc_val = json_object_property_value(obj, "process");
-	if (proc_val != NULL && proc_val->type == JSON_TYPE_OBJECT) {
+	struct json_object *proc_val = json_object_object_get(obj, "process");
+	if (proc_val != NULL && json_object_get_type(proc_val) == json_type_object) {
 		spec->process.cwd = json_get_string(proc_val, "cwd");
 		spec->process.tty = json_get_bool(proc_val, "tty", 0);
 		spec->process.terminal = json_get_bool(proc_val, "terminal", 0);
@@ -427,10 +427,10 @@ oci_parse_config(const char *config_path)
 	spec->hooks = parse_hooks(root);
 
 	/* Parse FreeBSD extensions */
-	struct json_value *fbsd_val = json_object_property_value(obj, "freebsd");
+	struct json_object *fbsd_val = json_object_object_get(obj, "freebsd");
 	spec->freebsd = parse_freebsd_ext(fbsd_val);
 
-	json_value_free(root);
+	json_object_put(root);
 
 	return (spec);
 }

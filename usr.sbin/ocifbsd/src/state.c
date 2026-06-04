@@ -175,7 +175,7 @@ state_load(const char *id)
 	char path[PATH_MAX];
 	char *json_str;
 	size_t json_len;
-	struct json_value *root;
+	struct json_object *root;
 	struct json_object *obj;
 	struct ocifbsd_container *c;
 
@@ -193,19 +193,19 @@ state_load(const char *id)
 	root = json_parse_string(json_str);
 	free(json_str);
 
-	if (root == NULL || root->type != JSON_TYPE_OBJECT) {
+	if (root == NULL || json_object_get_type(root) != json_type_object) {
 		if (root)
-			json_value_free(root);
+			json_object_put(root);
 		errno = EINVAL;
 		return (NULL);
 	}
 
-	obj = json_value_object(root);
+	obj = (root);
 
 	/* Allocate container */
 	c = calloc(1, sizeof(*c));
 	if (c == NULL) {
-		json_value_free(root);
+		json_object_put(root);
 		errno = ENOMEM;
 		return (NULL);
 	}
@@ -217,20 +217,20 @@ state_load(const char *id)
 } while (0)
 
 #define GET_INT(field, json_key) do { \
-	struct json_object *o = json_value_object(root); \
-	struct json_value *v = json_object_property_value(o, json_key); \
-	if (v && v->type == JSON_TYPE_NUMBER) { \
-		struct json_number *n = json_value_number(v); \
-		c->field = (int)n->number; \
+	struct json_object *o = (root); \
+	struct json_object *v = json_object_object_get(o, json_key); \
+	if (v && json_object_get_type(v) == json_type_int) { \
+		struct json_object *n = json_object_get_int(v); \
+		c->field = (int)json_object_get_int(n); \
 	} \
 } while (0)
 
 #define GET_INT64(field, json_key) do { \
-	struct json_object *o = json_value_object(root); \
-	struct json_value *v = json_object_property_value(o, json_key); \
-	if (v && v->type == JSON_TYPE_NUMBER) { \
-		struct json_number *n = json_value_number(v); \
-		c->field = (int64_t)n->number; \
+	struct json_object *o = (root); \
+	struct json_object *v = json_object_object_get(o, json_key); \
+	if (v && json_object_get_type(v) == json_type_int) { \
+		struct json_object *n = json_object_get_int(v); \
+		c->field = (int64_t)json_object_get_int(n); \
 	} \
 } while (0)
 
@@ -249,7 +249,7 @@ state_load(const char *id)
 	/* Parse state string */
 	GET_STRING(state_str, "state");
 
-	json_value_free(root);
+	json_object_put(root);
 
 	return (c);
 }
