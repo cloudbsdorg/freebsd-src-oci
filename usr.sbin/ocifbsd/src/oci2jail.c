@@ -222,7 +222,7 @@ parse_mounts(struct json_object *val, int *n_mounts)
 		obj = (elem);
 		m->source = json_get_string(elem, "source");
 		m->destination = json_get_string(elem, "destination");
-		json_object_get_type(m) = json_get_string(elem, "type");
+		m->type = json_get_string(elem, "type");
 		m->options = json_get_string(elem, "options");
 		m->readonly = json_get_bool(elem, "readonly", false);
 	}
@@ -348,7 +348,7 @@ oci_parse_config(const char *config_path)
 	fclose(f);
 
 	/* Parse JSON */
-	root = json_parse_string(json_str);
+	root = json_tokener_parse(json_str);
 	free(json_str);
 
 	if (root == NULL || json_object_get_type(root) != json_type_object) {
@@ -370,7 +370,6 @@ oci_parse_config(const char *config_path)
 	/* Parse root */
 	struct json_object *root_val = json_object_object_get(obj, "root");
 	if (root_val != NULL && json_object_get_type(root_val) == json_type_object) {
-		struct json_object *root_obj = (root_val);
 		spec->root.path = json_get_string(root_val, "path");
 		spec->root.readonly = json_get_bool(root_val, "readonly", false);
 	} else {
@@ -382,8 +381,12 @@ oci_parse_config(const char *config_path)
 			/* Go up from config.json */
 			p = strrchr(dir, '/');
 			if (p) {
+				size_t len;
 				*p = '\0';
-				asprintf(&spec->root.path, "%s/rootfs", p + 1);
+				len = strlen(p + 1) + strlen("/rootfs") + 1;
+				spec->root.path = malloc(len);
+				if (spec->root.path != NULL)
+					snprintf(spec->root.path, len, "%s/rootfs", p + 1);
 			} else {
 				spec->root.path = strdup("rootfs");
 			}
