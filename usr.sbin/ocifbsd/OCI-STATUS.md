@@ -4,7 +4,7 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-04 22:33 UTC (17:33 CDT) — live status, third update this session
+> **Last updated**: 2026-06-04 23:26 UTC (18:26 CDT) — live status, **MAJOR MILESTONE**
 > **Branch**: `feature/oci-bootstrap`
 > **Owner**: REVYTECH, Inc.
 > **Target**: FreeBSD 16.0-CURRENT (native, tier-1)
@@ -370,6 +370,75 @@ orphan-specifier):
 
 ### Build infrastructure (updated mid-session)
 
+**🎉 MAIN ocifbsd BINARY BUILT AND RUNS!** Verified on VM at
+commit `83323e196f7`. The full output:
+
+```
+$ file usr.sbin/ocifbsd/ocifbsd
+ocifbsd: ELF 64-bit LSB pie executable, x86-64, version 1 (FreeBSD),
+         dynamically linked, for FreeBSD 16.0 (1600018)
+
+$ ./ocifbsd --help
+Usage: ./ocifbsd [OPTIONS] COMMAND [ARGS...]
+FreeBSD Native OCI Runtime
+Commands: create start kill delete state list inspect run
+```
+
+All 6 SRCS files compile clean under FreeBSD strict -Werror after
+this session's fixes:
+- `ocifbsd.c` — variable shadowing, missing <strings.h>, missing
+  <pthread.h>, missing `static` on `opt` struct.
+- `src/container.c` — added <pthread.h>, <libutil.h>, `struct
+  oci_runtime_spec *spec` field, replaced `usleep`/`asprintf`,
+  added `extern void setproctitle`, `extern int putenv`.
+- `src/oci2jail.c` — ported from json-c 0.10-0.12 API to 0.13+ API
+  (`struct json_value` → `struct json_object`, etc.), fixed shift
+  count, fixed `jailparam_import_raw` 3-arg form.
+- `src/state.c` — ported to new json-c API, renamed `state_lock`
+  mutex to `state_mutex`, rewrote `GET_*` macros, added
+  `__attribute__((no_thread_safety_analysis))`.
+- `src/hooks.c` — removed const from `hooks_run` signature
+  (C99 aliasing loophole), removed orphan `int` line, removed
+  header declaration (now file-local static).
+- `src/utils.c` — added <stdarg.h>, replaced removed
+  `_PATH_ROOT` with stack-allocated `char root[] = "/"`.
+
+Linker: added `md` to LIBADD for FreeBSD 16's moved-out
+SHA256_Data symbol (was in libc, now in libmd).
+
+### Subdir status: 5 of 16 SUBDIRs are broken (AI-generated stubs)
+
+After the main binary links, build moves to the SUBDIR phase
+(15 module executables: ocifbsd-cert, ocifbsd-export, etc.). The
+following 5 subdirs have syntactically broken Makefiles (Klara-AI
+generated, never tested or completed):
+
+- `cert/Makefile` — `<include "Makefile.inc">` (bad BSD make
+  syntax; should be `.include`), references missing Makefile.inc,
+  has `json` in LIBADD (should be in LDADD since json-c is a
+  port, not in base).
+- `export/Makefile` — same issues.
+- `gc/Makefile` — same issues.
+- `logd/Makefile` — same issues + references missing
+  `${SRCDIR}/metrics` include path.
+- `pam/Makefile` — same issues + uses `<bsd.lib.mk>` but
+  configures as a program (PROG=).
+
+**Pragmatic decision**: Commented out these 5 SUBDIR entries
+temporarily so the build can complete end-to-end. The 5
+subdir Makefiles need a separate refactor PR — they're stubs
+that need:
+1. Bad `<include>` → `.include` (sed mechanical fix).
+2. Missing `Makefile.inc` (need to create with shared SRCDIR
+   definition).
+3. Move `json` from `LIBADD` to `LDADD` with CFLAGS/LDFLAGS
+   paths (same pattern as main Makefile).
+4. Fix `${SRCDIR}/tpm|metrics|security-daemon` references.
+
+Tracked as deferred work, not blocking the bootstrap.
+
+### Build infrastructure (updated mid-session)
+
 **`make` vs `bmake` clarification**: On FreeBSD, `/usr/bin/make` IS
 bmake (BSD make). The `bmake` port is only needed on macOS/Linux
 hosts for cross-build. As of this update, the Makefile has been
@@ -671,6 +740,11 @@ branch, and the full `.omo/drafts/` documentation tree.
 
 | Timestamp (UTC)      | Author    | Change                                                              |
 | -------------------- | --------- | ------------------------------------------------------------------- |
+| 2026-06-04 23:26:24 | mlapointe | **MAJOR MILESTONE**: main ocifbsd binary built (50,712 bytes) and runs (`./ocifbsd --help` shows commands). Fixed SHA256_Data link (added libmd). Subdir phase hit 5 broken Makefiles (cert/export/gc/logd/pam — AI-generated stubs with bad `<include>` syntax + missing Makefile.inc). Pragmatically commented out 5 SUBDIR entries to get end-to-end build. Tracked as deferred work. | 83323e196f7
+| 2026-06-04 23:15    | mlapointe | Fixed utils.c cast-qual: replaced `(char *)"/"` with stack `char root[] = "/"`. | f54123407dc
+| 2026-06-04 23:08    | mlapointe | utils.c: added <stdarg.h>, replaced removed _PATH_ROOT (FreeBSD 16 dropped it from paths.h) with `"/"`. | 429404b5704
+| 2026-06-04 23:00    | mlapointe | hooks.c: removed const from `hooks_run` (C99 aliasing loophole forbids T**→const T**). | 17d7ab498ae
+| 2026-06-04 22:55    | mlapointe | container.c: added local `extern int putenv(char *)` (gated on `__XSI_VISIBLE` in stdlib.h). Makefile: added `-Wno-error=visibility` for FreeBSD 16 signal.h system-header warning. | 3dae26286c6
 | 2026-06-04 22:33:17 | mlapointe | Live status update: build progressed through ocifbsd.c, container.c, oci2jail.c, state.c, utils.c all clean. hooks.c hit 8 const-qual errors (over-aggressive const fix from earlier); fix in progress. Added header timestamp + UTC timestamps in change log. | (in flight)
 | 2026-06-04 ~22:00   | mlapointe | Live update: build progressed through 5/6 SRCS (d07cfbd32f5 push). hooks.c 8 const-qual errors detailed in §5. | b5a0a7bbf93
 | 2026-06-04 ~21:30   | mlapointe | Verified `make` (BSD make) works on FreeBSD VM; `make -V .MAKE.VERSION` returns 20260508. Updated all bmake→make for FreeBSD native; kept bmake for cross-build. README.md cross-build example fixed (was `make`, now `bmake`). Makefile GNU-make guard added; info target uses `.MAKE.VERSION`; removed redundant `Host bmake` line | d07cfbd32f5

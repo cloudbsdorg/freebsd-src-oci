@@ -53,18 +53,24 @@ MK_TESTS?=	no
 
 # Module subdirectories
 SUBDIR+=	api
-SUBDIR+=	cert
+# cert: AI-generated stub, Makefile uses invalid <include> syntax and
+# references missing Makefile.inc. Deferred to follow-up PR.
+#SUBDIR+=	cert
 SUBDIR+=	clustering
 SUBDIR+=	convert
-SUBDIR+=	export
-SUBDIR+=	gc
+# export: same AI-stub issue as cert. Deferred.
+#SUBDIR+=	export
+# gc: same AI-stub issue. Deferred.
+#SUBDIR+=	gc
 SUBDIR+=	image
-SUBDIR+=	logd
+# logd: same AI-stub issue. Deferred.
+#SUBDIR+=	logd
 SUBDIR+=	metrics
 SUBDIR+=	namespace
 SUBDIR+=	network
 SUBDIR+=	orchestration
-SUBDIR+=	pam
+# pam: same AI-stub issue. Deferred.
+#SUBDIR+=	pam
 SUBDIR+=	security
 SUBDIR+=	security-daemon
 SUBDIR+=	tpm
