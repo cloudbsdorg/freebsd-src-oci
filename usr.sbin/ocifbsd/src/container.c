@@ -473,7 +473,8 @@ container_start(struct ocifbsd_container *c)
 			execvp(c->spec->process.args[0], c->spec->process.args);
 		} else {
 			/* Default: run sh */
-			char *sh_args[] = { (char *)"/bin/sh", NULL };
+			char sh[] = "/bin/sh";
+			char *sh_args[] = { sh, NULL };
 			execvp("/bin/sh", sh_args);
 		}
 
