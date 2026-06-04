@@ -307,7 +307,7 @@ docker_compose_convert_v2(const char *compose, char **output,
 		    "%sservices:\n"
 		    "  - name: %s\n"
 		    "    image: %s\n"
-		    "%s%s%s%s%s%s%s\n",
+		    "%s%s%s%s%s%s%s%s\n",
 		    result,
 		    services[i],
 		    image ? image : services[i],
