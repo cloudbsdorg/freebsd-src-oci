@@ -157,7 +157,7 @@ cleanup:
  * Run a set of hooks
  */
 static int
-hooks_run(const struct oci_hook **hooks, int nhooks, const char *state_file)
+hooks_run(struct oci_hook **hooks, int nhooks, const char *state_file)
 {
 	int i;
 	int ret = 0;
@@ -170,7 +170,6 @@ hooks_run(const struct oci_hook **hooks, int nhooks, const char *state_file)
 		if (hook_ret != 0) {
 			fprintf(stderr, "warning: hook %d failed with code %d\n",
 			    i, hook_ret);
-			/* Continue running other hooks, but track failure */
 			if (ret == 0)
 				ret = hook_ret;
 		}
