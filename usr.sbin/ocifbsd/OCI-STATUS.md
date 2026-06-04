@@ -4,7 +4,7 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-04 (mid-session, second update — corrected long gap)
+> **Last updated**: 2026-06-04 (mid-session, third update — build progress)
 > **Branch**: `feature/oci-bootstrap`
 > **Owner**: REVYTECH, Inc.
 > **Target**: FreeBSD 16.0-CURRENT (native, tier-1)
@@ -326,6 +326,43 @@ Completed in one session; 7 commits, all pushed.
 | `cert/cert.c` audit (1077 lines)        | Not yet audited                              | Pending                           |
 | `auth.c` audit (1181 lines)             | Partially audited (JWT secret fixed)          | `.omo/drafts/SECURITY.md`         |
 
+### Build progress update (live, mid-build)
+
+**What compiled clean** (under FreeBSD strict `-Werror -Wall -Wextra
+-Wcast-qual -Wthread-safety -Wmissing-variable-declarations ...`):
+- `ocifbsd.c` — clean after fixing variable shadowing, missing
+  `<strings.h>`, missing `<pthread.h>`, missing `static` on `opt` struct.
+- `src/container.c` — clean after adding `<pthread.h>`, `<libutil.h>`,
+  `struct oci_runtime_spec *spec` field, replacing `usleep`/`asprintf`,
+  adding `extern void setproctitle`.
+- `src/oci2jail.c` — clean after porting from json-c 0.10-0.12 API to
+  0.13+ API (`struct json_value` → `struct json_object`, etc.).
+- `src/state.c` — clean after porting to new json-c API, renaming
+  `state_lock` mutex to `state_mutex` (collision with `int state_lock()`),
+  rewriting `GET_*` macros, adding `__attribute__((no_thread_safety_analysis))`
+  on lock/unlock.
+- `src/utils.c` — pre-existing, was already clean.
+
+**What just broke** (8 errors, 6 `-Wcast-qual` + 1 static-decl + 1
+orphan-specifier):
+- `src/hooks.c` — my earlier const-qual "fix" was over-aggressive:
+  - Left an orphan `int` line above `static int` (my sed edit
+    inserted both instead of replacing).
+  - Used `const struct oci_hook * const *` (double-const) which
+    C forbids implicit conversion to from `struct oci_hook **`.
+  - Declared hooks_run `static` but the header still has it `extern`.
+
+**Fix** (in progress):
+1. Remove orphan `int` line.
+2. Change `static int hooks_run(const struct oci_hook * const *hooks, ...)`
+   to `static int hooks_run(const struct oci_hook **hooks, ...)` —
+   match the header's loose signature so implicit `T**` → `const T**`
+   (single-level const add) works at call sites.
+3. Remove the 3x local-var blocks (`const struct oci_hook *const *prestart = ...`)
+   since the loose signature doesn't need them.
+4. Remove `int hooks_run(...)` from `include/ocifbsd.h` since it's now
+   file-local static.
+
 ### Build infrastructure (updated mid-session)
 
 **`make` vs `bmake` clarification**: On FreeBSD, `/usr/bin/make` IS
@@ -352,7 +389,7 @@ updated so that:
 | `make -C usr.sbin/ocifbsd help`           | ✅ Working |
 | `make -C usr.sbin/ocifbsd audit`          | ✅ Working |
 | `make -C usr.sbin/ocifbsd info`           | ✅ Working |
-| `make -C usr.sbin/ocifbsd` (native build) | 🔄 **IN PROGRESS** — all 5 SRCS compile clean (ocifbsd.c, src/container.c, src/oci2jail.c, src/state.c, src/hooks.c) under FreeBSD strict `-Werror`. Link step pending. |
+| `make -C usr.sbin/ocifbsd` (native build) | 🔄 **IN PROGRESS** — ocifbsd.c, container.c, oci2jail.c, state.c all compile clean under FreeBSD strict `-Werror`. **hooks.c**: 8 const-qual errors from my over-constification (fix in progress). Link step pending after hooks.c compiles. |
 | `make -C usr.sbin/ocifbsd install`        | ⏳ Pending native build |
 | `bmake -C usr.sbin/ocifbsd cross-build` (cross-build host) | ✅ Code in place, untested on macOS host |
 
@@ -629,6 +666,7 @@ branch, and the full `.omo/drafts/` documentation tree.
 
 | Date       | Author    | Change                                                              |
 | ---------- | --------- | ------------------------------------------------------------------- |
+| 2026-06-04 | mlapointe | Live update: build progressed through ocifbsd.c, container.c, oci2jail.c, state.c, utils.c all clean. hooks.c hit 8 const-qual errors (over-aggressive const fix from earlier); fix in progress | d07cfbd32f5
 | 2026-06-04 | mlapointe | Updated all bmake→make for FreeBSD native; kept bmake for cross-build. README.md cross-build example fixed (was `make`, now `bmake`). Makefile GNU-make guard added; info target uses `.MAKE.VERSION`; removed redundant `Host bmake` line | (catch-up, not regular)
 | 2026-06-04 | mlapointe | Initial OCI-STATUS.md created (this file)                           |
 | 2026-06-04 | mlapointe | Identified need to demote darwin-* to opt-in cross-build            |
