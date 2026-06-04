@@ -801,14 +801,17 @@ banner:
 # On a minimal install (no /usr/src), it may be at /usr/share/mk/ or
 # absent entirely. If absent, we define the MK_* variables we need
 # below (currently only MK_TESTS) so the build still works.
-.for _srcopts_path in /usr/src/share/mk /usr/share/mk
-.if exists(${_srcopts_path}/src.opts.mk) && !defined(_OCIFBSD_SRC_OPTS_INCLUDED)
-.include "${_srcopts_path}/src.opts.mk"
+_OCIFBSD_SRC_OPTS_INCLUDED=0
+.if exists(/usr/src/share/mk/src.opts.mk)
+.include "/usr/src/share/mk/src.opts.mk"
 _OCIFBSD_SRC_OPTS_INCLUDED=1
 .endif
-.endfor
+.if !${_OCIFBSD_SRC_OPTS_INCLUDED} && exists(/usr/share/mk/src.opts.mk)
+.include "/usr/share/mk/src.opts.mk"
+_OCIFBSD_SRC_OPTS_INCLUDED=1
+.endif
 
-.if !defined(_OCIFBSD_SRC_OPTS_INCLUDED)
+.if !${_OCIFBSD_SRC_OPTS_INCLUDED}
 # src.opts.mk not found — define what we need for a minimal build.
 # The FreeBSD base system doesn't ship src.opts.mk without /usr/src.
 # For a standalone build, this is fine; we don't need the full set
