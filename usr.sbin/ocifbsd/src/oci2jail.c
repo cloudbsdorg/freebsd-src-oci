@@ -189,8 +189,7 @@ parse_mounts(struct json_object *val, int *n_mounts)
 {
 	struct json_object *obj;
 	struct json_object *arr;
-	struct json_object *elem, *dest_val;
-	struct json_object *s;
+	struct json_object *elem;
 	struct oci_mount *mounts;
 	struct oci_mount *m;
 	size_t i;
@@ -314,7 +313,6 @@ oci_parse_config(const char *config_path)
 	struct json_object *root;
 	struct json_object *obj;
 	char *json_str;
-	size_t json_len;
 	FILE *f;
 	struct stat sb;
 
@@ -406,8 +404,8 @@ oci_parse_config(const char *config_path)
 		    &(int){0});
 		spec->process.env = json_get_string_array(proc_val, "env",
 		    &(int){0});
-		spec->process.uid = json_get_int(proc_val, "user", 0) & 0xFFFFFFFF;
-		spec->process.gid = (json_get_int(proc_val, "user", 0) >> 32) & 0xFFFFFFFF;
+		spec->process.uid = json_get_int(proc_val, "user", 0);
+		spec->process.gid = json_get_int(proc_val, "user", 0);
 	}
 
 	/* Parse hostname */
@@ -436,7 +434,6 @@ void
 oci_free_spec(struct oci_runtime_spec *spec)
 {
 	int i;
-	struct oci_hook **hooks;
 
 	if (spec == NULL)
 		return;
@@ -549,7 +546,7 @@ oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
 			return (NULL);						\
 	}									\
 	jailparam_init(&params[n], name);					\
-	jailparam_import_raw(&params[n], value);				\
+	jailparam_import_raw(&params[n], value, strlen(value) + 1);	\
 	n++;									\
 } while (0)
 
