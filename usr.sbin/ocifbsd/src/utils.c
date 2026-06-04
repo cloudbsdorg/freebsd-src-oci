@@ -179,9 +179,10 @@ resolve_bundle_path(const char *bundle)
 		resolved = strdup(bundle);
 	} else if (bundle[0] == '~') {
 		/* Home directory */
+		char root[] = "/";
 		path = getenv("HOME");
 		if (path == NULL)
-			path = (char *)"/";
+			path = root;
 		resolved = malloc(PATH_MAX);
 		if (resolved == NULL)
 			return (NULL);
