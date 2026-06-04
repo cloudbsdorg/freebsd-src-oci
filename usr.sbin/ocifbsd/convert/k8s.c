@@ -523,7 +523,6 @@ k8s_convert_multi(const char *yaml, char **output,
 		
 		free(converted);
 		free(doc);
-		doc_num++;
 		p = doc_end + 3;
 	}
 	
