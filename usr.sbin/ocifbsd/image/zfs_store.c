@@ -62,7 +62,6 @@ extern int copy_file(const char *from, const char *to, int mode);
  */
 static const char *zfs_pool = OCIFBSD_ZFS_POOL;
 static char *mountpoint_base = "/var/lib/ocifbsd";
-static char zfs_cmd_buf[1024];
 
 static int
 run_zfs(int argc, ...)
