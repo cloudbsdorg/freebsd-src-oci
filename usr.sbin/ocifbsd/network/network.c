@@ -41,7 +41,7 @@
 #include <net/if_var.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
@@ -569,7 +569,6 @@ network_connect(const char *network_id, const char *container_id,
 	char *output = NULL;
 	char bridge_name[64] = "";
 	char *side_a = NULL, *side_b = NULL;
-	int ret = -1;
 
 	if (network_id == NULL || container_id == NULL || ep == NULL) {
 		errno = EINVAL;
