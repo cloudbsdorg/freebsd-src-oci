@@ -62,7 +62,12 @@ SUBDIR+=	convert
 #SUBDIR+=	export
 # gc: same AI-stub issue. Deferred.
 #SUBDIR+=	gc
-SUBDIR+=	image
+# image: many AI-slop issues across pull.c, unpack.c, push.c.
+# zfs_store.c is clean (libmd + stdarg + unused-var fixes done).
+# pull.c has fopen(arg count), missing curl callbacks, missing json-c
+# include, dozens of unused vars, missing fields. Needs full refactor.
+# Deferred to follow-up PR.
+#SUBDIR+=	image
 # logd: same AI-stub issue. Deferred.
 #SUBDIR+=	logd
 SUBDIR+=	metrics
