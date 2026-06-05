@@ -1,0 +1,137 @@
+.\"-
+.\" Copyright (c) 2024 The FreeBSD Foundation
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" This software was developed by Klara, Inc. under sponsorship
+.\" from the FreeBSD Foundation.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+.\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+.\" IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+.\" INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+.\" BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+.\" LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+.\" AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+.\" OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+.\" USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+.\" DAMAGE.
+.\"
+.Dd June 5, 2026
+.Dt OCIFBSD-GC 8
+.Os
+.Sh NAME
+.Nm ocifbsd-gc
+.Nd ocifbsd garbage collection daemon
+.Sh SYNOPSIS
+.Nm
+.Op Fl fvh
+.Sh DESCRIPTION
+The
+.Nm
+daemon performs periodic garbage collection for the
+.Xr ocifbsd 8
+OCI runtime.
+It scans container, image, volume, and network state on disk
+and the host's network and ZFS configuration to identify and
+remove resources that are orphaned, stopped past their
+time-to-live, or no longer referenced.
+.Pp
+Collection passes are scheduled on a configurable interval
+(see
+.Pa /etc/ocifbsd/ocifbsd.conf )
+and cover:
+.Bl -bullet
+.It
+Orphaned container jails (no owner record).
+.It
+Stopped containers older than the stopped-container TTL.
+.It
+Finished pods older than the container TTL.
+.It
+Unused OCI images older than the image TTL, or when image
+storage usage crosses the configured high/low watermarks.
+.It
+Pinned images are never collected.
+.It
+Orphaned volumes and released PersistentVolumeClaims.
+.It
+Orphaned and unused bridge networks.
+.It
+Dead-node resources in clustered deployments.
+.It
+Stale node registrations.
+.El
+.Pp
+Deletions are delegated back to the main
+.Xr ocifbsd 8
+binary via
+.Xr execvp 3
+when a resource needs to be removed, so all cleanup honours
+the runtime's safety checks and audit logging.
+.Pp
+The options are:
+.Bl -tag -width indent
+.It Fl f
+Run in the foreground.
+The default is to daemonize via
+.Xr daemon 3 .
+.It Fl v
+Enable verbose syslog output for every GC item considered.
+.It Fl h
+Print a short usage summary and exit.
+.El
+.Pp
+The daemon handles
+.Dv SIGTERM ,
+.Dv SIGINT ,
+and
+.Dv SIGHUP
+for graceful shutdown.
+.Sh FILES
+.Bl -tag -width /var/run/ocifbsd -compact
+.It Pa /var/run/ocifbsd
+Default state directory used for container, image, volume,
+and network metadata (
+.Pa OCIFBSD_STATE_DIR
+in the source).
+.It Pa /var/lib/ocifbsd/images
+Default image storage directory
+.Pq Dq OCIFBSD_IMAGE_DIR .
+.It Pa /usr/sbin/ocifbsd
+Path to the main
+.Xr ocifbsd 8
+binary invoked for delete operations
+.Pq Dq OCIFBSD_BIN .
+.It Pa tank/ocifbsd
+Default ZFS dataset for container roots
+.Pq Dq OCIFBSD_ZFS_POOL .
+.It Pa /etc/ocifbsd/ocifbsd.conf
+Runtime configuration (intervals, TTLs, watermarks).
+.El
+.Sh SEE ALSO
+.Xr ocifbsd 8 ,
+.Xr daemon 3 ,
+.Xr zfs 8 ,
+.Xr pfctl 8
+.Sh HISTORY
+The
+.Nm
+command first appeared in
+.Fx 16.0 .
+.Sh AUTHORS
+The
+.Nm
+utility was developed by
+.An Klara, Inc.
+under sponsorship from
+.The FreeBSD Foundation .

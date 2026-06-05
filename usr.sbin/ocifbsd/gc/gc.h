@@ -87,6 +87,7 @@ struct gc_orphan {
     RB_ENTRY(gc_orphan) entry;
 };
 RB_HEAD(orphan_tree, gc_orphan);
+RB_PROTOTYPE(orphan_tree, gc_orphan, entry, orphan_compare);
 
 /* GC item */
 struct gc_item {

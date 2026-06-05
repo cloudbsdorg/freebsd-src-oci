@@ -37,7 +37,7 @@
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <sys/sysctl.h>
-#include <sys/json.h>
+#include <dirent.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -54,6 +54,70 @@
 
 #include "gc.h"
 #include "../include/ocifbsd.h"
+
+/*
+ * Runtime paths used by the GC worker. These are local to gc.c for
+ * now; eventually they should come from the main ocifbsd config.
+ */
+#ifndef OCIFBSD_BIN
+#define OCIFBSD_BIN		"/usr/sbin/ocifbsd"
+#endif
+#ifndef OCIFBSD_ZFS_POOL
+#define OCIFBSD_ZFS_POOL	"tank/ocifbsd"
+#endif
+#ifndef OCIFBSD_IMAGE_DIR
+#define OCIFBSD_IMAGE_DIR	"/var/lib/ocifbsd/images"
+#endif
+
+/*
+ * Recursive mkdir(2). FreeBSD 16's <libutil.h> does not export mkdirp
+ * in any public header. We provide a local copy.
+ */
+static int
+mkdirp_local(const char *path, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *p;
+	size_t len;
+
+	if (path == NULL || *path == '\0')
+		return (-1);
+
+	len = strlcpy(buf, path, sizeof(buf));
+	if (len >= sizeof(buf))
+		return (-1);
+
+	for (p = buf + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, mode) != 0 && errno != EEXIST)
+			return (-1);
+		*p = '/';
+	}
+
+	if (mkdir(buf, mode) != 0 && errno != EEXIST)
+		return (-1);
+	return (0);
+}
+
+#define	mkdirp(path, mode)	mkdirp_local((path), (mode))
+
+static void *gc_worker(void *arg);
+static void *gc_timer(void *arg);
+static int gc_process_item(struct gc_item *item);
+static int gc_queue_item(int type, const char *name, const char *ns,
+    int priority);
+static int gc_delete_container(const char *name);
+static int gc_delete_image(const char *name);
+static int gc_delete_volume(const char *name);
+static int gc_delete_network(const char *name);
+static int gc_is_container_orphaned(const char *name);
+static int gc_is_container_stopped(const char *name, time_t cutoff);
+static int gc_image_is_pinned(const char *name);
+static int gc_is_volume_orphaned(const char *name);
+static int gc_is_bridge_orphaned(const char *name);
+static void sig_handler(int sig);
 
 /* Global state */
 static struct gc_config config;
@@ -270,7 +334,6 @@ gc_process_item(struct gc_item *item)
 static int
 gc_delete_container(const char *name)
 {
-    char cmd[PATH_MAX];
     int ret;
 
     if (config.dry_run) {
@@ -378,24 +441,33 @@ gc_run_now(int type)
     gc_log_start(type);
 
     switch (type) {
-    case GC_TYPE_CONTAINER:
     case GC_TYPE_ALL:
+        gc_container_orphans();
+        gc_stopped_containers(config.stopped_container_ttl);
+        gc_finished_pods(config.container_ttl);
+        gc_unused_images(config.image_ttl);
+        gc_image_space(config.image_high_threshold, config.image_low_threshold);
+        gc_orphaned_volumes();
+        gc_released_pvc();
+        gc_orphaned_networks();
+        gc_unused_networks(config.image_ttl);
+        gc_dead_node_resources();
+        gc_stale_registrations();
+        break;
+    case GC_TYPE_CONTAINER:
         gc_container_orphans();
         gc_stopped_containers(config.stopped_container_ttl);
         gc_finished_pods(config.container_ttl);
         break;
     case GC_TYPE_IMAGE:
-    case GC_TYPE_ALL:
         gc_unused_images(config.image_ttl);
         gc_image_space(config.image_high_threshold, config.image_low_threshold);
         break;
     case GC_TYPE_VOLUME:
-    case GC_TYPE_ALL:
         gc_orphaned_volumes();
         gc_released_pvc();
         break;
     case GC_TYPE_NETWORK:
-    case GC_TYPE_ALL:
         gc_orphaned_networks();
         gc_unused_networks(config.image_ttl);
         break;
@@ -610,7 +682,7 @@ gc_container_orphans(void)
     struct dirent *dp;
     int count = 0;
 
-    snprintf(path, sizeof(path), "%s/containers", OCIFBSD_VAR_DIR);
+    snprintf(path, sizeof(path), "%s/containers", OCIFBSD_STATE_DIR);
     dir = opendir(path);
     if (dir == NULL)
         return (0);
@@ -647,7 +719,7 @@ gc_is_container_orphaned(const char *name)
     char line[256];
     bool has_owner = false;
 
-    snprintf(path, sizeof(path), "%s/containers/%s/state.json", OCIFBSD_VAR_DIR, name);
+    snprintf(path, sizeof(path), "%s/containers/%s/state.json", OCIFBSD_STATE_DIR, name);
     fp = fopen(path, "r");
     if (fp == NULL)
         return (0);  /* Container doesn't exist */
@@ -676,7 +748,7 @@ gc_stopped_containers(int ttl_seconds)
     int count = 0;
     time_t cutoff = time(NULL) - ttl_seconds;
 
-    snprintf(path, sizeof(path), "%s/containers", OCIFBSD_VAR_DIR);
+    snprintf(path, sizeof(path), "%s/containers", OCIFBSD_STATE_DIR);
     dir = opendir(path);
     if (dir == NULL)
         return (0);
@@ -712,7 +784,7 @@ gc_is_container_stopped(const char *name, time_t cutoff)
     char line[256];
     time_t stopped_time = 0;
 
-    snprintf(path, sizeof(path), "%s/containers/%s/state.json", OCIFBSD_VAR_DIR, name);
+    snprintf(path, sizeof(path), "%s/containers/%s/state.json", OCIFBSD_STATE_DIR, name);
     fp = fopen(path, "r");
     if (fp == NULL)
         return (0);
@@ -790,7 +862,7 @@ gc_image_is_pinned(const char *name)
     char path[PATH_MAX];
     FILE *fp;
 
-    snprintf(path, sizeof(path), "%s/images/%s/pinned", OCIFBSD_VAR_DIR, name);
+    snprintf(path, sizeof(path), "%s/images/%s/pinned", OCIFBSD_STATE_DIR, name);
     fp = fopen(path, "r");
     if (fp != NULL) {
         fclose(fp);
@@ -808,7 +880,7 @@ gc_image_pinned(const char *name)
 {
     char path[PATH_MAX];
 
-    snprintf(path, sizeof(path), "%s/images/%s/pinned", OCIFBSD_VAR_DIR, name);
+    snprintf(path, sizeof(path), "%s/images/%s/pinned", OCIFBSD_STATE_DIR, name);
     FILE *fp = fopen(path, "w");
     if (fp != NULL) {
         fprintf(fp, "1\n");
@@ -827,7 +899,8 @@ gc_image_space(int high_percent, int low_percent)
 {
     struct statfs fs;
     int used_percent;
-    uint64_t need_space;
+    (void)used_percent;
+    (void)fs;
 
     if (statfs(OCIFBSD_IMAGE_DIR, &fs) != 0)
         return (-1);
@@ -905,7 +978,7 @@ gc_is_volume_orphaned(const char *name)
     char line[256];
     bool has_owner = false;
 
-    snprintf(path, sizeof(path), "%s/volumes/%s/owner", OCIFBSD_VAR_DIR, name);
+    snprintf(path, sizeof(path), "%s/volumes/%s/owner", OCIFBSD_STATE_DIR, name);
     fp = fopen(path, "r");
     if (fp == NULL)
         return (1);  /* No owner file = orphaned */
@@ -971,7 +1044,7 @@ gc_unused_networks(int ttl_seconds)
 int
 gc_orphan_bridge(void)
 {
-    char cmd[PATH_MAX];
+    (void)0;
     FILE *fp;
     char line[256];
     int count = 0;
@@ -1005,7 +1078,7 @@ gc_is_bridge_orphaned(const char *name)
     char path[PATH_MAX];
     FILE *fp;
 
-    snprintf(path, sizeof(path), "%s/networks/%s/owner", OCIFBSD_VAR_DIR, name);
+    snprintf(path, sizeof(path), "%s/networks/%s/owner", OCIFBSD_STATE_DIR, name);
     fp = fopen(path, "r");
     if (fp == NULL)
         return (1);
@@ -1085,7 +1158,7 @@ gc_stale_registrations(void)
 int
 gc_zfs_cleanup(const char *dataset)
 {
-    char cmd[PATH_MAX];
+    (void)dataset;
 
     if (config.dry_run) {
         syslog(LOG_INFO, "[DRY RUN] Would cleanup ZFS dataset: %s", dataset);
@@ -1267,7 +1340,7 @@ gc_log_item(int type, const char *name, const char *action)
 /*
  * Orphan tree comparison
  */
-int
+static int
 orphan_compare(struct gc_orphan *a, struct gc_orphan *b)
 {
     int cmp = strcmp(a->name, b->name);
@@ -1275,6 +1348,7 @@ orphan_compare(struct gc_orphan *a, struct gc_orphan *b)
         return (cmp);
     return (a->type - b->type);
 }
+RB_GENERATE(orphan_tree, gc_orphan, entry, orphan_compare);
 
 /*
  * Main

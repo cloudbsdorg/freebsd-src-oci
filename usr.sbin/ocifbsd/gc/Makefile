@@ -6,13 +6,17 @@ INC=	gc.h
 
 .PATH:	${SRCDIR}/gc
 
-<include "Makefile.inc">
-<include <objfmt>.mk>
-
 PROG=	ocifbsd-gc
 MAN=	ocifbsd-gc.8
 
-LIBADD=	 m json z crypto pthread util
+# m, z, crypto, pthread, util are in FreeBSD base
+LIBADD=	 m z crypto pthread util
+
+# json-c is a port (not in FreeBSD base). Port path + LDADD.
+# Install on VM with:  sudo pkg install json-c
+CFLAGS+=	-I/usr/local/include/json-c
+LDFLAGS+=	-L/usr/local/lib
+LDADD+=		-ljson-c
 
 CFLAGS+=	-I${SRCDIR}/include
 
