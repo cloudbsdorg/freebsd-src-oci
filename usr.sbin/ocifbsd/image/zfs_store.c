@@ -114,6 +114,7 @@ run_zfs_str(const char *cmd, char **output)
 	FILE *fp;
 	char buf[1024];
 	size_t len;
+	size_t result_len = 0;
 	char *result = NULL;
 	int first = 1;
 
@@ -123,7 +124,7 @@ run_zfs_str(const char *cmd, char **output)
 
 	while (fgets(buf, sizeof(buf), fp) != NULL) {
 		len = strlen(buf);
-		char *newp = realloc(result, (result ? strlen(result) : 0) + len + 1);
+		char *newp = realloc(result, result_len + len + 1);
 		if (newp == NULL) {
 			free(result);
 			pclose(fp);
@@ -134,7 +135,9 @@ run_zfs_str(const char *cmd, char **output)
 			result[0] = '\0';
 			first = 0;
 		}
-		strcat(result, buf);
+		memcpy(result + result_len, buf, len);
+		result_len += len;
+		result[result_len] = '\0';
 	}
 
 	pclose(fp);

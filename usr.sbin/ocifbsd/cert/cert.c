@@ -1089,7 +1089,11 @@ cert_status_json(char **json_out)
     }
 
     json = realloc(json, strlen(json) + 2);
-    strcat(json, "]");
+    {
+        size_t l = strlen(json);
+        json[l] = ']';
+        json[l + 1] = '\0';
+    }
 
     free(certs);
     *json_out = json;

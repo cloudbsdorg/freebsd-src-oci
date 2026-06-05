@@ -134,7 +134,8 @@ run_cmd_output(char **output, int argc, ...)
 	char *cmd = NULL;
 	size_t cmd_len = 0;
 	for (int i = 0; i < argc; i++) {
-		size_t need = cmd_len + (i > 0 ? 1 : 0) + strlen(argv[i]) + 1;
+		size_t alen = strlen(argv[i]);
+		size_t need = cmd_len + (i > 0 ? 1 : 0) + alen + 1;
 		char *newcmd = realloc(cmd, need);
 		if (newcmd == NULL) {
 			free(cmd);
@@ -142,10 +143,12 @@ run_cmd_output(char **output, int argc, ...)
 			return (-1);
 		}
 		cmd = newcmd;
-		if (i > 0)
-			strcat(cmd, " ");
-		strcat(cmd, argv[i]);
-		cmd_len = need - 1;
+		if (i > 0) {
+			cmd[cmd_len++] = ' ';
+		}
+		memcpy(cmd + cmd_len, argv[i], alen);
+		cmd_len += alen;
+		cmd[cmd_len] = '\0';
 	}
 
 	fp = popen(cmd, "r");

@@ -510,15 +510,23 @@ k8s_convert_multi(const char *yaml, char **output,
 		}
 		
 		if (ret == CONVERT_SUCCESS && converted != NULL) {
-			size_t needed = result_len + strlen(converted) + 64;
+			size_t clen = strlen(converted);
+			size_t needed = result_len + clen + 64;
 			if (needed > result_cap) {
-				result_cap = needed * 2;
-				result = realloc(result, result_cap);
+				size_t new_cap = needed * 2;
+				char *new_result = realloc(result, new_cap);
+				if (new_result == NULL) {
+					free(converted);
+					free(doc);
+					free(result);
+					return (CONVERT_MEMORY_ERROR);
+				}
+				result = new_result;
+				result_cap = new_cap;
 			}
-			if (result != NULL) {
-				strcat(result, converted);
-				result_len = strlen(result);
-			}
+			memcpy(result + result_len, converted, clen);
+			result_len += clen;
+			result[result_len] = '\0';
 		}
 		
 		free(converted);

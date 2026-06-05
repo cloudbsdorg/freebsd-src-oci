@@ -80,6 +80,13 @@ CFLAGS+=	-I${.CURDIR}
 CFLAGS+=	-Wall -Wextra
 CFLAGS+=	-D__BSD_VISIBLE=1
 CFLAGS+=	-D_POSIX_C_SOURCE=200809L
+# Link-Time Optimization (LTO) lets the linker see across .o files
+# in a single SUBDIR .a/.so, enabling cross-TU inlining and dead-
+# code elimination that -O2 alone can't do. The default FreeBSD
+# base linker (lld, /usr/bin/ld.lld) supports -flto natively.
+# Expect 10-25% binary size reduction on the .so outputs.
+CFLAGS+=	-flto
+LDFLAGS+=	-flto
 # FreeBSD 16's <signal.h> has a function prototype (sigstack) that
 # forward-declares 'struct sigstack' in the prototype itself, which
 # Clang -Werror -Wvisibility turns into an error when we include
