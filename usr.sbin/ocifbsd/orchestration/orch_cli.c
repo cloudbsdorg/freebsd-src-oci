@@ -564,7 +564,6 @@ cmd_stack_create(int argc, char **argv)
 			name = optarg;
 			break;
 		case 'f':
-			file = optarg;
 			break;
 		}
 	}
