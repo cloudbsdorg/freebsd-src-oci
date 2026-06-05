@@ -5,8 +5,9 @@
 
 SRCS=		network.c bridge.c vnet.c cni.c
 
-PROG=		ocifbsd_network
-MAN=
+LIB=		ocifbsd_network
+SHLIB_NAME=	ocifbsd_network.so.1
+MAN=		ocifbsd_network.3
 
 # json-c is a port (not in FreeBSD base). cni.c uses json_object_*.
 # Same pattern as main Makefile: CFLAGS/LDFLAGS add the /usr/local
@@ -18,4 +19,4 @@ LDADD+=		-ljson-c
 
 WARNS?=		3
 
-.include <bsd.prog.mk>
+.include <bsd.lib.mk>
