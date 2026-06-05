@@ -121,7 +121,6 @@ static int
 bridge_add_vlan(const char *bridge, const char *parent, int vlan_id)
 {
 	char vlan_if[64];
-	char cmd[256];
 
 	snprintf(vlan_if, sizeof(vlan_if), "%s.%d", parent, vlan_id);
 
