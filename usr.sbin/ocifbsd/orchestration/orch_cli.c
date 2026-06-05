@@ -324,7 +324,6 @@ cmd_service_create(int argc, char **argv)
 	memset(&spec, 0, sizeof(spec));
 	strlcpy(spec.name, name, sizeof(spec.name));
 	strlcpy(spec.image, image, sizeof(spec.image));
-	strlcpy(spec.namespace, namespace, sizeof(spec.namespace));
 	spec.replicas = replicas;
 	
 	struct service *svc = service_create(&spec);
