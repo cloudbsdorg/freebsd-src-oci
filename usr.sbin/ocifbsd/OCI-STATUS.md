@@ -4,36 +4,43 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-05 08:45 UTC (03:45 CDT) — live status
+> **Last updated**: 2026-06-05 13:45 UTC (08:45 CDT) — live status
 
-## 🎉 **BOOTSTRAP COMPLETE — `make` SUCCEEDS END-TO-END!**
+## 🎉 **PHASE 1 COMPLETE — 5 SUBDIRs RE-ENABLED!**
 
-The end-to-end build of `ocifbsd` + all 6 active SUBDIRs
-succeeds cleanly on FreeBSD 16.0-CURRENT.
+All 5 Phase 1 SUBDIRs (cert, export, gc, logd, pam) have been
+fixed and committed. The end-to-end build of `ocifbsd` + all
+**12 active SUBDIRs** succeeds cleanly on FreeBSD 16.0-CURRENT.
 
 - **Main binary**: `ocifbsd` (50K) builds, links, and runs.
-  `./ocifbsd --help` shows all 8 commands:
-  create, start, kill, delete, state, list, inspect, run.
-- **6 active SUBDIRs build clean**: api, clustering, convert,
-  metrics, namespace, security-daemon, tpm.
-- **9 SUBDIRs commented out** (deferred AI-slop refactor work):
-  cert, export, gc, logd, pam (bad Makefiles);
-  image (pull.c/unpack.c/push.c stub code);
-  network + orchestration (library-vs-program misconfiguration);
-  security (made-up rctl_usage struct fields).
+- **12 active SUBDIRs build clean**: api, cert, clustering,
+  convert, export, gc, logd, metrics, namespace, pam,
+  security-daemon, tpm.
+- **4 SUBDIRs commented out** (remaining deferred refactor work):
+  image (pull.c/unpack.c/push.c deep refactor needed);
+  network + orchestration (PROG→LIB conversion needed);
+  security (rctl.c struct field fixes needed).
 
-The commented-out subdirs are tracked in §5 "Subdir status" with
-per-subdir explanation of the AI-slop issue and the refactor
-work needed. None of them block the bootstrap.
+**Phase 1 commits (all pushed to origin)**:
+- `2c33724ce60` — enable cert SUBDIR (OpenSSL 3.0 + FreeBSD 16 fixes)
+- `2d35e44db14` — enable export SUBDIR (libmd SHA256 + FreeBSD 16 fixes)
+- `d2219adb756` — enable gc SUBDIR (RB-tree + mkdirp_local)
+- `f93983e352f` — enable logd SUBDIR (RB-tree + curl port path)
+- `727bc76597c` — enable pam SUBDIR (LIB + pam_sm_* entry points)
 
-**Re-verified clean at 2026-06-05 07:42 UTC**: `rm -rf obj *.o .depend*
-ocifbsd && make` succeeds end-to-end on the VM. All 6 active
-SUBDIRs build clean. Binary is 50,712 bytes, links against
+**Re-verified at 2026-06-05 13:40 UTC**: Full `make` succeeds
+end-to-end on the VM. All 12 SUBDIRs build clean. 42/42 unit
+tests pass via `kyua test -k Kyuafile`.
+
+**Next**: Phase 2 (network/ + orchestration/ PROG→LIB conversion),
+then Phase 3 (image/ deep refactor + security/ rctl.c rewrite).
+
+**Earlier (BOOTSTRAP COMPLETE)**: `make` first succeeded
+end-to-end at 2026-06-05 07:42 UTC with the original 7 SUBDIRs
+(api, clustering, convert, metrics, namespace, security-daemon,
+tpm). Binary is 50,712 bytes, links against
 libc/libjail/libutil/libzfs/libm/libpthread/libcrypto/libmd
 (per `make` `.depend` output).
-
-**Working tree**: clean as of 2026-06-05 08:45 UTC (pending commit
-of the doc refresh and the new unit-test work — see below).
 
 ## 🧪 **Unit test suite landed (2026-06-05 08:42 UTC)**
 
@@ -477,23 +484,13 @@ this session's fixes:
 Linker: added `md` to LIBADD for FreeBSD 16's moved-out
 SHA256_Data symbol (was in libc, now in libmd).
 
-### Subdir status: 9 of 15 SUBDIRs are commented out (deferred AI-slop work)
+### Subdir status: 4 of 15 SUBDIRs remain commented out (deferred refactor work)
 
 After the main binary links, build moves to the SUBDIR phase
-(15 module executables: ocifbsd-cert, ocifbsd-export, etc.). The
-following 8 subdirs have issues ranging from syntactically broken
-Makefiles to deeply AI-slopped C source:
+(15 module executables: ocifbsd-cert, ocifbsd-export, etc.).
+**12 of 15 SUBDIRs are now active and build clean** (Phase 1
+complete). The following 4 subdirs still need refactor work:
 
-- `cert/Makefile` — `<include "Makefile.inc">` (bad BSD make
-  syntax; should be `.include`), references missing Makefile.inc,
-  has `json` in LIBADD (should be in LDADD since json-c is a
-  port, not in base).
-- `export/Makefile` — same issues.
-- `gc/Makefile` — same issues.
-- `logd/Makefile` — same issues + references missing
-  `${SRCDIR}/metrics` include path.
-- `pam/Makefile` — same issues + uses `<bsd.lib.mk>` but
-  configures as a program (PROG=).
 - `image/` — Makefile is fine, but source files are heavily
   AI-slopped. zfs_store.c compiles clean after fixes (libmd
   SHA256 moved out of libc; stdarg.h added; mkdirp/copy_file
@@ -525,27 +522,24 @@ Makefiles to deeply AI-slopped C source:
   labels) probably has similar issues. Deferred to follow-up
   PR that rewrites rctl.c against the real rctl(8) API.
 
-**Pragmatic decision**: Commented out all 9 SUBDIR entries
-temporarily so the build can complete end-to-end. The 9
-subdirs need separate refactor PRs — the work is:
-1. cert/export/gc/logd/pam Makefiles: bad `<include>` →
-   `.include` (sed mechanical fix), create missing
-   Makefile.inc with shared SRCDIR definition, move `json`
-   from `LIBADD` to `LDADD` with CFLAGS/LDFLAGS paths, fix
-   `${SRCDIR}/tpm|metrics|security-daemon` references.
+**Phase 1 COMPLETE** (2026-06-05 13:40 UTC) — cert, export, gc,
+logd, and pam all fixed, committed, and pushed. Each one
+needed: `<sys/json.h>` dropped, json-c port path in CFLAGS,
+`mkdirp_local()` (FreeBSD 16 doesn't export mkdirp), libmd
+added to LIBADD for SHA256/HMAC/base64, RB_PROTOTYPE/RB_GENERATE
+pairs, static keyword on helpers, and dead-code/typo removal.
+
+**Remaining work** (Phase 2 + 3):
+1. network/ + orchestration/ Makefiles: convert from PROG to
+   LIB, or add a stub main.c. orchestration/ also needs either
+   stub ocifbsd_create_container/etc. implementations, or the
+   main ocifbsd binary needs to expose these symbols.
 2. image/ source files: refactor pull.c (most of it is dead
    code / undeclared callbacks / wrong API usage), unpack.c
    and push.c not yet examined.
-3. network/ + orchestration/ Makefiles: convert from PROG to
-   LIB, or add a stub main.c. The compiled object files are
-   fine. orchestration/ also needs either stub
-   ocifbsd_create_container/etc. implementations, or the
-   main ocifbsd binary needs to expose these symbols.
-4. security/ source: rewrite rctl.c against the real
+3. security/ source: rewrite rctl.c against the real
    rctl(8) API (struct rctl_usage, rctl_get_racct, etc.),
    review mac.c for similar AI-fabricated API usage.
-
-Tracked as deferred work, not blocking the bootstrap.
 
 ### Build infrastructure (updated mid-session)
 
