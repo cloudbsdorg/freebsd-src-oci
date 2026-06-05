@@ -373,8 +373,8 @@ If the agent's context is lost (or the user restarts the session), the recovery 
 graph TB
     subgraph CLIENTS[BDP Clients]
         ADMIN[Admin Client<br/>mTLS / uid 0]
-        ALICE[User alice<br/>PAM / ACL=@team-web]
-        BOB[User bob<br/>PAM / ACL=@team-db]
+        ALICE[User alice<br/>PAM / ACL=team-web]
+        BOB[User bob<br/>PAM / ACL=team-db]
         TV[TV / Signage<br/>multicast UDP subscriber]
     end
 
@@ -531,8 +531,8 @@ sequenceDiagram
 
     Note over Pub,TV3: Channel: menu-board-lobby<br/>Multicast group: 239.1.1.42:9999<br/>Encryption: AES-256-GCM<br/>TTL=1 (LAN only)<br/>Frame rate: max_fps_per_channel=30
 
-    Pub->>Br: BDP MULTICAST_CREATE (channel=menu-board-lobby, ACL=@signage, max_subs=1024)
-    Br->>Br: ACL check (publisher in @signage?)
+    Pub->>Br: BDP MULTICAST_CREATE (channel=menu-board-lobby, ACL=signage, max_subs=1024)
+    Br->>Br: ACL check (publisher in signage?)
     Br-->>Pub: BDP MULTICAST_CREATE_OK (group=239.1.1.42, key_id=...)
 
     TV1->>Br: BDP MULTICAST_SUB (channel=menu-board-lobby)
@@ -545,7 +545,7 @@ sequenceDiagram
     TV3->>Br: BDP MULTICAST_SUB
     Br-->>TV3: BDP MULTICAST_SUB_OK
 
-    loop Every 33ms (30 fps @ 4K/8K, rate-limited)
+    loop Every 33ms (30 fps at 4K/8K, rate-limited)
         Pub->>Br: BDP MULTICAST_FRAME (pixels, ZRLE, frame_no)
         Br->>Br: encrypt with channel key
         Br-->>TV1: UDP packet to 239.1.1.42:9999
