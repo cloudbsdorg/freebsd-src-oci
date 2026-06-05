@@ -41,6 +41,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+
+extern int mkdirp(const char *path, mode_t mode);
 #include <stdarg.h>
 #include <time.h>
 
