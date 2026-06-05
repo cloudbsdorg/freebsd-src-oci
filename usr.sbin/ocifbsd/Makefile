@@ -74,16 +74,7 @@ SUBDIR+=	logd
 SUBDIR+=	metrics
 SUBDIR+=	namespace
 SUBDIR+=	network
-# orchestration: similar to network. All 7 .c files compile
-# clean after extensive fixes (json-c port path, pthread.h,
-# mkdirp extern, ~5 static additions, ~10 unused-var removals,
-# get_physmem/rolling_update_progress forward decls, bad
-# spec.namespace ref). Link phase fails: no main() function
-# AND pod.c calls ocifbsd_create_container/start/stop/delete/
-# get_container_state/logs which are internal to the main
-# ocifbsd binary, not exported. Subdir is a library, not a
-# program. Deferred to follow-up PR.
-#SUBDIR+=	orchestration
+SUBDIR+=	orchestration
 SUBDIR+=	pam
 # security: rctl.c uses made-up struct rctl_usage fields
 # (exceeded, usage, resource_name, jail_name) that don't exist
