@@ -453,7 +453,7 @@ scheduler_node_not_ready(const char *node_name)
 /*
  * Update node resources (called by metrics collector)
  */
-int
+static int
 scheduler_update_node_resources(const char *node_name, 
     uint64_t memory_used, uint64_t cpu_used)
 {
