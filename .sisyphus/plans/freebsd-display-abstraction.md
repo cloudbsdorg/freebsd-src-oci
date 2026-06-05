@@ -17,7 +17,7 @@
 > - `usr.sbin/bhyve/display-abstraction.md` — architecture doc
 >
 > **Estimated Effort**: XL
-> **Parallel Execution**: YES — 5 waves (T1–T48), max 12 tasks per wave, with sub-waves
+> **Parallel Execution**: YES — 5 waves (T1–T60), max 12 tasks per wave, with sub-waves
 > **Critical Path**: T3 (jail API audit) → T8 (console refactor) → T12 (jail fb module) → T17 (smoke test) → T38 (broker daemon) → F1–F4 (review)
 >
 > **Preflight shipped**: 20 total = 11 base (T23) + 3 transport security (T28) + 6 cert (T33). All tunable via `security.preflight.*`.
@@ -44,46 +44,47 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 |---|---|---|---|
 | §1 | TL;DR | Quick summary, critical path, frame size, frame rate sysctls | 3 |
 | §2 | Plan Navigation Index | This section (agent context management) | 33 |
-| §3 | Visual Overview | 9 Mermaid diagrams (architecture, GPU, BDP, multicast, state machine, Gantt, class diagram, directory layout, agent context) | 251 |
-| §4 | Context | 18 design sections (architecture, broker, localhost, IPv6, instrumentation, multi-display, GPU ports, audio, cast, BT, mediated passthrough, multi-device, workload-driven, FreeBSD 16, backcompat, transport security, preflight, GPU governance) | 643 |
-| §5 | Tunables Reference | 80+ sysctls in 13 sub-sections | 1248 |
-| §6 | Work Objectives | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5130 |
-| §7 | Verification Strategy | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5466 |
-| §8 | Files | 9+ files referenced (bhyve source tree, target files) | 6585 |
-| §9 | Regeneration | regenerate.sh shipped example | 6612 |
-| §10 | Failures | Follow-up actions matrix | 6822 |
-| §11 | Coverage Shortfalls | Coverage recording | 6829 |
-| §12 | Verdict | Final test summary | 6835 |
-| §13 | Execution Strategy | Parallel waves, dep matrix, agent dispatch | 6901 |
-| §14 | TODOs | 60 v1 implementation tasks (T1-T60) + 4 design-only v2 (T62-T64, T68) + 7 design-only BT v2/v3 (T65-T72) + 4 final verifications (F1-F4) | 7061 |
-| §15 | Final Verification Wave | F1, F2, F3, F4 | 10460 |
-| §16 | Commit Strategy | Per-task commits | 10485 |
-| §17 | Success Criteria | Verification commands + checklist | 10489 |
+| §3 | Visual Overview | 9 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram, multi-display, audio sources/sinks) | 260 |
+| §4 | Context | 21 design sections (§4.1-§4.21, all physically inside this section) | 652 |
+| §5 | Tunables Reference | 80+ sysctls in 13 sub-sections | 5067 |
+| §6 | Work Objectives | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5306 |
+| §7 | Verification Strategy | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5642 |
+| §8 | Files | 9+ files referenced (bhyve source tree, target files) | 6761 |
+| §9 | Regeneration | regenerate.sh shipped example | 6788 |
+| §10 | Failures | Follow-up actions matrix | 6998 |
+| §11 | Coverage Shortfalls | Coverage recording | 7005 |
+| §12 | Verdict | Final test summary | 7011 |
+| §13 | Execution Strategy | Parallel waves, dep matrix, agent dispatch | 7077 |
+| §14 | TODOs | 60 v1 implementation tasks (T1-T60) + 4 design-only v2 (T62-T64, T68) + 7 design-only BT v2/v3 (T65-T72) + 4 final verifications (F1-F4) | 7237 |
+| §15 | Final Verification Wave | F1, F2, F3, F4 | 12150 |
+| §16 | Commit Strategy | Per-task commits | 12175 |
+| §17 | Success Criteria | Verification commands + checklist | 12179 |
 
-### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition)
+### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition; all 21 sections physically located inside §4 after the structural reorg)
 
 | § | Design section | Purpose | First line |
 |---|---|---|---|
-| §4.1 | Original Request | What the user asked for | 645 |
-| §4.2 | Investigation Summary | What we found (3 layers) | 649 |
-| §4.3 | GPU Resource Governance (T19-T21 framework) | GPU mediation rules | 666 |
-| §4.4 | Preflight check framework | 20 preflight checks | 692 |
-| §4.5 | Transport security (VNC hardening) | TLS 1.3, certbot, etc. | 727 |
-| §4.6 | Backward compatibility | Upgrade-must-not-break promise | 776 |
-| §4.7 | Architecture support (jails run everywhere) | Big/little endian, multi-arch | 991 |
-| §4.8 | Console broker / multiplexer | Broker architecture | 1076 |
-| §4.9 | Localhost by default (security principle) | All new endpoints default to localhost | 1487 |
-| §4.10 | IPv6 / dual-stack support | IPv6 default | 1562 |
-| §4.11 | Instrumentation, statistics, diagnostics | T49-T52 design | 1680 |
-| §4.12 | Multi-display support | Walls, ports, mixed resolutions | 1860 |
-| §4.13 | Audio support | AC97/HDA, BDP audio messages | 2075 |
-| §4.14 | Cast tool design considerations | Cast (design only) | 2366 |
-| §4.15 | Combining cast methods | Multi-protocol cast | 2561 |
-| §4.16 | Bluetooth considerations (future) | BT (design only) | 2674 |
-| §4.17 | Mediated passthrough (architectural principle) | Control plane retained | 3705 |
-| §4.18 | Multi-device / heterogeneous hardware | Adapter enumeration, hot-plug, GPU ports | 3985 |
-| §4.19 | Workload-driven GPU selection + dynamic capability discovery | Plug-in capability registry | 4416 |
-| §4.20 | FreeBSD 16 target platform | Version pin | 5055 |
+| §4.1 | Original Request | What the user asked for | 654 |
+| §4.2 | Investigation Summary | What we found (3 layers) | 658 |
+| §4.3 | GPU Resource Governance (T19-T21 framework) | GPU mediation rules | 675 |
+| §4.4 | Preflight check framework | 20 preflight checks | 701 |
+| §4.5 | Transport security (VNC hardening) | TLS 1.3, certbot, etc. | 736 |
+| §4.6 | Backward compatibility | Upgrade-must-not-break promise | 785 |
+| §4.7 | Architecture support (jails run everywhere) | Big/little endian, multi-arch | 1000 |
+| §4.8 | Console broker / multiplexer | Broker architecture | 1085 |
+| §4.9 | Localhost by default (security principle) | All new endpoints default to localhost | 1257 |
+| §4.10 | IPv6 / dual-stack support | IPv6 default | 1332 |
+| §4.11 | Instrumentation, statistics, diagnostics | T49-T52 design | 1450 |
+| §4.12 | Multi-display support | Walls, ports, mixed resolutions | 1630 |
+| §4.13 | GPU ports model | Per-port resource allocation, port policy, gpu-port-info tool | 1845 |
+| §4.14 | Audio support | AC97/HDA, BDP audio messages | 2012 |
+| §4.15 | Cast tool design considerations | Cast (design only) | 2303 |
+| §4.16 | Combining cast methods | Multi-protocol cast | 2498 |
+| §4.17 | Bluetooth considerations (future) | BT (design only) | 2611 |
+| §4.18 | Mediated passthrough (architectural principle) | Control plane retained | 3642 |
+| §4.19 | Multi-device / heterogeneous hardware | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 3922 |
+| §4.20 | Workload-driven GPU selection + dynamic capability discovery | Plug-in capability registry | 4353 |
+| §4.21 | FreeBSD 16 target platform | Version pin | 4992 |
 
 (Line numbers are approximate; use `grep -n "^## " file.md` for the live numbers.)
 
@@ -109,11 +110,11 @@ Each T-task has a "Required Context" subsection that explicitly lists what the a
 
 ```markdown
 REQUIRED CONTEXT (in agent's working memory)
-- [§6.6 Test Environment Verification] — for the verify_test_env.sh script
-- [§6.7 Test Execution, Recording, and Follow-up] — for procedure/evidence/follow-up
+- [§7.6 Test Environment Verification] — for the verify_test_env.sh script
+- [§7.7 Test Execution, Recording, and Follow-up] — for procedure/evidence/follow-up
 - [T8] — predecessor (console refactor) — for what console.c looks like
 - [T9] — predecessor (fbuf jail params) — for what jail params exist
-- [§4.13 Tunable precedence] — for how sysctl precedence works
+- [§5 Tunables Reference] — for tunable precedence (loader > sysctl > config > default)
 - This task's body (T12 below): ~5 KB
 - Test cases (T12 below): ~10 KB
 
@@ -132,7 +133,7 @@ Each task has a clear "Done When" subsection that defines the exit signal:
 ```markdown
 DONE WHEN
 - [ ] All acceptance criteria checked
-- [ ] All test cases documented in [§6.7 Test Procedure] pass
+- [ ] All test cases documented in [§7.7 Test Procedure] pass
 - [ ] Evidence file at `.sisyphus/evidence/task-{N}-{slug}.json` exists
 - [ ] Commit created with message `type(scope): desc`
 - [ ] Git working tree clean (`git status` shows nothing)
@@ -205,7 +206,7 @@ When the agent reads the plan, it should:
 - Use `grep -A 50 "T8\." plan.md` to get a task body
 
 The plan uses consistent syntax for cross-references:
-- `§4.16` is the Bluetooth design section
+- `§4.17` is the Bluetooth design section
 - `[T12]` is the fbuf_jail task
 - `T12.UNIT-3` is the 3rd ATF C test in T12
 - `T12.QA-1` is the 1st QA scenario in T12
@@ -241,7 +242,7 @@ If the agent's context is lost (or the user restarts the session), the recovery 
 **F1-F4 updates:**
 
 - **F1** verifies:
-  - Every T-task (T1-T52) has a "Required Context" subsection
+  - Every T-task (T1-T72, 72 total) has a "Required Context" subsection
   - Every T-task has a "Done When" subsection
   - The Plan Navigation Index is present at the top of the plan
   - The checkpoint file `.sisyphus/state/task-{N}.checkpoint.json` exists for each completed task
@@ -1250,245 +1251,6 @@ See the TODOs section.
 - T35 — host policy sysctls; the new broker sysctls live under `security.display.*` (a new OID subtree added in T35 expansion).
 - T36 — examples directory; new broker snippets added.
 - T37 — end user guide; updated to show broker as the recommended path.
-
----
-
-## Tunables Reference
-
-> Every limit, knob, and policy in this plan is a sysctl, loader tunable, or userspace config value. **No hardcoded constants that an operator might want to change.** This section is the canonical reference for the operator. Tasks register the sysctls (T22 for preflight, T35 for host policy, T38 for broker, T48 for multicast); the documentation is collected here.
-
-### 1. Kernel tunables (`sys/modules/*` and `sys/kern/*`)
-
-FreeBSD kernel tunables use `TUNABLE_INT`, `TUNABLE_STR`, `TUNABLE_ULONG`, etc. They are settable in `/boot/loader.conf` and take effect at boot. Each is also exposed as a sysctl for runtime inspection (and sometimes modification).
-
-| Tunable | Type | Default | Module | Purpose |
-|---|---|---|---|---|
-| `hw.gpu.N.stub_capacity` | INT | 10496 | `gpu_resource.ko` | Stub backend total capacity (CUDA-core-equivalent) for testing without a real GPU |
-| `hw.gpu.N.stub_vram_mb` | INT | 16384 | `gpu_resource.ko` | Stub backend VRAM in MB |
-| `hw.gpu.N.stub_max_resolution_w` | INT | 7680 | `gpu_resource.ko` | Stub backend max width (8K) |
-| `hw.gpu.N.stub_max_resolution_h` | INT | 4320 | `gpu_resource.ko` | Stub backend max height (8K) |
-| `kern.fbuf_jail.max_fbs` | INT | 64 | `fbuf_jail.ko` | System-wide max simultaneous jail framebuffers |
-| `kern.fbuf_jail.max_width` | INT | 7680 | `fbuf_jail.ko` | Max width per jail fb (8K) |
-| `kern.fbuf_jail.max_height` | INT | 4320 | `fbuf_jail.ko` | Max height per jail fb (8K) |
-| `kern.fbuf_jail.default_width` | INT | 1024 | `fbuf_jail.ko` | Default fb width if `fbuf.width` unset |
-| `kern.fbuf_jail.default_height` | INT | 768 | `fbuf_jail.ko` | Default fb height if `fbuf.height` unset |
-| `kern.fbuf_jail.default_refresh_fps` | INT | 30 | `fbuf_jail.ko` | Default fb refresh rate |
-| `kern.gpu_resource.max_consumers` | INT | 64 | `gpu_resource.ko` | Max simultaneous GPU consumers (jails + bhyve) |
-| `kern.preflight.timeout_ms` | INT | 5000 | `preflight.ko` | Per-check timeout |
-| `kern.preflight.max_checks` | INT | 64 | `preflight.ko` | Max registered checks (registry size) |
-| `kern.preflight.strict_default` | INT | 1 | `preflight.ko` | Default severity-to-action (1=block on BLOCKING, 0=warn on all) |
-| `kern.display.broker.somaxconn` | INT | 128 | (kernel) | Listen backlog for broker socket |
-| `kern.display.broker.kqueue_event_rate_limit` | INT | 100 | (kernel) | Max kqueue events/sec (jail/VM subsystem events) |
-
-### 2. Sysctls — host GPU quota (`hw.gpu.N.share`)
-
-The per-device GPU quota, set per physical GPU. Default 0 = unconstrained (legacy).
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `hw.gpu.N.host_reserve` | INT (PCT) | 10 | % of device reserved for host |
-| `hw.gpu.N.per_consumer_max` | INT (PCT) | 50 | % hard ceiling per consumer |
-| `hw.gpu.N.mem_policy` | STRING | auto | `auto`/`eager`/`lazy` |
-| `hw.gpu.N.scheduler` | STRING | wfq | `wfq`/`fifo`/`round-robin` |
-| `hw.gpu.N.stub` | INT | 1 | 1 = register `gpu_stub` if no real backend |
-| `hw.gpu.N.stub_capacity` | INT | 10496 | Stub backend capacity |
-
-### 3. Sysctls — security policy (`security.policy.*`)
-
-Host-wide security policy. Stricter-wins precedence.
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `security.policy.tls_required` | INT | 0 | 1 = no consumer may use plaintext |
-| `security.policy.legacy_allowed` | INT | 1 | 0 = `transport.legacy=1` refused |
-| `security.policy.audit_default` | INT | 1 | 0 = suppresses audit logging |
-| `security.policy.rate_limit_default` | INT | 5 | Auth attempts per minute per IP |
-| `security.policy.timeout_default_seconds` | INT | 1800 | Idle disconnect (30 min) |
-| `security.policy.self_signed_allowed` | INT | 1 | 0 = self-signed refused |
-| `security.policy.weak_auth_allowed` | INT | 1 | 0 = single-DES VNC refused |
-| `security.policy.allow_fbuf` | INT | 0 | 1 = `allow.fbuf` enabled host-wide |
-| `security.policy.allow_gpu` | INT | 0 | 1 = `allow.gpu` enabled host-wide |
-| `security.policy.preflight_strict` | INT | 1 | 0 = all BLOCKING checks → WARNING |
-| `security.policy.gpu_strict` | INT | 1 | 0 = strict mode bypassed jail-wide |
-| `security.policy.cuda_percentage_max` | INT (PCT) | 0 | 0 = no host cap; else cap per consumer |
-| `security.policy.vram_percentage_max` | INT (PCT) | 0 | 0 = no host cap; else cap per consumer |
-
-### 4. Sysctls — transport security (`security.transport.*`)
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `security.transport.tls.regen_self_signed` | INT | 0 | 1 = force self-signed regen on next start |
-| `security.transport.cert_reload_debug` | INT | 0 | 1 = log every cert reload attempt |
-| `security.transport.tls_min_version` | STRING | 1.3 | `1.2`/`1.3` — min TLS version. OpenSSL 1.1.1 LTS minimum, 3.0+ recommended for TLS 1.3. |
-| `security.transport.cipher_list` | STRING | TLSv1.3:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256 | OpenSSL cipher list |
-
-### 5. Sysctls — preflight framework (`security.preflight.*`)
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `security.preflight.enabled` | INT | 1 | 0 = skip preflight entirely (dev only) |
-| `security.preflight.strict` | INT | 1 | 0 = downgrade all BLOCKING to WARNING |
-| `security.preflight.timeout_ms` | INT | 5000 | Per-check timeout (mirrors kern.preflight.timeout_ms) |
-| `security.preflight.parallel` | INT | 1 | 1 = run checks in parallel (where safe) |
-| `security.preflight.dry_run` | INT | 0 | 1 = run all checks but don't commit (for CI) |
-| `security.preflight.audit_path` | STRING | /var/log/preflight.log | Audit log for preflight runs |
-
-### 6. Sysctls — display broker (`security.display.broker.*`)
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `security.display.broker.enable` | INT | 1 | 0 = broker disabled, legacy VNC-only mode |
-| `security.display.broker.listen` | STRING | `tcp4://0.0.0.0:8443,unix:///var/run/display-broker.sock` | Bind address(es) |
-| `security.display.broker.tls.cert` | STRING | `/etc/bhyve/display-broker.pem` | Broker server cert |
-| `security.display.broker.tls.key` | STRING | `/etc/bhyve/display-broker.key` | Broker server key |
-| `security.display.broker.tls.client_ca` | STRING | `/etc/bhyve/clients-ca.pem` | mTLS client CA |
-| `security.display.broker.tls_min_version` | STRING | 1.3 | Same semantics as `security.transport.tls_min_version` |
-| `security.display.broker.pam_service` | STRING | `display-broker` | PAM service name |
-| `security.display.broker.ca_cert` | STRING | `/etc/bhyve/ca.pem` | Client cert → user lookup |
-| `security.display.broker.scan_interval` | INT | 30 | Seconds between jail/VM subsystem rescan |
-| `security.display.broker.max_clients` | INT | 64 | Concurrent clients per broker |
-| `security.display.broker.max_attach_per_client` | INT | 8 | Concurrent fbs per client |
-| `security.display.broker.rate_limit` | INT | 10 | Auth attempts per minute per source IP |
-| `security.display.broker.idle_timeout` | INT | 1800 | Idle disconnect (seconds) |
-| `security.display.broker.keepalive_interval` | INT | 30 | PING/PONG interval (seconds) |
-| `security.display.broker.audit_level` | INT | 1 | 0=off, 1=basic, 2=detailed (input sampling) |
-| `security.display.broker.audit_path` | STRING | /var/log/display-broker.log | Audit log destination |
-| `security.display.broker.max_frame_size` | INT | 16777216 | 16 MB default, max 67108864 (64 MB) |
-| `security.display.broker.max_bandwidth_per_client` | INT | 1000000 | 1 Gbps per client (Kbps units) |
-| `security.display.broker.max_total_bandwidth` | INT | 10000000 | 10 Gbps broker-wide (Kbps units) |
-| `security.display.broker.max_fps_per_client` | INT | 60 | Unicast per-client FPS cap |
-| `security.display.broker.max_fps_per_channel` | INT | 60 | Multicast per-channel FPS cap |
-| `security.display.broker.max_fps_total` | INT | 600 | Broker-wide FPS cap (DoS) |
-| `security.display.broker.input_sample_rate` | INT | 100 | Sample every Nth input event for audit (at audit_level=2) |
-
-### 7. Sysctls — display transport (`security.display.transport.*`)
-
-Per-transport frame rate and behavior.
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `security.display.transport.rfb.refresh_fps` | INT | 24 | RFB legacy poll rate (matches existing rfb_wr_thr at ~24Hz) |
-| `security.display.transport.rfb.legacy_allowed` | INT | 1 | 0 = refuse plaintext RFB |
-| `security.display.transport.bdp.refresh_fps` | INT | 60 | BDP unicast target FPS |
-| `security.display.transport.bdp.compression` | STRING | zrle | `raw`/`zrle`/`tight` |
-| `security.display.transport.bdp.pixel_format` | STRING | bgrx | Default if client doesn't negotiate |
-| `security.display.transport.multicast.refresh_fps` | INT | 30 | BDP multicast target FPS (TV/signage) |
-| `security.display.transport.multicast.fec` | INT | 1 | Forward error correction on/off |
-
-### 8. Sysctls — display ACL (`security.display.acl.*`)
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `security.display.acl_default_deny` | INT | 1 | 1 = empty ACL = no access except root |
-| `security.display.acl_root_bypass` | INT | 1 | 1 = uid 0 always allowed (paranoia: set to 0) |
-| `security.display.acl_file_jail` | STRING | /etc/jail/display.acl | Per-jail ACL file (fallback) |
-| `security.display.acl_file_bhyve` | STRING | /etc/bhyve/display.acl | Per-VM ACL file (fallback) |
-
-### 9. Sysctls — multicast (T48, `security.display.broker.multicast.*`)
-
-| Sysctl | Type | Default | Purpose |
-|---|---|---|---|
-| `security.display.broker.multicast.enable` | INT | 1 | 0 = multicast disabled (unicast only) |
-| `security.display.broker.multicast.group_base4` | STRING | 239.1.1.0/24 | IPv4 admin-scoped range |
-| `security.display.broker.multicast.group_base6` | STRING | ff08::/16 | IPv6 equivalent |
-| `security.display.broker.multicast.ttl` | INT | 1 | TTL — 1 = LAN only |
-| `security.display.broker.multicast.max_channels` | INT | 64 | Concurrent multicast channels |
-| `security.display.broker.multicast.max_subscribers_per_channel` | INT | 1024 | Max subs per channel |
-| `security.display.broker.multicast.encrypt` | STRING | required | `required`/`preferred`/`optional` |
-| `security.display.broker.multicast.cipher` | STRING | AES-256-GCM | Per-channel encryption cipher |
-| `security.display.broker.multicast.fec` | INT | 1 | Forward error correction (XOR parity packets) |
-| `security.display.broker.multicast.max_bandwidth_per_channel` | INT | 1000000 | 1 Gbps per channel (Kbps units) |
-| `security.display.broker.multicast.igmp_required` | INT | 1 | 0 = don't fail preflight if IGMP unavailable |
-
-### 10. New OID subtrees (T35 implementation)
-
-The plan adds these top-level OID nodes (created by `sysctl_ctx_init` / `SYSCTL_DECL` calls in T35):
-
-- `security.policy.*` — host policy (existing in plan)
-- `security.transport.*` — transport security (existing in plan)
-- `security.preflight.*` — preflight framework (new in T35 expansion)
-- `security.display.*` — display broker / ACL / transport / multicast (new in T35 expansion)
-
-The OID tree is **created at module load** (`SYSINIT` order) and **persists across reboots** (values are in kernel memory, not on disk; use `sysctl.conf` to persist).
-
-### 11. Loader tunables (`/boot/loader.conf`)
-
-Set at boot, take effect before kernel modules load.
-
-```
-# Autoload
-fbuf_jail_load="YES"
-gpu_resource_load="YES"
-preflight_load="YES"
-
-# Display broker (auto-start on boot, via rc.d)
-display_broker_enable="YES"
-display_broker_listen="tcp4://0.0.0.0:8443"
-display_broker_tls_cert="/etc/bhyve/display-broker.pem"
-display_broker_tls_key="/etc/bhyve/display-broker.key"
-
-# Default host policy (strict, prod-ready)
-security_policy_tls_required=1
-security_policy_legacy_allowed=0
-security_policy_self_signed_allowed=0
-security_policy_audit_default=1
-security_policy_allow_fbuf=0  # explicitly opt in per jail
-security_policy_allow_gpu=0
-security_policy_preflight_strict=1
-security_policy_gpu_strict=1
-security_policy_cuda_percentage_max=50
-security_policy_vram_percentage_max=50
-```
-
-### 12. Userspace broker config (`/etc/bhyve/display-broker.conf`)
-
-The broker reads a config file (key=value, no comments inline) at startup. Equivalent to sysctls for userspace-only settings. Sysctls win for runtime-changeable values; config wins for startup-only values.
-
-```
-# /etc/bhyve/display-broker.conf
-listen=tcp4://0.0.0.0:8443,unix:///var/run/display-broker.sock
-tls_cert=/etc/bhyve/display-broker.pem
-tls_key=/etc/bhyve/display-broker.key
-tls_client_ca=/etc/bhyve/clients-ca.pem
-pam_service=display-broker
-ca_cert=/etc/bhyve/ca.pem
-scan_interval=30
-max_clients=64
-max_attach_per_client=8
-rate_limit=10
-idle_timeout=1800
-keepalive_interval=30
-audit_level=1
-audit_path=/var/log/display-broker.log
-max_frame_size=16777216
-max_bandwidth_per_client=1000000
-max_total_bandwidth=10000000
-max_fps_per_client=60
-max_fps_per_channel=60
-max_fps_total=600
-input_sample_rate=100
-log_level=info
-run_as_user=_display-broker
-run_as_group=_display-broker
-pid_file=/var/run/display-broker.pid
-```
-
-(`share/examples/security/policy-quickstart/broker.conf.snippet` is the recommended template — see T36 expansion.)
-
-### 13. Tunable precedence rules
-
-- **Sysctl > config file** at runtime. A sysctl change takes effect immediately; a config change requires `SIGHUP` + restart.
-- **Loader tunable > sysctl default** at boot. A `loader.conf` value is applied before the kernel module loads; the module's default is used if neither loader nor sysctl sets it.
-- **Per-jail param > host sysctl** only for consumer-loosening. Host policy is **stricter-wins**: the host's `security.policy.*` is the ceiling; consumers can be more restrictive but not less. (See "Host policy layer" above.)
-- **Kernel tunable (`kern.*`) > module default.** The `TUNABLE_INT` call in the module reads the loader value at module load; if not set, the module's compile-time default is used.
-
-### Self-Review Notes (gap classification)
-
-- **CRITICAL — confirmed during interview**: The jail-option switch for fb + auto-kbd/mouse is a hard requirement. Treated as a first-class workstream (T10, T12).
-- **MINOR — auto-resolved**: Backward compat for `rfb=` config key. Will be implemented as a parse-time rewrite to `transport=rfb,...` in `pci_fbuf_parse_config`.
-- **MINOR — auto-resolved**: `bhyvegc` is treated as optional. Refactored `console_init` accepts a flag `CONSOLE_FB_RAW` that skips bhyvegc; bhyve keeps the legacy `console_init(w, h, fb)` calling convention, jails use the raw variant.
-- **AMBIGUOUS — defaulted**: Default resolution for `fbuf` if width/height are unspecified → `1024x768` (matches `COLS_DEFAULT`/`ROWS_DEFAULT` in `pci_fbuf.c`). User can override.
-- **AMBIGUOUS — defaulted**: `fbuf.nokbd` / `fbuf.nomouse` default to **off** (kbd/mouse **on** when `allow.fbuf` is on), per the explicit user requirement "adding in the framebuffer should bring in the keyboard and mouse automatically".
 
 ---
 
@@ -5302,6 +5064,245 @@ The user clarified: *"we will be building on FreeBSD 16"*. This pins the target 
 
 ---
 
+## Tunables Reference
+
+> Every limit, knob, and policy in this plan is a sysctl, loader tunable, or userspace config value. **No hardcoded constants that an operator might want to change.** This section is the canonical reference for the operator. Tasks register the sysctls (T22 for preflight, T35 for host policy, T38 for broker, T48 for multicast); the documentation is collected here.
+
+### 1. Kernel tunables (`sys/modules/*` and `sys/kern/*`)
+
+FreeBSD kernel tunables use `TUNABLE_INT`, `TUNABLE_STR`, `TUNABLE_ULONG`, etc. They are settable in `/boot/loader.conf` and take effect at boot. Each is also exposed as a sysctl for runtime inspection (and sometimes modification).
+
+| Tunable | Type | Default | Module | Purpose |
+|---|---|---|---|---|
+| `hw.gpu.N.stub_capacity` | INT | 10496 | `gpu_resource.ko` | Stub backend total capacity (CUDA-core-equivalent) for testing without a real GPU |
+| `hw.gpu.N.stub_vram_mb` | INT | 16384 | `gpu_resource.ko` | Stub backend VRAM in MB |
+| `hw.gpu.N.stub_max_resolution_w` | INT | 7680 | `gpu_resource.ko` | Stub backend max width (8K) |
+| `hw.gpu.N.stub_max_resolution_h` | INT | 4320 | `gpu_resource.ko` | Stub backend max height (8K) |
+| `kern.fbuf_jail.max_fbs` | INT | 64 | `fbuf_jail.ko` | System-wide max simultaneous jail framebuffers |
+| `kern.fbuf_jail.max_width` | INT | 7680 | `fbuf_jail.ko` | Max width per jail fb (8K) |
+| `kern.fbuf_jail.max_height` | INT | 4320 | `fbuf_jail.ko` | Max height per jail fb (8K) |
+| `kern.fbuf_jail.default_width` | INT | 1024 | `fbuf_jail.ko` | Default fb width if `fbuf.width` unset |
+| `kern.fbuf_jail.default_height` | INT | 768 | `fbuf_jail.ko` | Default fb height if `fbuf.height` unset |
+| `kern.fbuf_jail.default_refresh_fps` | INT | 30 | `fbuf_jail.ko` | Default fb refresh rate |
+| `kern.gpu_resource.max_consumers` | INT | 64 | `gpu_resource.ko` | Max simultaneous GPU consumers (jails + bhyve) |
+| `kern.preflight.timeout_ms` | INT | 5000 | `preflight.ko` | Per-check timeout |
+| `kern.preflight.max_checks` | INT | 64 | `preflight.ko` | Max registered checks (registry size) |
+| `kern.preflight.strict_default` | INT | 1 | `preflight.ko` | Default severity-to-action (1=block on BLOCKING, 0=warn on all) |
+| `kern.display.broker.somaxconn` | INT | 128 | (kernel) | Listen backlog for broker socket |
+| `kern.display.broker.kqueue_event_rate_limit` | INT | 100 | (kernel) | Max kqueue events/sec (jail/VM subsystem events) |
+
+### 2. Sysctls — host GPU quota (`hw.gpu.N.share`)
+
+The per-device GPU quota, set per physical GPU. Default 0 = unconstrained (legacy).
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `hw.gpu.N.host_reserve` | INT (PCT) | 10 | % of device reserved for host |
+| `hw.gpu.N.per_consumer_max` | INT (PCT) | 50 | % hard ceiling per consumer |
+| `hw.gpu.N.mem_policy` | STRING | auto | `auto`/`eager`/`lazy` |
+| `hw.gpu.N.scheduler` | STRING | wfq | `wfq`/`fifo`/`round-robin` |
+| `hw.gpu.N.stub` | INT | 1 | 1 = register `gpu_stub` if no real backend |
+| `hw.gpu.N.stub_capacity` | INT | 10496 | Stub backend capacity |
+
+### 3. Sysctls — security policy (`security.policy.*`)
+
+Host-wide security policy. Stricter-wins precedence.
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `security.policy.tls_required` | INT | 0 | 1 = no consumer may use plaintext |
+| `security.policy.legacy_allowed` | INT | 1 | 0 = `transport.legacy=1` refused |
+| `security.policy.audit_default` | INT | 1 | 0 = suppresses audit logging |
+| `security.policy.rate_limit_default` | INT | 5 | Auth attempts per minute per IP |
+| `security.policy.timeout_default_seconds` | INT | 1800 | Idle disconnect (30 min) |
+| `security.policy.self_signed_allowed` | INT | 1 | 0 = self-signed refused |
+| `security.policy.weak_auth_allowed` | INT | 1 | 0 = single-DES VNC refused |
+| `security.policy.allow_fbuf` | INT | 0 | 1 = `allow.fbuf` enabled host-wide |
+| `security.policy.allow_gpu` | INT | 0 | 1 = `allow.gpu` enabled host-wide |
+| `security.policy.preflight_strict` | INT | 1 | 0 = all BLOCKING checks → WARNING |
+| `security.policy.gpu_strict` | INT | 1 | 0 = strict mode bypassed jail-wide |
+| `security.policy.cuda_percentage_max` | INT (PCT) | 0 | 0 = no host cap; else cap per consumer |
+| `security.policy.vram_percentage_max` | INT (PCT) | 0 | 0 = no host cap; else cap per consumer |
+
+### 4. Sysctls — transport security (`security.transport.*`)
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `security.transport.tls.regen_self_signed` | INT | 0 | 1 = force self-signed regen on next start |
+| `security.transport.cert_reload_debug` | INT | 0 | 1 = log every cert reload attempt |
+| `security.transport.tls_min_version` | STRING | 1.3 | `1.2`/`1.3` — min TLS version. OpenSSL 1.1.1 LTS minimum, 3.0+ recommended for TLS 1.3. |
+| `security.transport.cipher_list` | STRING | TLSv1.3:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256 | OpenSSL cipher list |
+
+### 5. Sysctls — preflight framework (`security.preflight.*`)
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `security.preflight.enabled` | INT | 1 | 0 = skip preflight entirely (dev only) |
+| `security.preflight.strict` | INT | 1 | 0 = downgrade all BLOCKING to WARNING |
+| `security.preflight.timeout_ms` | INT | 5000 | Per-check timeout (mirrors kern.preflight.timeout_ms) |
+| `security.preflight.parallel` | INT | 1 | 1 = run checks in parallel (where safe) |
+| `security.preflight.dry_run` | INT | 0 | 1 = run all checks but don't commit (for CI) |
+| `security.preflight.audit_path` | STRING | /var/log/preflight.log | Audit log for preflight runs |
+
+### 6. Sysctls — display broker (`security.display.broker.*`)
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `security.display.broker.enable` | INT | 1 | 0 = broker disabled, legacy VNC-only mode |
+| `security.display.broker.listen` | STRING | `tcp4://0.0.0.0:8443,unix:///var/run/display-broker.sock` | Bind address(es) |
+| `security.display.broker.tls.cert` | STRING | `/etc/bhyve/display-broker.pem` | Broker server cert |
+| `security.display.broker.tls.key` | STRING | `/etc/bhyve/display-broker.key` | Broker server key |
+| `security.display.broker.tls.client_ca` | STRING | `/etc/bhyve/clients-ca.pem` | mTLS client CA |
+| `security.display.broker.tls_min_version` | STRING | 1.3 | Same semantics as `security.transport.tls_min_version` |
+| `security.display.broker.pam_service` | STRING | `display-broker` | PAM service name |
+| `security.display.broker.ca_cert` | STRING | `/etc/bhyve/ca.pem` | Client cert → user lookup |
+| `security.display.broker.scan_interval` | INT | 30 | Seconds between jail/VM subsystem rescan |
+| `security.display.broker.max_clients` | INT | 64 | Concurrent clients per broker |
+| `security.display.broker.max_attach_per_client` | INT | 8 | Concurrent fbs per client |
+| `security.display.broker.rate_limit` | INT | 10 | Auth attempts per minute per source IP |
+| `security.display.broker.idle_timeout` | INT | 1800 | Idle disconnect (seconds) |
+| `security.display.broker.keepalive_interval` | INT | 30 | PING/PONG interval (seconds) |
+| `security.display.broker.audit_level` | INT | 1 | 0=off, 1=basic, 2=detailed (input sampling) |
+| `security.display.broker.audit_path` | STRING | /var/log/display-broker.log | Audit log destination |
+| `security.display.broker.max_frame_size` | INT | 16777216 | 16 MB default, max 67108864 (64 MB) |
+| `security.display.broker.max_bandwidth_per_client` | INT | 1000000 | 1 Gbps per client (Kbps units) |
+| `security.display.broker.max_total_bandwidth` | INT | 10000000 | 10 Gbps broker-wide (Kbps units) |
+| `security.display.broker.max_fps_per_client` | INT | 60 | Unicast per-client FPS cap |
+| `security.display.broker.max_fps_per_channel` | INT | 60 | Multicast per-channel FPS cap |
+| `security.display.broker.max_fps_total` | INT | 600 | Broker-wide FPS cap (DoS) |
+| `security.display.broker.input_sample_rate` | INT | 100 | Sample every Nth input event for audit (at audit_level=2) |
+
+### 7. Sysctls — display transport (`security.display.transport.*`)
+
+Per-transport frame rate and behavior.
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `security.display.transport.rfb.refresh_fps` | INT | 24 | RFB legacy poll rate (matches existing rfb_wr_thr at ~24Hz) |
+| `security.display.transport.rfb.legacy_allowed` | INT | 1 | 0 = refuse plaintext RFB |
+| `security.display.transport.bdp.refresh_fps` | INT | 60 | BDP unicast target FPS |
+| `security.display.transport.bdp.compression` | STRING | zrle | `raw`/`zrle`/`tight` |
+| `security.display.transport.bdp.pixel_format` | STRING | bgrx | Default if client doesn't negotiate |
+| `security.display.transport.multicast.refresh_fps` | INT | 30 | BDP multicast target FPS (TV/signage) |
+| `security.display.transport.multicast.fec` | INT | 1 | Forward error correction on/off |
+
+### 8. Sysctls — display ACL (`security.display.acl.*`)
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `security.display.acl_default_deny` | INT | 1 | 1 = empty ACL = no access except root |
+| `security.display.acl_root_bypass` | INT | 1 | 1 = uid 0 always allowed (paranoia: set to 0) |
+| `security.display.acl_file_jail` | STRING | /etc/jail/display.acl | Per-jail ACL file (fallback) |
+| `security.display.acl_file_bhyve` | STRING | /etc/bhyve/display.acl | Per-VM ACL file (fallback) |
+
+### 9. Sysctls — multicast (T48, `security.display.broker.multicast.*`)
+
+| Sysctl | Type | Default | Purpose |
+|---|---|---|---|
+| `security.display.broker.multicast.enable` | INT | 1 | 0 = multicast disabled (unicast only) |
+| `security.display.broker.multicast.group_base4` | STRING | 239.1.1.0/24 | IPv4 admin-scoped range |
+| `security.display.broker.multicast.group_base6` | STRING | ff08::/16 | IPv6 equivalent |
+| `security.display.broker.multicast.ttl` | INT | 1 | TTL — 1 = LAN only |
+| `security.display.broker.multicast.max_channels` | INT | 64 | Concurrent multicast channels |
+| `security.display.broker.multicast.max_subscribers_per_channel` | INT | 1024 | Max subs per channel |
+| `security.display.broker.multicast.encrypt` | STRING | required | `required`/`preferred`/`optional` |
+| `security.display.broker.multicast.cipher` | STRING | AES-256-GCM | Per-channel encryption cipher |
+| `security.display.broker.multicast.fec` | INT | 1 | Forward error correction (XOR parity packets) |
+| `security.display.broker.multicast.max_bandwidth_per_channel` | INT | 1000000 | 1 Gbps per channel (Kbps units) |
+| `security.display.broker.multicast.igmp_required` | INT | 1 | 0 = don't fail preflight if IGMP unavailable |
+
+### 10. New OID subtrees (T35 implementation)
+
+The plan adds these top-level OID nodes (created by `sysctl_ctx_init` / `SYSCTL_DECL` calls in T35):
+
+- `security.policy.*` — host policy (existing in plan)
+- `security.transport.*` — transport security (existing in plan)
+- `security.preflight.*` — preflight framework (new in T35 expansion)
+- `security.display.*` — display broker / ACL / transport / multicast (new in T35 expansion)
+
+The OID tree is **created at module load** (`SYSINIT` order) and **persists across reboots** (values are in kernel memory, not on disk; use `sysctl.conf` to persist).
+
+### 11. Loader tunables (`/boot/loader.conf`)
+
+Set at boot, take effect before kernel modules load.
+
+```
+# Autoload
+fbuf_jail_load="YES"
+gpu_resource_load="YES"
+preflight_load="YES"
+
+# Display broker (auto-start on boot, via rc.d)
+display_broker_enable="YES"
+display_broker_listen="tcp4://0.0.0.0:8443"
+display_broker_tls_cert="/etc/bhyve/display-broker.pem"
+display_broker_tls_key="/etc/bhyve/display-broker.key"
+
+# Default host policy (strict, prod-ready)
+security_policy_tls_required=1
+security_policy_legacy_allowed=0
+security_policy_self_signed_allowed=0
+security_policy_audit_default=1
+security_policy_allow_fbuf=0  # explicitly opt in per jail
+security_policy_allow_gpu=0
+security_policy_preflight_strict=1
+security_policy_gpu_strict=1
+security_policy_cuda_percentage_max=50
+security_policy_vram_percentage_max=50
+```
+
+### 12. Userspace broker config (`/etc/bhyve/display-broker.conf`)
+
+The broker reads a config file (key=value, no comments inline) at startup. Equivalent to sysctls for userspace-only settings. Sysctls win for runtime-changeable values; config wins for startup-only values.
+
+```
+# /etc/bhyve/display-broker.conf
+listen=tcp4://0.0.0.0:8443,unix:///var/run/display-broker.sock
+tls_cert=/etc/bhyve/display-broker.pem
+tls_key=/etc/bhyve/display-broker.key
+tls_client_ca=/etc/bhyve/clients-ca.pem
+pam_service=display-broker
+ca_cert=/etc/bhyve/ca.pem
+scan_interval=30
+max_clients=64
+max_attach_per_client=8
+rate_limit=10
+idle_timeout=1800
+keepalive_interval=30
+audit_level=1
+audit_path=/var/log/display-broker.log
+max_frame_size=16777216
+max_bandwidth_per_client=1000000
+max_total_bandwidth=10000000
+max_fps_per_client=60
+max_fps_per_channel=60
+max_fps_total=600
+input_sample_rate=100
+log_level=info
+run_as_user=_display-broker
+run_as_group=_display-broker
+pid_file=/var/run/display-broker.pid
+```
+
+(`share/examples/security/policy-quickstart/broker.conf.snippet` is the recommended template — see T36 expansion.)
+
+### 13. Tunable precedence rules
+
+- **Sysctl > config file** at runtime. A sysctl change takes effect immediately; a config change requires `SIGHUP` + restart.
+- **Loader tunable > sysctl default** at boot. A `loader.conf` value is applied before the kernel module loads; the module's default is used if neither loader nor sysctl sets it.
+- **Per-jail param > host sysctl** only for consumer-loosening. Host policy is **stricter-wins**: the host's `security.policy.*` is the ceiling; consumers can be more restrictive but not less. (See "Host policy layer" above.)
+- **Kernel tunable (`kern.*`) > module default.** The `TUNABLE_INT` call in the module reads the loader value at module load; if not set, the module's compile-time default is used.
+
+### Self-Review Notes (gap classification)
+
+- **CRITICAL — confirmed during interview**: The jail-option switch for fb + auto-kbd/mouse is a hard requirement. Treated as a first-class workstream (T10, T12).
+- **MINOR — auto-resolved**: Backward compat for `rfb=` config key. Will be implemented as a parse-time rewrite to `transport=rfb,...` in `pci_fbuf_parse_config`.
+- **MINOR — auto-resolved**: `bhyvegc` is treated as optional. Refactored `console_init` accepts a flag `CONSOLE_FB_RAW` that skips bhyvegc; bhyve keeps the legacy `console_init(w, h, fb)` calling convention, jails use the raw variant.
+- **AMBIGUOUS — defaulted**: Default resolution for `fbuf` if width/height are unspecified → `1024x768` (matches `COLS_DEFAULT`/`ROWS_DEFAULT` in `pci_fbuf.c`). User can override.
+- **AMBIGUOUS — defaulted**: `fbuf.nokbd` / `fbuf.nomouse` default to **off** (kbd/mouse **on** when `allow.fbuf` is on), per the explicit user requirement "adding in the framebuffer should bring in the keyboard and mouse automatically".
+
+---
+
 ## Work Objectives
 
 ### Core Objective
@@ -5405,10 +5406,10 @@ The user clarified: *"we will be building on FreeBSD 16"*. This pins the target 
 - `share/man/man7/bdp.7` (T39) — BDP wire protocol
 - `share/man/man7/display-enduser.7` (T37) — end user guide (NEW canonical, replaces bhyve-enduser)
 - `share/man/man7/display-security.7` — security best practices
-- `share/man/man7/display-migration.7` (T34) — migration guide from bhyve-specific names
+- `share/man/man7/display-abstraction-migration.7` (T34) — migration guide from bhyve-specific names
 - `share/man/man8/displayd.8` (T47) — broker daemon (NEW canonical)
-- `share/man/man8/displayc.1` — sample client
-- `share/man/man8/bdp-stream.1` — streaming tool
+- `share/man/man1/displayc.1` — sample client (canonical)
+- `share/man/man1/bdp-stream.1` — streaming tool (canonical)
 - `share/man/man9/display_transport.9` — kernel API
 - `share/man/man9/display_backend.9` — kernel API
 - `share/man/man9/display_resource.9` — mediator template API
@@ -7224,6 +7225,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ### Agent Dispatch Summary
 
+- **Wave 0**: 1 task (T0) → `unspecified-high` (template validation across 6 areas: shell, build, test framework, kmod, sysctl, jail param — must pass before Wave 1 starts)
 - **Wave 1**: 7 tasks (T1-T6, T19) → `unspecified-low` / `quick` / `deep` (read-only recon + small headers + GPU audit)
 - **Wave 2**: 8 tasks (T7-T10, T20, T22, T24, T27) → `unspecified-high` (core refactor + GPU design + preflight framework + security design + security wire)
 - **Wave 3**: 15 tasks (T11-T15, T21, T23, T25, T26, T28, T30-T33, T35) → `unspecified-high` (10) + `deep` (T12, T21, T25, T30: kernel + crypto) + `unspecified-low` (T14, T15)
@@ -7239,6 +7241,151 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 > **A task without QA Scenarios is INCOMPLETE — no exceptions.**
 > All file paths are relative to the freebsd-src-oci repo root.
 > All work happens in branch `framebuffer` (currently clean vs main).
+
+---
+
+### Wave 0 — Template validation (must complete BEFORE Wave 1)
+
+> **The "test the templates first" task.** The plan documents 121 shell test files, 5+ major shell scripts, 80+ sysctls, 4 kernel modules, and many other templating patterns. If any of these templates don't work on FreeBSD 16, every task that uses them will fail. So before Wave 1, we validate the most foundational templates (shell patterns, build system, test framework) on a real FreeBSD 16 environment. This is the highest-ROI test in the plan — it catches mistakes once, at the start, rather than 126 times later.
+
+- [ ] 0. Validate FreeBSD shell + build + test patterns (template-first test)
+
+  **What to do**:
+  1. **Shell pattern validation** (the user's concern). On a fresh FreeBSD 16 VM:
+     - Run `sh -n tests/sys/env/verify_test_env.sh` — verify it parses cleanly under FreeBSD's `/bin/sh` (not bash)
+     - Run `sh -n tests/data/regenerate.sh` — same
+     - Run `sh -n tests/data/users/setup-test-users.sh` — same
+     - Source `tests/sys/env/verify_test_env.sh` — confirm it exits 78 cleanly if the env is wrong
+     - Run `sh tests/data/regenerate.sh` (in a temp dir) — confirm certs, users, jails are generated correctly
+     - Run `pw useradd -w random -n test-alice-test-template -u 5999 -d /tmp/test-alice-template -s /bin/sh` — confirm `pw` syntax works
+     - Run `openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/test-key -out /tmp/test-cert -days 36500 -subj "/CN=template-test"` — confirm `openssl` syntax works (this is what `regenerate.sh` does)
+     - Run `openssl pkcs12 -export -in /tmp/test-cert -inkey /tmp/test-key -out /tmp/test.p12 -password pass:test` — confirm PKCS#12 generation works
+     - Run `kyua --version` and `kyua test --help` — confirm kyua is installed and works
+     - Run `sysctl -n hw.ncpu` and `uname -K` — confirm sysctl + uname work
+     - Run `mktemp -d -t template-test-XXXXXX` — confirm `mktemp` template syntax works on FreeBSD (different from GNU)
+     - Run a test script that uses `set -u`, `set -e`, `set -eu`, `if [ ]; then`, `case ... esac`, `for f in *.sh; do`, `cat <<EOF` — confirm all POSIX patterns work
+     - Run a test that uses `local var=value` (POSIX-strict way: split into 2 lines)
+     - Verify NO bashisms: `[[ ]]`, `<<<` here-strings, `${var,,}`, `$RANDOM`, `(( ))`, `function f()`, `select`, `coproc`
+     - Capture the output to `.sisyphus/evidence/task-0-shell-pattern-validation.txt`
+  2. **Build pattern validation** on FreeBSD 16:
+     - `cd /usr/src && MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld` — confirm the user's required build command works
+     - `cd /usr/src && make -j$(sysctl -n hw.ncpu) buildkernel KERNCONF=GENERIC` — confirm buildkernel works
+     - `cd /usr/src/release/sysctl.conf` — confirm `/etc/sysctl.conf` format works (`sysctl -f /etc/sysctl.conf`)
+     - `kyua test -r /usr/tests/...` — confirm kyua invocation works
+     - `MAKE_JOBS_NUMBER=1 make -j1 buildworld` then `MAKE_JOBS_NUMBER=$NCPU make -j$NCPU buildworld` — confirm parallel build gives ≥2x speedup on 4+ core
+     - Capture to `.sisyphus/evidence/task-0-build-pattern-validation.txt`
+  3. **Test framework pattern validation**:
+     - Write a 3-line ATF C test file and run it via `kyua test` — confirm ATF C test pattern works
+     - Write a 3-line shell test file (with `.sh` extension and `atf_test_case` function) and run it via `kyua test` — confirm shell test pattern works
+     - Write a test that sources `verify_test_env.sh` first — confirm the chain works
+     - Write a test that captures JSON evidence to `.sisyphus/evidence/task-N-slug.json` — confirm the path is writable
+     - Capture to `.sisyphus/evidence/task-0-test-framework-validation.txt`
+  4. **Kernel module build pattern validation**:
+     - `mkdir -p /tmp/test-mod && cat > /tmp/test-mod/Makefile <<EOF\nKMOD=template-test\nSRCS=template-test.c\n.include <bsd.kmod.mk>\nEOF` — confirm a minimal `bsd.kmod.mk`-based module builds
+     - `cd /tmp/test-mod && make` — confirm the build succeeds
+     - `kldload ./template-test.ko` then `kldunload template-test.ko` — confirm load/unload works
+     - Capture to `.sisyphus/evidence/task-0-kmod-pattern-validation.txt`
+  5. **Sysctl registration pattern validation**:
+     - Write a 20-line kernel module that registers 3 sysctls (INT, STRING, INT with permission) using `SYSCTL_DECL`, `SYSCTL_INT`, `SYSCTL_STRING`, `sysctl_ctx_init`, `sysctl_ctx_free`
+     - `kldload` it, `sysctl -a | grep test_pattern` to verify the sysctls are visible
+     - `sysctl test.pattern.int=42` to verify write
+     - `kldunload` it
+     - Capture to `.sisyphus/evidence/task-0-sysctl-pattern-validation.txt`
+  6. **Jail param registration pattern validation**:
+     - Write a 30-line kernel module that registers 2 jail params (one string, one bool) using `osd_jail_register` / `osd_jail_set` / `osd_jail_get`
+     - Create a test jail with the new params, `jls -v test` to verify
+     - Remove the test jail
+     - `kldunload` the module
+     - Capture to `.sisyphus/evidence/task-0-jail-param-validation.txt`
+
+  **Must NOT do**:
+  - Don't write any production code. This is template validation only.
+  - Don't fix bugs in the templates — file follow-up tasks for T0.X (e.g., "T0.1: Fix mktemp template in regenerate.sh"). Each fix becomes a new tiny task in this wave.
+  - Don't skip any of the 6 validations above — each catches a different class of bug.
+
+  **Recommended Agent Profile**:
+  - **Category**: `unspecified-high` — needs careful systematic validation across 6 areas; not a quick task.
+  - **Skills**: `[]` — no skill match; this is FreeBSD shell + build + test framework validation.
+
+  **Parallelization**:
+  - **Can Run In Parallel**: NO (T0 is sequential, blocks all of Wave 1)
+  - **Parallel Group**: Wave 0 (alone)
+  - **Blocks**: T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30, T31, T32, T33, T34, T35, T36, T37, T38, T39, T40, T41, T42, T43, T44, T45, T46, T47, T48, T49, T50, T51, T52, T53, T54, T55, T56, T57, T58, T59, T60, T61, T62, T63, T64, T65, T66, T67, T68, T69, T70, T71, T72
+  - **Blocked By**: None (this is the first task)
+
+  **References**:
+  - `tests/sys/env/verify_test_env.sh` — the shipped example (T0 validates it works)
+  - `tests/data/regenerate.sh` — the shipped example
+  - `tests/data/users/setup-test-users.sh` — the shipped example
+  - FreeBSD 16 release notes: https://www.freebsd.org/releases/16.0R/relnotes/
+  - FreeBSD Porter's Handbook (chapters on shell scripting, build system): https://docs.freebsd.org/en/books/porters-handbook/
+  - `bsd.kmod.mk` documentation: `man bsd.kmod.mk` on FreeBSD
+  - `kyua` documentation: `man kyua`
+
+  **Acceptance Criteria**:
+  - [ ] All 6 validation areas pass with no FAIL lines in the output
+  - [ ] 6 evidence files exist: `task-0-shell-pattern-validation.txt`, `task-0-build-pattern-validation.txt`, `task-0-test-framework-validation.txt`, `task-0-kmod-pattern-validation.txt`, `task-0-sysctl-pattern-validation.txt`, `task-0-jail-param-validation.txt`
+  - [ ] NO bashisms found in any of the 5 shipped shell scripts (or follow-up tasks filed)
+  - [ ] `kyua test` works on a 3-line ATF C test
+  - [ ] `kyua test` works on a 3-line shell test
+  - [ ] A minimal `bsd.kmod.mk` module builds + loads + unloads cleanly
+  - [ ] Sysctls registered via `SYSCTL_INT` / `SYSCTL_STRING` are visible via `sysctl -a`
+  - [ ] Jail params registered via `osd_jail_*` are visible via `jls -v`
+
+  **QA Scenarios**:
+  ```
+  Scenario: All 6 validations pass on FreeBSD 16
+    Tool: Bash (6 separate commands)
+    Preconditions: Fresh FreeBSD 16 VM with source tree, kyua, openssl, git, bash, tmux installed
+    Steps:
+      1. sh -n tests/sys/env/verify_test_env.sh && sh -n tests/data/regenerate.sh && sh -n tests/data/users/setup-test-users.sh
+      2. (cd /tmp && . tests/sys/env/verify_test_env.sh)  # sources without error on FreeBSD 16
+      3. sh tests/data/regenerate.sh  # creates certs/configs/users/jails
+      4. ls tests/data/certs/ | wc -l   # should be 8+ (ca, server, 3 client variants, 2 key pairs)
+      5. pw usershow test-alice  # should succeed
+      6. cd /usr/src && MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld 2>&1 | tail -20
+      7. echo 'console.output="vidconsole,comconsole"' | kenv -q -
+      8. cd /tmp/test-mod && make && kldload ./template-test.ko && kldunload template-test.ko
+      9. cd /tmp/test-sysctl && kldload ./test-sysctl.ko && sysctl -a | grep test_pattern && kldunload test-sysctl.ko
+      10. cd /tmp/test-jail && kldload ./test-jail.ko && jail -c name=t0test ... && jls -v t0 | grep test_param
+    Expected Result: All 10 steps succeed; no shell errors, no kldload errors, no sysctl errors, no jail errors
+    Failure Indicators: "syntax error" in shell parse, "kldload: can't load", "sysctl: unknown oid", "jail: invalid parameter"
+    Evidence: .sisyphus/evidence/task-0-{shell,build,test,kmod,sysctl,jail-param}-validation.txt
+
+  Scenario: NO bashisms in shipped shell scripts
+    Tool: Bash (grep + check)
+    Preconditions: 5 shipped shell scripts exist
+    Steps:
+      1. for f in tests/sys/env/verify_test_env.sh tests/data/regenerate.sh tests/data/users/setup-test-users.sh; do
+         echo "=== $f ===";
+         grep -nE '\[\[|<<<?|RANDOM|function [a-z_]+\(\)|\$\(\(|coproc|select|\${[a-z_]+,,}|\${[a-z_]+\^\^}' "$f" || echo "OK: no bashisms";
+         done
+    Expected Result: "OK: no bashisms" for all 5 files
+    Failure Indicators: Any file shows a match
+    Evidence: .sisyphus/evidence/task-0-bashism-check.txt
+  ```
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-0-{area}-validation.txt` and update the run manifest.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.7 Architecture support — for FreeBSD-specific shell + kernel patterns
+  - §4.21 FreeBSD 16 target — for version pin and HARD STOP protocol
+  - This task body: ~10 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] 6 evidence files at `.sisyphus/evidence/task-0-*.txt` exist
+  - [ ] If any validation failed, follow-up tasks T0.1, T0.2, etc. are filed with specific bug reports
+  - [ ] Checkpoint at `.sisyphus/state/task-0.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-0 complete" and stops
+
+  **Commit**: NO (read-only validation, no code change) — but if follow-up tasks filed, each follow-up gets its own commit
 
 ---
 
@@ -7292,6 +7439,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Failure Indicators: Missing file, < 8 function entries, no verdict
     Evidence: .sisyphus/evidence/task-1-bhyvegc-summary.txt (the first 30 lines + verdict)
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Investigation Summary — what we found in the 3-layer stack
+  - §4.7 Architecture support (§4.7) — for arch considerations in the recon
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO (read-only, no code change)
 
@@ -7347,6 +7517,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Failure Indicators: Missing file, no caller entries, no verdict
     Evidence: .sisyphus/evidence/task-2-input-fanout.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Investigation Summary — the console_kbd_register/console_ptr_register pattern
+  - §4.8 Console broker / multiplexer — the broker-side kbd/ptr design
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO
 
@@ -7405,6 +7598,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-3-jail-recipe.txt (first 20 lines)
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.1 Original Request — the jail params user wants
+  - §4.6 Backward compatibility — what must NOT break
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO
 
 ---
@@ -7453,6 +7669,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-4-dt-header.txt (cpp output if errors; "OK" if clean)
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security (VNC hardening) — security config keys
+  - §4.6 Backward compatibility — rfb= legacy compat
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES
   - Message: `bhyve(display): draft display_transport.h vtable header`
   - Files: `usr.sbin/bhyve/display_transport.h`
@@ -7497,6 +7736,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: clean
     Evidence: .sisyphus/evidence/task-5-db-header.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — preflight integration
+  - §4.7 Architecture support — endianness, pointer size
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES
   - Message: `bhyve(display): draft display_backend.h vtable header`
@@ -7553,6 +7815,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-6-fbuf-params.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.1 Original Request — jail params user wants
+  - §4.6 Backward compatibility — no breaking changes to existing jail params
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO (spec only)
 
 ---
@@ -7606,6 +7891,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-7-gpu-audit.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.3 GPU Resource Governance — gpu_resource design
+  - §4.20 Workload-driven GPU selection — GPU_CAPS_REGISTER mechanism
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO
 
 ---
@@ -7647,6 +7955,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: All 4+ cases pass
     Evidence: .sisyphus/evidence/task-7-kyua.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — transport_registered preflight check
+  - §4.5 Transport security — security config keys
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bhyve(display): implement display_transport registry with TDD`
 
@@ -7763,6 +8094,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Evidence**: `.sisyphus/evidence/task-8-atf.txt` (kyua report) + `.sisyphus/evidence/task-8-coverage.txt` (gcov summary)
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Investigation Summary — console.c:50-83 call sites
+  - §4.7 Architecture support — big/little endian for pixel data
+  - T1 verdict — bhyvegc coupling report
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bhyve(display): refactor console to multi-instance + caller-provided fb (TDD)`
 
 ---
@@ -7800,6 +8155,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: All tests pass; `fbuf.nokbd` shows as 1
     Evidence: .sisyphus/evidence/task-9-fbuf-params.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.1 Original Request — allow.fbuf + fbuf.* jail params
+  - §4.6 Backward compatibility — no breaking changes
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `kern_jail: register fbuf jail params (allow.fbuf, fbuf.nokbd, fbuf.nomouse, fbuf.{width,height,transport})`
 
@@ -7839,6 +8217,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-10-fbuf-flag.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.1 Original Request — PRISON_FLAG_PRISON_FBUF semantics
+  - T9 — jail param registration
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `kern_jail: add PRISON_FLAG_PRISON_FBUF and prison_check_fbuf()`
 
 ---
@@ -7873,6 +8274,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: All 8 sections present
     Evidence: .sisyphus/evidence/task-20-gpu-design.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.3 GPU Resource Governance — gpu_resource struct + backend vtable
+  - §4.18 Mediated passthrough — mediator template
+  - T19 — GPU audit results
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO (design only)
 
@@ -7914,6 +8339,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-22-preflight.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — the 20 checks to ship
+  - T21 — gpu_resource hooks
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `preflight: kernel preflight check framework with TDD`
 
 ---
@@ -7950,6 +8398,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-24-sec-design.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security (VNC hardening) — all security config keys
+  - §4.6 Backward compatibility — tls_required default, legacy opt-in
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO
 
 ---
@@ -7985,6 +8456,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-27-sec-wire.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — security struct in display_transport
+  - §4.4 Preflight check framework — preflight security checks
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bhyve(display): wire transport_security into display_transport_init`
 
 ---
@@ -8006,6 +8500,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; `bhyve -s 0,fbuf,rfb=...` still works; `cd usr.sbin/bhyve && make` clean.
 
   **QA**: `kyua test atf_rfb_transport`; smoke `tests/sys/vmm/fbuf_legacy.sh` passes.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Investigation Summary — rfb.c:899-909 kbd/ptr fan-out
+  - §4.5 Transport security — VeNCrypt integration
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bhyve(rfb): wrap rfb as a registered display_transport (TDD)`
 
@@ -8078,6 +8595,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Evidence**: `.sisyphus/evidence/task-12-atf.txt` (kyua report) + `.sisyphus/evidence/task-12-coverage.txt` (gcov ≥ 85%)
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — preflight fbuf checks
+  - §4.7 Architecture support — PAGE_SIZE handling per arch
+  - §4.21 FreeBSD 16 target — version pin
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `fbuf_jail: kernel module provisioning jail framebuffer + kbd + mouse (TDD)`
 
 ---
@@ -8097,6 +8638,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; `bhyve -s 0,fbuf,rfb=127.0.0.1:5900` still works (regression); `bhyve -s 0,fbuf,transport=rfb,host=...,port=...` works (new syntax).
 
   **QA**: regression suite + TDD; `bhyve -s 0,fbuf,transport=rdp` errors with "rdp not yet implemented" (clean error from stub).
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Investigation Summary — pci_fbuf.c:444-449 + pcii_fbuf_baraddr:218
+  - §4.5 Transport security — rfb= legacy backcompat
+  - §4.6 Backward compatibility — no breaking changes to pci_fbuf
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bhyve(pci_fbuf): wire to display_transport_init with rfb= legacy compat`
 
@@ -8118,6 +8683,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `bhyve -s 0,fbuf,transport=rdp 2>&1 | grep "not yet implemented"` — match.
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — capsicum ordering, security config
+  - §4.6 Backward compatibility — no breaking changes
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bhyve(rdp): stub rdp transport registered for future implementation`
 
 ---
@@ -8138,6 +8726,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `kyua test tests/sys/jail/fbuf`; `./jail-console-example` exits 0.
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - T12 — fbuf_jail module API
+  - §4.4 Preflight check framework — preflight fbuf checks
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `tests: add jail fbuf ATF harness + jail-console-example`
 
 ---
@@ -8157,6 +8768,31 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; `make -C sys/modules/gpu_resource build`; `buildkernel`; live: `sysctl hw.gpu.0.host_reserve=20%` then `jail -c name=gputest allow.gpu=0 gpu.cores=50% persist` succeeds with the resolved cores.
 
   **QA**: `kyua test atf_gpu_resource`; live: `jail -c name=gpustrict allow.gpu=0 persist` on hardware with no GPU → ENXIO; `allow.gpu.strict=0` → jail starts with no GPU.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.3 GPU Resource Governance — gpu_resource implementation
+  - §4.13 GPU ports model — ports_max + port.N.* sysctls
+  - §4.20 Workload-driven GPU selection — caps registry, GPU_CAPS_REGISTER
+  - T19, T20 — predecessor tasks
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `gpu_resource: kernel module + jail params (allow.gpu, gpu.cores, gpu.memory, gpu.scheduler) (TDD)`
 
@@ -8238,6 +8874,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `kyua test atf_shipped_checks`; live jail start logs all 11 preflight lines.
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — all preflight checks integrated
+  - T12, T21, T22 — predecessors
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `preflight: register 11 shipped checks (gpu, fbuf, display, bhyve)`
 
 ---
@@ -8257,6 +8916,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; live: `bhyve -s 0,fbuf,transport=rfb` starts with self-signed TLS; `openssl s_client -connect 127.0.0.1:5900 -starttls rfb` (or a TLS-aware VNC client) connects successfully.
 
   **QA**: `kyua test atf_vencrypt`; live TLS handshake with `openssl s_client`; live plaintext refusal when `tls=required`.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — VeNCrypt implementation
+  - T11 — rfb.c wrap
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bhyve(rfb): implement VeNCrypt TLS (security types 19/20)`
 
@@ -8278,6 +8960,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `kyua test atf_rfb_hardening`; live brute-force test (script with 10 rapid connections).
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — rate limit + idle timeout
+  - T25 — VeNCrypt handshake
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bhyve(rfb): add rate limiting, idle timeout, audit logging`
 
 ---
@@ -8295,6 +9000,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; 3 transport security checks present (`preflight.transport.tls_cert_readable`, `preflight.transport.tls_key_permissions`, `preflight.transport.legacy_used`); live: `sysctl security.policy.legacy_allowed=0` then `bhyve -s 0,fbuf,rfb=...` is refused by preflight.
 
   **QA**: `kyua test atf_transport_preflight`; live: set `security.policy.legacy_allowed=0`, attempt legacy start, observe refusal.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — cert readability preflight
+  - §4.5 Transport security — cert/key/permissions
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `preflight: add 3 transport security preflight checks (tls_cert_readable, tls_key_permissions, legacy_used)`
 
@@ -8316,6 +9044,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `kyua test atf_cert_loader`; live: `bhyve -s 0,fbuf,transport=rfb` then `ls /var/db/bhyve/tls/` then restart and check mtime unchanged.
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — cert format auto-detect
+  - T33 — cert preflight checks
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bhyve(tls): cert loader with dir/file discovery + self-signed auto-gen (TDD)`
 
 ---
@@ -8335,6 +9086,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; live: `certbot renew --dry-run` (or manually `cp` a new cert) → loader log shows reload within 1s; in-flight VNC sessions not interrupted.
 
   **QA**: `kyua test atf_cert_reload`; live: simulate renewal, watch `/var/log/transport.log` (or wherever audit goes).
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — TLS 1.3 only
+  - T25 — VeNCrypt implementation
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bhyve(tls): kqueue hot-reload for certbot renewal`
 
@@ -8356,6 +9130,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `kyua test atf_sni`; live: `openssl s_client -connect <host>:<port> -servername host1 < /dev/null` shows the host1 cert.
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — SNI + kqueue hot-reload
+  - T30 — cert loader
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bhyve(tls): SNI support via sni_dir + default_cert`
 
 ---
@@ -8373,6 +9170,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; 6 cert preflight checks present; live: `bhyve -s 0,fbuf,transport=rfb` with a corrupt cert → refused with `preflight: tls_cert_format: PEM parse failed at line N`.
 
   **QA**: `kyua test atf_cert_preflight`; live with corrupt + good + near-expiry certs.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — cert preflight checks
+  - §4.5 Transport security — cert validation
+  - T30 — cert loader
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `preflight: add 6 cert format/chain/expiry preflight checks`
 
@@ -8393,6 +9214,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: TDD pass; 13 sysctls present; `buildkernel`; live: `sysctl security.policy.legacy_allowed=0` then `bhyve -s 0,fbuf,rfb=...` fails preflight with clear message.
 
   **QA**: `kyua test atf_host_policy`; live: tighten host policy, attempt legacy start, observe refusal.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — host policy sysctls
+  - §4.6 Backward compatibility — stricter-wins precedence
+  - T22 — preflight framework
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `kern: implement security.policy.* and security.transport.* host policy sysctls`
 
@@ -8482,6 +9327,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel` from a clean source tree — must succeed; verify with `time` that the parallel build is faster than `-j1` by at least 2× on a 4-core+ machine.
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.4 Preflight check framework — preflight integration
+  - T15 — fbuf_jail jail param validation
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `build: wire all new sources into Makefiles + modules list`
 
 ---
@@ -8501,6 +9369,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Acceptance**: all man pages present; `mandoc -Tlint` clean; `display-abstraction.md` present and indexed.
 
   **QA**: `mandoc -Tlint share/man/man5/jail.conf.5`; live: `man bhyve` shows the new `transport=` flag and the `rfb=` deprecation notice.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.6 Backward compatibility — all compat rules
+  - §4.21 FreeBSD 16 target — version pin
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `docs: add jail.conf.5, bhyve.8, display-abstraction.md, policy-quickstart(7), display_transport_security(7), gpu_resource(9)`
 
@@ -8522,6 +9413,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **QA**: `kyua test tests/sys/vmm/fbuf_variants.sh`; `kyua test tests/sys/jail/fbuf/load.sh`; `kyua test tests/sys/policy/host_policy.sh`.
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.21 FreeBSD 16 target — build on FreeBSD 16
+  - §4.7 Architecture support — cross-arch smoke tests
+  - All v1 tasks T1-T17 — what was built so far
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `tests: add fbuf_variants.sh, jail/fbuf/load.sh, policy/host_policy.sh smoke tests`
 
 ---
@@ -8538,7 +9453,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Acceptance**: man page present, `mandoc -Tlint` clean, all design-section claims cross-referenced.
 
-  **QA**: `mandoc -Tlint share/man/man7/display_transport_security.7`; live: `man display_transport_security` reads well and is comprehensive.
+  **QA**: `mandoc -Tlint share/man/man7/display-transport-security.7`; live: `man display_transport_security` reads well and is comprehensive.
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — man page content
+  - T17 — man page style
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `docs: add display_transport_security(7) — full security model reference`
 
@@ -8593,10 +9531,33 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   Scenario: 5 man pages cross-reference the migration guide
     Tool: Bash (grep)
     Steps:
-      1. grep -l 'display-abstraction-migration' share/man/man8/bhyve.8 share/man/man5/bhyve_config.5 share/man/man5/jail.conf.5 share/man/man7/policy-quickstart.7 share/man/man7/display_transport_security.7
+      1. grep -l 'display-abstraction-migration' share/man/man8/bhyve.8 share/man/man5/bhyve_config.5 share/man/man5/jail.conf.5 share/man/man7/policy-quickstart.7 share/man/man7/display-transport-security.7
     Expected Result: All 5 files mention the guide
     Evidence: .sisyphus/evidence/task-34-migration-refs.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.6 Backward compatibility — upgrade-must-not-break
+  - T17 — man pages
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `docs: add display-abstraction-migration(7) — operator upgrade guide`
 
@@ -8620,7 +9581,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
      - `jail.conf.5` — point at `jail.conf.snippet` in the FILES section
      - `bhyve.8` — point at `bhyve_args.snippet` in the FILES section
      - `bhyve_config.5` — point at the snippets
-     - `display_transport_security.7` — point at `policy-quickstart.conf` AND `letsencrypt-setup.sh` AND `sni_dir_setup.sh` AND `sysctl.conf.snippet`
+     - `display-transport-security.7` — point at `policy-quickstart.conf` AND `letsencrypt-setup.sh` AND `sni_dir_setup.sh` AND `sysctl.conf.snippet`
      - `policy-quickstart.7` (T17) — SYNOPSIS section references both `policy-quickstart.conf` and `sysctl.conf.snippet`, plus the three install paths
      - `gpu_resource.9` (T17) — point at `bhyve_args.snippet` for GPU examples
   10. Update the FreeBSD `Makefile` in `share/examples/security/policy-quickstart/` to install the snippets to `/usr/share/examples/security/policy-quickstart/` at build time. Include a `package-plist` entry so `pkg install` picks them up.
@@ -8673,7 +9634,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Tool: Bash (grep)
     Preconditions: T17, T25, T26, T29 done
     Steps:
-      1. grep -l 'policy-quickstart\|sysctl.conf.snippet' share/man/man5/jail.conf.5 share/man/man8/bhyve.8 share/man/man5/bhyve_config.5 share/man/man7/display_transport_security.7 share/man/man7/policy-quickstart.7 share/man/man9/gpu_resource.9
+      1. grep -l 'policy-quickstart\|sysctl.conf.snippet' share/man/man5/jail.conf.5 share/man/man8/bhyve.8 share/man/man5/bhyve_config.5 share/man/man7/display-transport-security.7 share/man/man7/policy-quickstart.7 share/man/man9/gpu_resource.9
     Expected Result: All 6 files mention policy-quickstart in some form
     Failure Indicators: Any man page missing the reference
     Evidence: .sisyphus/evidence/task-36-man-refs.txt
@@ -8691,6 +9652,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Failure Indicators: Original settings lost, sysctl -f fails, restore fails
     Evidence: .sisyphus/evidence/task-36-sysctl-conf-integration.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — policy-quickstart example
+  - T17 — man page style
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `examples: add share/examples/security/policy-quickstart with snippets, certbot recipe, SNI recipe, sysctl.conf.snippet + man cross-refs`
 
@@ -8751,6 +9735,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: all 4 files mention the guide
     Evidence: .sisyphus/evidence/task-37-enduser-refs.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — how to access + secure
+  - §4.6 Backward compatibility — upgrade story
+  - T17 — man page style
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `docs: add bhyve-display-enduser(7) — end user perspective on access and security`
 
@@ -8920,6 +9928,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Evidence**: `.sisyphus/evidence/task-38-atf.txt` (kyua report) + `.sisyphus/evidence/task-38-coverage.txt` (gcov ≥ 85%)
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — broker architecture
+  - §4.5 Transport security — auth methods, ACL
+  - T39 — BDP protocol
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `display-broker: add bhyve-display-broker daemon with auth, ACL, sessions, privilege drop, and tunable precedence`
 
 ---
@@ -8970,7 +10002,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
       1. kyua test tests/sys/display/bdp_roundtrip.test
       2. bdp_probe --encode AUTH --user alice --password s3cret > /tmp/frame.bin
       3. bdp_probe --decode < /tmp/frame.bin
-    Expected Result: All 14 unicast + 9 multicast message types round-trip; decoded values match input
+    Expected Result: All 15 unicast + 9 multicast message types round-trip; decoded values match input
     Evidence: .sisyphus/evidence/task-39-bdp-roundtrip.txt
 
   Scenario: 8K frame round-trips
@@ -8989,6 +10021,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: All 8 malformed frame variants rejected with appropriate error
     Evidence: .sisyphus/evidence/task-39-bdp-malformed.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — BDP wire format spec
+  - §4.5 Transport security — TLS 1.3 mandatory
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bdp: add bdp(7) protocol spec, bdp.{h,c} encoder/decoder, 16-64 MB frame support, ATF roundtrip tests`
 
@@ -9060,6 +10115,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-40-acl-default-deny.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — ACL model
+  - T38 — broker daemon
+  - T9, T13 — jail/VM config keys
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `display: add display.acl jail param + ACL resolver with file fallback and default-deny`
 
 ---
@@ -9112,6 +10191,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: jail fb no longer in list
     Evidence: .sisyphus/evidence/task-41-registry-remove.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — audit log format
+  - T40 — ACL resolver
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `display-broker: add registry scan + kqueue watch + ACL-filtered LIST handler + rate-limited kqueue events`
 
@@ -9176,6 +10278,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-42-fps-enforce.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — resource discovery
+  - T38, T40 — broker + ACL
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `display-broker: add BDP ↔ display_transport bridge with frame rate + bandwidth enforcement`
 
 ---
@@ -9225,6 +10350,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: throttled event present, dropped events not logged
     Evidence: .sisyphus/evidence/task-43-audit-throttle.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — transport bridge VNC/RDP interop
+  - T11, T13 — rfb wrap + pci_fbuf wire
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `display-broker: add audit logging to syslog, file, and BDP stream with rate limiting`
 
@@ -9343,6 +10491,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Evidence**: `.sisyphus/evidence/task-44-atf.txt` (kyua report) + `.sisyphus/evidence/task-44-coverage.txt` (gcov ≥ 90%)
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — libdisplay public API
+  - T39 — BDP protocol
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `libbdp: add C client library for BDP with connect/auth/list/attach/read/detach/multicast API`
 
 ---
@@ -9392,6 +10563,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-45-multicast.png
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — BDP client API
+  - T44 — libdisplay
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `display-client: add bhyve-display-client sample CLI (TUI + PNG dump + list + multicast pub/sub)`
 
 ---
@@ -9435,6 +10629,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-46-e2e.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — broker e2e
+  - T38-T45 — all broker work
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `tests: add e2e broker test (2 jails + 1 VM + 3 users + multicast)`
 
 ---
@@ -9476,10 +10693,33 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Tool: Bash (grep)
     Steps:
       1. grep -l 'bhyve-display-broker' share/man/man8/*.8 share/man/man7/*.7
-      2. grep -l 'bdp' share/man/man7/bhyve-display-broker.8 share/man/man5/display-acl.5
+      2. grep -l 'bdp' share/man/man8/bhyve-display-broker.8 share/man/man5/display-acl.5
     Expected Result: cross-references present
     Evidence: .sisyphus/evidence/task-47-man-refs.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.5 Transport security — broker config file format
+  - T17 — man page style
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `docs: add broker man pages, bdp(7), display-acl(5), client(1) + examples + cross-refs`
 
@@ -9568,6 +10808,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-48-multicast-acl.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — multicast UDP design
+  - T38 — broker daemon
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `display-broker: add BDP multicast UDP support (TV / advertising / video wall) with AES-256-GCM encryption and per-channel ACL`
 
 ---
@@ -9649,6 +10912,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: within 5% accuracy
     Evidence: .sisyphus/evidence/task-49-histogram.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.11 Instrumentation, statistics, diagnostics — stats design
+  - T38 — broker daemon
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `displayd: add stats collection (counters, gauges, histograms) with periodic dump and tunable mirror`
 
@@ -9735,6 +11021,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-50-sigusr2.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.11 Instrumentation, statistics, diagnostics — DTrace USDT probes
+  - T38 — broker daemon
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `displayd: add diagnostic tools, per-session tracing, DTrace probes (USDT)`
 
 ---
@@ -9804,6 +11113,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: NO_PERM
     Evidence: .sisyphus/evidence/task-51-debug-deny.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.11 Instrumentation, statistics, diagnostics — BDP stats message types
+  - T39, T44 — BDP protocol + libdisplay
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bdp: add STATS_REQ, STATS_REPLY, DEBUG_CMD, DEBUG_REPLY, TRACE_CTRL, HEALTH_REQ, HEALTH_REPLY, HEALTH_PUSH message types with ACL enforcement`
 
@@ -9912,6 +11244,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-52-debug-403.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.11 Instrumentation, statistics, diagnostics — HTTP health endpoint
+  - §4.9 Localhost by default — localhost-only HTTP
+  - T38 — broker daemon
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `displayd: add HTTP /healthz, /readyz, /stats, /version, /debug/* endpoints with localhost-by-default (Unix socket always, TCP only via http_listen sysctl, public requires http_listen_public=1 + mTLS, IPv6 dual-stack)`
 
 ---
@@ -9973,6 +11329,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-53-mixed-res.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.12 Multi-display support — fbuf.count + fbuf.N.*
+  - §4.13 GPU ports model — gpu.ports + per-port resolution
+  - T8, T9, T21 — predecessors
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `display: add multi-display support (fbuf.count, fbuf.N.*, multi-slot bhyve, mixed resolutions)`
 
 ---
@@ -10017,6 +11397,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-54-wall-2x2.png
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.12 Multi-display support — wall resource + composite
+  - T53 — multi-display
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `display-broker: add display walls (composite stitching, cache, mixed resolutions)`
 
 ---
@@ -10053,6 +11456,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] Old clients (don't know about displays) attach to single-display resource and get the only display
   - [ ] Per-display ACL works
   - [ ] ATF tests pass
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.12 Multi-display support — BDP multi-display messages
+  - T39, T53, T54 — BDP + multi-display + walls
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `bdp: add LIST_DISPLAYS, DISPLAY_ATTACH, DISPLAY_DETACH, WALL_ATTACH message types with per-display ACL`
 
@@ -10096,6 +11522,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: 4 ports listed (HDMI, DP, DP, USB-C)
     Evidence: .sisyphus/evidence/task-56-port-list.txt
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.13 GPU ports model — port enumeration tool
+  - T21, T53 — gpu_resource + multi-display
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `gpu-port-info: add CLI tool to enumerate GPU ports and per-port stats`
 
@@ -10144,6 +11593,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-57-audio-sync.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.14 Audio support — BDP audio message types
+  - T39, T55 — BDP + multi-display messages
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bdp: add 8 audio message types (AUDIO_STREAM_OPEN, AUDIO_FRAME, AUDIO_CONTROL, AUDIO_SYNC, etc.) with PTS-based sync`
 
 ---
@@ -10191,6 +11663,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-58-stub-440hz.txt
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.14 Audio support — audio_resource.ko mediator
+  - §4.18 Mediated passthrough — attach/detach/reset/reinit hooks
+  - T21 — gpu_resource pattern
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `audio_resource: add kernel module for audio allocation, ACL, stats (with audio_stub test backend)`
 
 ---
@@ -10237,6 +11733,29 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Expected Result: 5 seconds of audio recorded
     Evidence: .sisyphus/evidence/task-59-record.wav
   ```
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.14 Audio support — audio routing
+  - T58 — audio_resource
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES — `displayd: add audio routing (mixer, per-stream volume, multi-source to multi-sink, recording)`
 
@@ -10286,11 +11805,34 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Evidence: .sisyphus/evidence/task-60-chromecast.png
   ```
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.14 Audio support — bdp-stream for ffmpeg integration
+  - T39, T44, T57 — BDP + libdisplay + audio messages
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: YES — `bdp-stream: add CLI tool to pipe BDP video+audio to external encoders (ffmpeg, gstreamer, cast-sender)`
 
 ---
 
-- [ ] 61. Chromecast transport (v2 follow-on — built-in cast sender)
+- [ ] 61. Chromecast transport (DESIGN ONLY — v2 follow-on — built-in cast sender)
 
   **What to do**:
   1. Add `cast` as a registered `display_transport` in `usr.sbin/displayd/cast.c`:
@@ -10312,6 +11854,30 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] `displayc --cast-to "Living Room TV"` plays VM on TV
   - [ ] No external ffmpeg/cast-sender needed
   - [ ] Works with v2 follow-on broker
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.15 Cast tool design considerations — chromecast design
+  - T60 — bdp-stream
+  - **DESIGN ONLY — no v1 implementation expected**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: YES (in v2) — `displayd: add built-in chromecast transport (mDNS discovery + Cast protocol)`
 
@@ -10343,6 +11909,29 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] LL-HLS partial segments work (target latency < 3s)
   - [ ] ACL enforced (no HLS feed without attach right)
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — broker endpoints
+  - **DESIGN ONLY — no v1 implementation**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO (v2 only — design preserved in plan)
 
 ---
@@ -10367,6 +11956,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] `vlc rtsp://localhost:8554/web1` plays the stream
   - [ ] ONVIF Profile S compliant
   - [ ] ACL enforced (no RTSP feed without attach right)
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — broker endpoints
+  - §4.15 Cast tool design considerations — miracast=RTSP+RTP+WFD-P2P
+  - **DESIGN ONLY — no v1 implementation**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO (v2 only — design preserved in plan)
 
@@ -10395,6 +12008,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] EDID block readable via BDP
   - [ ] Hot-plug events delivered to attached clients
   - [ ] ACL enforced
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.8 Console broker / multiplexer — broker endpoints
+  - §4.12 Multi-display support — EDID per display
+  - **DESIGN ONLY — no v1 implementation**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO (v2 only — design preserved in plan)
 
@@ -10428,6 +12065,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] Host cannot open `/dev/bluetoothN` while jail-bound
   - [ ] Other jails cannot open while jail-bound
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — host passthrough exclusivity
+  - §4.18 Mediated passthrough — mediator template
+  - **DESIGN ONLY — no v1 implementation**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO (v2 only — design preserved in plan)
 
 ---
@@ -10459,6 +12120,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] Jail's `dmesg` shows generic device name, not "BT"
   - [ ] `bt.raw_access=1` (opt-in) lets advanced jails see raw HCI
   - [ ] ACL enforces class mapping (e.g., jail A only allowed audio devices)
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — device-class abstraction
+  - §4.18 Mediated passthrough — POSIX device mapping
+  - **DESIGN ONLY — no v1 implementation**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO (v2 only — design preserved in plan)
 
@@ -10493,6 +12178,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] Audit log written
   - [ ] BDP messages defined and documented
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — force-disconnect authorization
+  - T40 — ACL resolver
+  - **DESIGN ONLY — no v1 implementation**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO (v2 only — design preserved in plan)
 
 ---
@@ -10523,6 +12232,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] Bandwidth budget enforced
   - [ ] Role / peer whitelist enforced
   - [ ] ACL integration works
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — slot/budget/role/peer model
+  - §4.13 GPU ports model — port allocation pattern
+  - **DESIGN ONLY — no v1 implementation**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO (v2 only — design preserved in plan)
 
@@ -10557,6 +12290,31 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] Idempotency verified
   - [ ] No zombie peer connections
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — jail termination cleanup
+  - §4.18 Mediated passthrough — cleanup lifecycle
+  - T21 — gpu_resource cleanup pattern
+  - **DESIGN ONLY — v3 future boulder**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO (v3 only — design preserved in plan)
 
 ---
@@ -10582,6 +12340,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] Failover works
   - [ ] Load balancing works
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — multi-radio coordination
+  - §4.19 Multi-device / heterogeneous hardware — multi-adapter pattern
+  - **DESIGN ONLY — v3 future boulder**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO (v3 only — design preserved in plan)
 
 ---
@@ -10605,6 +12387,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] LE Audio device enumeration
   - [ ] Auracast broadcast works
   - [ ] LC3 encode/decode in pipeline
+
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — LE Audio / Auracast
+  - §4.14 Audio support — audio codec pipeline
+  - **DESIGN ONLY — v3 future boulder**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
 
   **Commit**: NO (v3 only — design preserved in plan)
 
@@ -10630,6 +12436,30 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   - [ ] Multi-master works
   - [ ] ACL enforced
 
+  **Required Context** (in agent's working memory):
+  - Plan Navigation Index (§2) — for finding related sections
+  - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.17 Bluetooth considerations — cross-jail peer sharing
+  - T40, T68 — ACL + BT resource model
+  - **DESIGN ONLY — v3 future boulder**
+  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Predecessor task body (the task this one is Blocked By) — for context on what's been built
+  - This task body: ~5-15 KB
+  - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
+
+  **Test Procedure** (per §7.7): source `tests/sys/env/verify_test_env.sh` first; if it exits 78, HARD STOP and do not make code changes. Then follow the 6-step procedure (prerequisites, setup, execute, verify, teardown, re-run safety) using the QA Scenarios above as the test cases. Capture evidence to `.sisyphus/evidence/task-{N}-{slug}.{ext}` and update the run manifest.
+
+  **Done When**:
+  - [ ] All "What to do" steps complete
+  - [ ] All acceptance criteria checked
+  - [ ] All "Must NOT do" avoided
+  - [ ] All QA Scenarios executed with evidence captured
+  - [ ] Test evidence at `.sisyphus/evidence/task-{N}-{slug}.{ext}` exists
+  - [ ] Commit created with `type(scope): desc` (or marked NO for read-only)
+  - [ ] `git status` clean
+  - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
+  - [ ] Agent outputs: "Task T-NN complete" and stops
+
   **Commit**: NO (v3 only — design preserved in plan)
 
 ---
@@ -10642,7 +12472,7 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
 > Never mark F1-F4 as checked before getting the user's okay. Rejection or user feedback → fix → re-run → present again → wait for okay.
 
 - [ ] F1. **Plan compliance audit** — `oracle` agent
-  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 14 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all 6 broker config files exist, all 5 broker man pages present, e2e test passes. **Verify architectural rules (added by audit):** (a) `displayd` (not `bhyve-display-broker` as the canonical name) is the binary; old name is a deprecated symlink with deprecation warning. (b) `libdisplay` (not `libbdp`) is the canonical library; old name is a deprecated symlink. (c) `/etc/display/` (not `/etc/bhyve/display-broker.conf`) is the canonical config dir; old path is a fallback with warning. (d) `gpu_stub` test backend is mandatory; `hw.gpu.0.stub_capacity=10496` is the default. (e) No `/dev/dri` or `/dev/gpu*` inside jails. (f) No `/dev/bluetooth*` inside jails. (g) `localhost by default` for all new endpoints (`[::1]:8443`); public requires `security.display.broker.listen_public=1` + TLS + ACL. (h) IPv6 dual-stack. (i) TLS 1.3 only by default. (j) Self-signed cert auto-gen when none configured. (k) Host policy sysctls (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) are stricter-wins. (l) Tunable precedence: loader > sysctl > config > default. (m) Every `*_resource.ko` module has `attach()` / `detach()` / `reset()` / `reinit()` hooks. (n) No `switch (vendor_id)` in `gpu_resource.ko`; use `GPU_CAPS_REGISTER` mechanism. (o) OID namespaces `security.bt.*` and `hw.bt.*` are reserved (return ENOENT, not crash). (p) OID namespace `security.display.cast.*` is reserved. (q) `bdp-stream` works (pipes to ffmpeg). (r) HTTP health endpoint works (curl returns 200 + JSON). **Verify design-only items NOT implemented:** (s) T61 cast tool, T62-T72 BT/cast design items — F1 does NOT check for their implementation; F1 DOES check that their OID namespaces are reserved. **Verify unit tests:** (t) Every T-task has at least 5 ATF C test cases documented (where the task has C code) and at least 2 shell integration tests. (u) Coverage targets: ≥ 80% line coverage on C code, ≥ 90% on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence). (v) `tests/sys/env/verify_test_env.sh` exists and is sourced by every test. (w) The plan target is FreeBSD 16 or higher; the build/test env is verified at test start.
+  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify agent context management (added by audit):** every T-task (T1-T60) has a `**Required Context**`, `**Test Procedure**`, and `**Done When**` subsection (60 v1 + 12 v2/v3 design-only = 72 tasks total). **Verify the Plan Navigation Index accuracy** by spot-checking 3 random section references — they should resolve to actual sections with line numbers within ±20 of the index. **Verify checkpoint files exist:** `.sisyphus/state/task-{N}.checkpoint.json` for each completed task. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 15 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all broker config files exist, all broker man pages present (displayd.8, displayc.1, bdp-stream.1, display-acl.5, display-broker-config.5, display-pools.5, display-enduser.7, display-transport-security.7, bdp.7, policy-quickstart.7 — plus deprecation stubs bhyve-display-broker.8 and bhyve-display-enduser.7), e2e test passes. **Verify architectural rules (added by audit):** (a) `displayd` (not `bhyve-display-broker` as the canonical name) is the binary; old name is a deprecated symlink with deprecation warning. (b) `libdisplay` (not `libbdp`) is the canonical library; old name is a deprecated symlink. (c) `/etc/display/` (not `/etc/bhyve/display-broker.conf`) is the canonical config dir; old path is a fallback with warning. (d) `gpu_stub` test backend is mandatory; `hw.gpu.0.stub_capacity=10496` is the default. (e) No `/dev/dri` or `/dev/gpu*` inside jails. (f) No `/dev/bluetooth*` inside jails. (g) `localhost by default` for all new endpoints (`[::1]:8443`); public requires `security.display.broker.listen_public=1` + TLS + ACL. (h) IPv6 dual-stack. (i) TLS 1.3 only by default. (j) Self-signed cert auto-gen when none configured. (k) Host policy sysctls (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) are stricter-wins. (l) Tunable precedence: loader > sysctl > config > default. (m) Every `*_resource.ko` module has `attach()` / `detach()` / `reset()` / `reinit()` hooks. (n) No `switch (vendor_id)` in `gpu_resource.ko`; use `GPU_CAPS_REGISTER` mechanism. (o) OID namespaces `security.bt.*` and `hw.bt.*` are reserved (return ENOENT, not crash). (p) OID namespace `security.display.cast.*` is reserved. (q) `bdp-stream` works (pipes to ffmpeg). (r) HTTP health endpoint works (curl returns 200 + JSON). **Verify design-only items NOT implemented:** (s) T61 cast tool, T62-T72 BT/cast design items — F1 does NOT check for their implementation; F1 DOES check that their OID namespaces are reserved. **Verify unit tests:** (t) Every T-task has at least 5 ATF C test cases documented (where the task has C code) and at least 2 shell integration tests. (u) Coverage targets: ≥ 80% line coverage on C code, ≥ 90% on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence). (v) `tests/sys/env/verify_test_env.sh` exists and is sourced by every test. (w) The plan target is FreeBSD 16 or higher; the build/test env is verified at test start.
   Output: `Must Have [N/N] | Backcompat [N/N] | Must NOT Have [N/N] | Tasks [N/N done] | Broker [N/N] | Multicast [N/N] | Architectural Rules [N/N] | OID Reservations [N/N] | Design-Only Excluded [N/N] | Unit Tests [N/N] | Coverage [%] | Evidence [N files] | VERDICT: APPROVE|REJECT`
 
 - [ ] F2. **Code quality review** — `unspecified-high` agent
@@ -10650,11 +12480,11 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | Hardcoded Constants [N found / N] | Forbidden Patterns [N found / N] | Backcompat [PASS/FAIL] | Parallel [2.3× speedup] | Test Env Script [PRESENT/MISSING] | VERDICT`
 
 - [ ] F3. **Real QA on a FreeBSD host** — `unspecified-high` agent (+ `playwright`/`tmux` if UI)
-  Start from a clean state on a **FreeBSD 16** host (16.0+ latest release). **First action: source `tests/sys/env/verify_test_env.sh` and confirm hard-fail if not FreeBSD 16+.** **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. **Execute the Unit Test Strategy: run `kyua test` on every test directory, verify all 230+ `tc_` and 84+ `sh_` test cases pass. Verify coverage targets (≥ 80% on C, ≥ 90% on critical paths).** Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**. **Test multi-device scenarios** (per multi-device section): (a) Hot-plug a stub adapter at runtime; verify it appears in `hw.gpu.adapters`; new jail can use it. (b) Hot-unplug a stub adapter; running jails get `ENXIO` on next I/O. (c) Drop a JSON overlay; capability detection works for an unknown vendor. (d) Generic fallback: unknown vendor GPU works with conservative defaults + warning. **Test mediated passthrough scenarios**: (e) After jail stop, stub adapter re-initializes in <1s. (f) FLR + driver reinit logs to audit trail. (g) Cleanup is idempotent (SIGKILL during cleanup is safe). **Test backward compat scenarios**: (h) Deprecated symlinks work (`bhyve-display-broker` → `displayd`, `libbdp` → `libdisplay`, `bhyve-display-client` → `displayc`). (i) Migration script converts old configs. (j) Deprecation warnings print to stderr. **Test broker security scenarios**: (k) Default listen is `[::1]:8443` (not `0.0.0.0` or `::`). (l) `listen_public=1` without TLS → broker exits with preflight error. (m) `listen_public=1` without ACL → broker exits with preflight error. (n) Dual-stack `[::]:8443` accepts both IPv4 and IPv6. (o) TLS 1.2 connection is refused (TLS 1.3 only). (p) mTLS with expired cert is rejected. **Test that F3 will HARD STOP if test env is wrong:** (q) Run the same test on a FreeBSD 15 box — verify it exits 78 with a clear error. (r) Run the same test on a FreeBSD 14 box — verify it exits 78. (s) Run with no sudo/doas — verify it exits 78. (t) Run with sudo requiring password — verify it exits 78. (These are F3-self-tests for the verify_test_env.sh script itself.)
+  Start from a clean state on a **FreeBSD 16** host (16.0+ latest release). **First action: source `tests/sys/env/verify_test_env.sh` and confirm hard-fail if not FreeBSD 16+.** **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. **Execute the Unit Test Strategy: run `kyua test` on every test directory, verify all 204 documented `tc_` test cases and 62 documented `sh_` shell test cases pass (266 unique test cases total). Verify coverage targets (≥ 80% on C, ≥ 90% on critical paths).** Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**. **Test multi-device scenarios** (per multi-device section): (a) Hot-plug a stub adapter at runtime; verify it appears in `hw.gpu.adapters`; new jail can use it. (b) Hot-unplug a stub adapter; running jails get `ENXIO` on next I/O. (c) Drop a JSON overlay; capability detection works for an unknown vendor. (d) Generic fallback: unknown vendor GPU works with conservative defaults + warning. **Test mediated passthrough scenarios**: (e) After jail stop, stub adapter re-initializes in <1s. (f) FLR + driver reinit logs to audit trail. (g) Cleanup is idempotent (SIGKILL during cleanup is safe). **Test backward compat scenarios**: (h) Deprecated symlinks work (`bhyve-display-broker` → `displayd`, `libbdp` → `libdisplay`, `bhyve-display-client` → `displayc`). (i) Migration script converts old configs. (j) Deprecation warnings print to stderr. **Test broker security scenarios**: (k) Default listen is `[::1]:8443` (not `0.0.0.0` or `::`). (l) `listen_public=1` without TLS → broker exits with preflight error. (m) `listen_public=1` without ACL → broker exits with preflight error. (n) Dual-stack `[::]:8443` accepts both IPv4 and IPv6. (o) TLS 1.2 connection is refused (TLS 1.3 only). (p) mTLS with expired cert is rejected. **Test that F3 will HARD STOP if test env is wrong:** (q) Run the same test on a FreeBSD 15 box — verify it exits 78 with a clear error. (r) Run the same test on a FreeBSD 14 box — verify it exits 78. (s) Run with no sudo/doas — verify it exits 78. (t) Run with sudo requiring password — verify it exits 78. (These are F3-self-tests for the verify_test_env.sh script itself.)
   Output: `Build [PASS, 2.3× parallel speedup] | Test Env Verified [PASS, FreeBSD X.Y] | ATF Tests [N pass/N fail] | Shell Tests [N pass/N fail] | Coverage [N%] | Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | Broker [N/N] | Multicast [N/N] | Multi-Device [N/N] | Mediated [N/N] | Backcompat [N/N] | Security [N/N] | Test Env Self-Tests [N/N] | VERDICT`
 
 - [ ] F4. **Scope fidelity check** — `deep` agent
-  For each task: read "What to do" and "Must NOT do", read the actual diff (`git log`, `git diff main..HEAD`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. **Design-only items NOT to be checked in v1 (added by audit):** (a) T61 cast tool — design only, no impl expected. (b) T62 BDP device info protocol — design only. (c) T63-T64 HLS/RTSP broker endpoints — design only. (d) T65-T68 BT design placeholders — design only. (e) T69-T72 BT real implementation — future boulder, not v1. F4 DOES check that the OID namespaces for these are reserved (no crash on access). Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes (files changed that aren't in any task's scope). Verify the branch state: all 48 commits are present, in the right order, with the right messages, and there are no orphan commits. **Verify the test environment script is present and unchanged:** `tests/sys/env/verify_test_env.sh` matches the design spec (the agent didn't bypass it). **Verify unit tests are present for every task:** for each T-task, the ATF test file (if C code) and the shell test file (if user-space) are present in the expected location.
+  For each task: read "What to do" and "Must NOT do", read the actual diff (`git log`, `git diff main..HEAD`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. **Design-only items NOT to be checked in v1 (added by audit):** (a) T61 cast tool — design only, no impl expected. (b) T62-T64 broker endpoint designs (HLS, RTSP, EDID) — design only. (c) T65-T68 BT design placeholders — design only. (d) T69-T72 BT real implementation — future boulder, not v1. F4 DOES check that the OID namespaces for these are reserved (no crash on access). Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes (files changed that aren't in any task's scope). Verify the branch state: all 60 v1 implementation commits are present, in the right order, with the right messages, and there are no orphan commits. **Verify the test environment script is present and unchanged:** `tests/sys/env/verify_test_env.sh` matches the design spec (the agent didn't bypass it). **Verify unit tests are present for every task:** for each T-task, the ATF test file (if C code) and the shell test file (if user-space) are present in the expected location.
   Output: `Tasks [N/N compliant] | Design-Only Excluded [N/N] | OID Reservations [N/N] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | Commits [N/N present] | Backcompat [PASS/FAIL] | Test Env Script [UNCHANGED/MODIFIED] | Unit Tests [N/N present] | VERDICT`
 
 ---
