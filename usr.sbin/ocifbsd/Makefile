@@ -59,23 +59,18 @@ MK_TESTS?=	no
 
 # Module subdirectories
 SUBDIR+=	api
-# cert: AI-generated stub, Makefile uses invalid <include> syntax and
-# references missing Makefile.inc. Deferred to follow-up PR.
-#SUBDIR+=	cert
+SUBDIR+=	cert
 SUBDIR+=	clustering
 SUBDIR+=	convert
-# export: same AI-stub issue as cert. Deferred.
-#SUBDIR+=	export
-# gc: same AI-stub issue. Deferred.
-#SUBDIR+=	gc
+SUBDIR+=	export
+SUBDIR+=	gc
 # image: many AI-slop issues across pull.c, unpack.c, push.c.
 # zfs_store.c is clean (libmd + stdarg + unused-var fixes done).
 # pull.c has fopen(arg count), missing curl callbacks, missing json-c
 # include, dozens of unused vars, missing fields. Needs full refactor.
 # Deferred to follow-up PR.
 #SUBDIR+=	image
-# logd: same AI-stub issue. Deferred.
-#SUBDIR+=	logd
+SUBDIR+=	logd
 SUBDIR+=	metrics
 SUBDIR+=	namespace
 # network: Makefile declares PROG=ocifbsd_network but the 4 .c
@@ -96,8 +91,7 @@ SUBDIR+=	namespace
 # ocifbsd binary, not exported. Subdir is a library, not a
 # program. Deferred to follow-up PR.
 #SUBDIR+=	orchestration
-# pam: same AI-stub issue. Deferred.
-#SUBDIR+=	pam
+SUBDIR+=	pam
 # security: rctl.c uses made-up struct rctl_usage fields
 # (exceeded, usage, resource_name, jail_name) that don't exist
 # in FreeBSD 16's actual rctl_usage API. The AI generated stub

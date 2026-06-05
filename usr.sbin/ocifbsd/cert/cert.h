@@ -77,6 +77,7 @@ struct cert_info {
     RB_ENTRY(cert_info) entry;
 };
 RB_HEAD(cert_tree, cert_info);
+RB_PROTOTYPE(cert_tree, cert_info, entry, cert_info_cmp);
 
 /* Certificate rotation config */
 struct rotation_config {

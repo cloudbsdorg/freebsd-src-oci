@@ -33,7 +33,6 @@
 
 #include <sys/param.h>
 #include <sys/stat.h>
-#include <sys/json.h>
 
 #include <openssl/pem.h>
 #include <openssl/x509.h>

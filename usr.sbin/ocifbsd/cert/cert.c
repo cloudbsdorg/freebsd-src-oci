@@ -35,7 +35,8 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
-#include <sys/json.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 #include <openssl/pem.h>
 #include <openssl/x509.h>
@@ -59,6 +60,49 @@
 #include "cert.h"
 #include "../include/ocifbsd.h"
 
+/*
+ * Recursive mkdir(2). FreeBSD 16's <libutil.h> does not export mkdirp
+ * in any public header (it lives in libutil's internal mkdir.c and is
+ * gated by strict feature test macros). We provide a local copy.
+ * Returns 0 on success, -1 on failure (errno set by mkdir(2)).
+ */
+static int
+mkdirp_local(const char *path, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *p;
+	size_t len;
+
+	if (path == NULL || *path == '\0')
+		return (-1);
+
+	len = strlcpy(buf, path, sizeof(buf));
+	if (len >= sizeof(buf))
+		return (-1);
+
+	for (p = buf + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, mode) != 0 && errno != EEXIST)
+			return (-1);
+		*p = '/';
+	}
+
+	if (mkdir(buf, mode) != 0 && errno != EEXIST)
+		return (-1);
+	return (0);
+}
+
+#define	mkdirp(path, mode)	mkdirp_local((path), (mode))
+
+/* Forward declarations for functions defined later in this file */
+static struct cert_info *cert_parse_json(const char *json);
+static X509 *cert_create_signed(EVP_PKEY *pkey, const char *cn,
+    const char *sans, int days);
+static int cert_save_registry(void);
+static void cert_load_registry(void);
+
 /* Global state */
 static struct cert_tree cert_registry;
 static struct rotation_config rot_config;
@@ -67,6 +111,34 @@ static pthread_mutex_t cert_lock = PTHREAD_MUTEX_INITIALIZER;
 static int initialized = 0;
 static char cert_dir[PATH_MAX];
 static char backup_dir[PATH_MAX];
+
+/*
+ * Generate an EC P-256 key using the OpenSSL 3.0 provider API.
+ * The legacy EC_KEY_* functions (EC_KEY_new_by_curve_name,
+ * EC_KEY_generate_key, EVP_PKEY_assign_EC_KEY) are deprecated
+ * in OpenSSL 3.0 and emit -Wdeprecated-declarations errors.
+ * Returns 0 on success, -1 on failure. Caller owns *pkey.
+ */
+static int
+cert_generate_ec_key(EVP_PKEY **pkey)
+{
+    EVP_PKEY_CTX *ctx;
+
+    *pkey = NULL;
+    ctx = EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
+    if (ctx == NULL)
+        return (-1);
+    if (EVP_PKEY_keygen_init(ctx) <= 0) {
+        EVP_PKEY_CTX_free(ctx);
+        return (-1);
+    }
+    if (EVP_PKEY_generate(ctx, pkey) <= 0) {
+        EVP_PKEY_CTX_free(ctx);
+        return (-1);
+    }
+    EVP_PKEY_CTX_free(ctx);
+    return (0);
+}
 
 /*
  * Initialize certificate management
@@ -82,7 +154,7 @@ cert_init(void)
 
     /* Set up directories */
     snprintf(cert_dir, sizeof(cert_dir), "%s/certs", OCIFBSD_CONFIG_DIR);
-    snprintf(backup_dir, sizeof(backup_dir), "%s/certs/backups", OCIFBSD_VAR_DIR);
+    snprintf(backup_dir, sizeof(backup_dir), "%s/certs/backups", OCIFBSD_DATA_DIR);
     mkdirp(cert_dir, 0700);
     mkdirp(backup_dir, 0700);
 
@@ -142,8 +214,6 @@ static void
 cert_load_registry(void)
 {
     char path[PATH_MAX];
-    DIR *dir;
-    struct dirent *dp;
     FILE *fp;
     char buf[1024];
 
@@ -218,20 +288,9 @@ cert_create_ca(const char *name, int validity_days)
     if (name == NULL || validity_days <= 0)
         return (-1);
 
-    /* Generate key */
-    pkey = EVP_PKEY_new();
-    if (pkey == NULL)
+    /* Generate EC P-256 key (OpenSSL 3.0 provider API) */
+    if (cert_generate_ec_key(&pkey) != 0)
         return (-1);
-
-    /* Generate EC P-256 key */
-    EC_KEY *eckey = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
-    if (eckey == NULL) {
-        EVP_PKEY_free(pkey);
-        return (-1);
-    }
-
-    EC_KEY_generate_key(eckey);
-    EVP_PKEY_assign_EC_KEY(pkey, eckey);
 
     /* Create self-signed CA certificate */
     cert = X509_new();
@@ -333,14 +392,10 @@ cert_create_node(const char *name, const char *cn, const char *sans)
     if (name == NULL || cn == NULL)
         return (-1);
 
-    /* Generate key and CSR */
-    EVP_PKEY *pkey = EVP_PKEY_new();
-    if (pkey == NULL)
+    /* Generate EC P-256 key (OpenSSL 3.0 provider API) */
+    EVP_PKEY *pkey;
+    if (cert_generate_ec_key(&pkey) != 0)
         return (-1);
-
-    EC_KEY *eckey = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
-    EC_KEY_generate_key(eckey);
-    EVP_PKEY_assign_EC_KEY(pkey, eckey);
 
     /* Convert key to PEM */
     BIO *bio = BIO_new(BIO_s_mem());
@@ -854,13 +909,14 @@ cert_backup_create(const char *name)
 }
 
 /*
- * Certificate tree comparison
+ * Certificate tree comparison.
  */
-int
-cert_compare(struct cert_info *a, struct cert_info *b)
+static int
+cert_info_cmp(struct cert_info *a, struct cert_info *b)
 {
     return (strcmp(a->name, b->name));
 }
+RB_GENERATE(cert_tree, cert_info, entry, cert_info_cmp);
 
 /*
  * Get statistics
@@ -1010,7 +1066,6 @@ cert_status_json(char **json_out)
     struct cert_info **certs;
     int count;
     char *json = NULL, *tmp;
-    int len = 0;
 
     if (json_out == NULL)
         return (-1);
@@ -1022,7 +1077,6 @@ cert_status_json(char **json_out)
     }
 
     json = strdup("[");
-    len = 1;
 
     for (int i = 0; i < count; i++) {
         asprintf(&tmp, "%s%s{\"name\":\"%s\",\"type\":%d,\"cn\":\"%s\","
@@ -1049,8 +1103,6 @@ cert_status_json(char **json_out)
 int
 main(int argc, char *argv[])
 {
-    int ch;
-
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <command> [args]\n", argv[0]);
         fprintf(stderr, "Commands: list, create, rotate, backup, status\n");

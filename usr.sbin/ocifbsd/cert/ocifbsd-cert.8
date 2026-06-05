@@ -1,0 +1,92 @@
+.\"-
+.\" Copyright (c) 2024 The FreeBSD Foundation
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" This software was developed by Klara, Inc. under sponsorship
+.\" from the FreeBSD Foundation.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+.\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+.\" IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+.\" INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+.\" BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+.\" LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+.\" AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+.\" OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+.\" USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+.\" DAMAGE.
+.\"
+.Dd June 5, 2026
+.Dt OCIFBSD-CERT 8
+.Os
+.Sh NAME
+.Nm ocifbsd-cert
+.Nd ocifbsd certificate management tool
+.Sh SYNOPSIS
+.Nm
+.Ar command
+.Op Ar args ...
+.Sh DESCRIPTION
+The
+.Nm
+tool manages X.509 certificates used by the
+.Xr ocifbsd 8
+OCI runtime.
+It supports certificate authority (CA) creation, node enrollment,
+automatic rotation, ACME/Let's Encrypt integration, and external
+CA enrollment (SCEP, EST, ADCS, Vault PKI).
+.Pp
+Certificate data is stored under
+.Pa /etc/ocifbsd/certs
+with backups under
+.Pa /var/lib/ocifbsd/certs/backups .
+.Pp
+The commands are:
+.Bl -tag -width indent
+.It Cm list
+List all known certificates as JSON to standard output.
+.It Cm rotate
+Rotate every certificate that is due for renewal.
+.It Cm check
+Verify every certificate's expiry and emit syslog alerts for
+those approaching the warning or critical thresholds.
+.It Cm backup Ar name
+Create a timestamped backup of
+.Ar name Ap s
+key and certificate.
+.El
+.Sh FILES
+.Bl -tag -width /var/lib/ocifbsd/certs/backups -compact
+.It Pa /etc/ocifbsd/certs
+Certificate storage directory.
+.It Pa /var/lib/ocifbsd/certs/backups
+Certificate backup directory.
+.It Pa /etc/ocifbsd/certs/registry.json
+On-disk registry of known certificates.
+.It Pa /etc/ocifbsd/certs/history.log
+Append-only audit log of certificate actions.
+.El
+.Sh SEE ALSO
+.Xr ocifbsd 8
+.Sh HISTORY
+The
+.Nm
+command first appeared in
+.Fx 16.0 .
+.Sh AUTHORS
+The
+.Nm
+utility was developed by
+.An Klara, Inc.
+under sponsorship from
+.The FreeBSD Foundation .
