@@ -46,9 +46,11 @@
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <netdb.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <sysexits.h>
 #include <uuid.h>
@@ -130,7 +132,25 @@ run_cmd_output(char **output, int argc, ...)
 	va_end(ap);
 	argv[argc] = NULL;
 
-	fp = popen(argv, "r");
+	char *cmd = NULL;
+	size_t cmd_len = 0;
+	for (int i = 0; i < argc; i++) {
+		size_t need = cmd_len + (i > 0 ? 1 : 0) + strlen(argv[i]) + 1;
+		char *newcmd = realloc(cmd, need);
+		if (newcmd == NULL) {
+			free(cmd);
+			free(argv);
+			return (-1);
+		}
+		cmd = newcmd;
+		if (i > 0)
+			strcat(cmd, " ");
+		strcat(cmd, argv[i]);
+		cmd_len = need - 1;
+	}
+
+	fp = popen(cmd, "r");
+	free(cmd);
 	if (fp == NULL) {
 		free(argv);
 		return (-1);
