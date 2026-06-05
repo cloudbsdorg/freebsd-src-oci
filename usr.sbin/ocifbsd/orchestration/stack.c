@@ -47,6 +47,8 @@
 #include "orchestration.h"
 #include "../include/ocifbsd.h"
 
+extern int mkdirp(const char *path, mode_t mode);
+
 /*
  * Global stack registry
  */
@@ -77,7 +79,8 @@ generate_stack_id(char *id, size_t len)
 	
 	SHA256_Init(&ctx);
 	SHA256_Update(&ctx, &ts, sizeof(ts));
-	SHA256_Update(&ctx, &pthread_self(), sizeof(pthread_t));
+	pthread_t tid = pthread_self();
+	SHA256_Update(&ctx, &tid, sizeof(pthread_t));
 	SHA256_Final(hash, &ctx);
 	
 	snprintf(id, len, "stack-%08x", 
@@ -555,8 +558,7 @@ int
 service_start(struct service *service)
 {
 	struct scheduling_decision *decision;
-	char *pod_spec_json;
-	
+
 	if (service == NULL)
 		return (-1);
 	
