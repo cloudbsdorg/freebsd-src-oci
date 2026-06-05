@@ -44,7 +44,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 |---|---|---|---|
 | §1 | TL;DR | Quick summary, critical path, frame size, frame rate sysctls | 3 |
 | §2 | Plan Navigation Index | This section (agent context management) | 33 |
-| §3 | Visual Overview | 9 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram, multi-display, audio sources/sinks) | 260 |
+| §3 | Visual Overview | 12 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram, multi-display, audio sources/sinks, VMware passthrough failure, mediator pattern, BT device-class abstraction, BT bind/unbind lifecycle) | 260 |
 | §4 | Context | 23 design sections (§4.1-§4.23, all physically inside this section) | 652 |
 | §5 | Tunables Reference | 80+ sysctls in 13 sub-sections | 5067 |
 | §6 | Work Objectives | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5306 |
@@ -1165,7 +1165,7 @@ The user said: *"we also need to think about who is allowed to view the framebuf
 This is a **second, parallel workstream** that builds on top of the abstraction (T1–T36). It introduces:
 
 1. A new **Bhyve Display Protocol (BDP)** — a binary, length-prefixed, TLS 1.3 protocol designed for one-connection-multi-fb use. Better than VNC/RDP for the multi-tenant case (centralized auth, ACL, audit, resource discovery). Supports both **unicast TCP** and **multicast UDP** (T48) for the TV / advertising use case.
-2. A new **console broker daemon** (`displayd`, aka `displayd`) — a userspace service that authenticates clients, reports available framebuffers, and bridges BDP sessions to the existing `display_transport` instances.
+2. A new **console broker daemon** (`displayd`) — a userspace service that authenticates clients, reports available framebuffers, and bridges BDP sessions to the existing `display_transport` instances.
 3. A new **authorization model** — per-jail/per-VM ACLs (`display.acl=alice,@admins`), default-deny, root implicit-allow (configurable bypass), group membership honored. ACL falls back to a file (`/etc/bhyve/display.acl`, `/etc/jail/display.acl`).
 4. A new **resource discovery model** — broker scans the jail/VM subsystem on startup and on kqueue events; reports a list of `{id, name, type, status, perms}` for fbs the user can see. New sysctl `security.display.broker.scan_interval=30`.
 5. **VNC/RDP interop** — VNC is still the **legacy direct path** (one client, one fb, plaintext-by-default, opt-in TLS). The broker can **bridge** to VNC/RDP fbs so a BDP client can attach to an RFB-served fb; existing VNC clients still work unchanged.
@@ -2858,38 +2858,44 @@ The "10% of an antenna" mistake was applying the GPU's percent model to BT. The 
 
    **Lifecycle integration with jail start/stop:**
 
-   ```
-   jail start (allow.bt=1, bt.adapter=ubt0)
-     │
-     ├─► preflight check: BT_HOST_DETACHED (hw.bt.0.binding == "host" || "free")
-     │
-     ├─► preflight check: BT_ADAPTER_EXISTS
-     │
-     ├─► bind: hw.bt.0.binding: host → jail:<jid>
-     │     │
-     │     ├─► detach host ng_bluetooth from ubt0
-     │     ├─► hide /dev/bluetooth* from host
-     │     ├─► SDT_PROBE(bt-resource, host-detach)
-     │     ├─► audit_log("host detached from ubt0 for jail web1 (jid=42)")
-     │     ├─► DDI_GONE: existing host fds get ENXIO
-     │     │
-     │     └─► expose mediated cdev inside jail
-     │
-     ├─► jail runs, BT stack inside jail operates normally
-     │
-   jail stop (graceful)
-     │
-     ├─► unbind: hw.bt.0.binding: jail:<jid> → host
-     │     │
-     │     ├─► revoke jail's mediated cdev
-     │     ├─► re-attach host ng_bluetooth to ubt0
-     │     ├─► re-create /dev/bluetooth* in host
-     │     ├─► SDT_PROBE(bt-resource, host-attach)
-     │     └─► audit_log("host re-attached to ubt0 after jail web1 stopped")
-     │
-   jail stop (forced, jail killed)
-     │
-     └─► kernel forcibly rebinds to host, same as graceful stop
+   ```mermaid
+   flowchart TB
+       START["jail start<br/>(allow.bt=1, bt.adapter=ubt0)"]
+       PRE1["preflight check:<br/>BT_HOST_DETACHED<br/>(hw.bt.0.binding == host or free)"]
+       PRE2["preflight check:<br/>BT_ADAPTER_EXISTS"]
+       BIND["bind: hw.bt.0.binding<br/>host → jail:jid"]
+       B_DET["detach host ng_bluetooth from ubt0"]
+       B_HIDE["hide /dev/bluetooth* from host"]
+       B_PROBE["SDT_PROBE(bt-resource, host-detach)"]
+       B_AUDIT["audit_log(host detached from ubt0 for jail web1 jid=42)"]
+       B_ENXIO["DDI_GONE: existing host fds get ENXIO"]
+       B_EXP["expose mediated cdev inside jail"]
+       RUN["jail runs,<br/>BT stack inside jail operates normally"]
+       STOP_GR["jail stop (graceful)"]
+       UNBIND["unbind: hw.bt.0.binding<br/>jail:jid → host"]
+       U_REV["revoke jail's mediated cdev"]
+       U_ATT["re-attach host ng_bluetooth to ubt0"]
+       U_REC["re-create /dev/bluetooth* in host"]
+       U_PROBE["SDT_PROBE(bt-resource, host-attach)"]
+       U_AUDIT["audit_log(host re-attached to ubt0 after jail web1 stopped)"]
+       STOP_FR["jail stop (forced, jail killed)"]
+       FORCE["kernel forcibly rebinds to host,<br/>same as graceful stop"]
+       
+       START --> PRE1 --> PRE2 --> BIND
+       BIND --> B_DET
+       BIND --> B_HIDE
+       BIND --> B_PROBE
+       BIND --> B_AUDIT
+       BIND --> B_ENXIO
+       BIND --> B_EXP
+       B_EXP --> RUN
+       RUN --> STOP_GR --> UNBIND
+       UNBIND --> U_REV
+       UNBIND --> U_ATT
+       UNBIND --> U_REC
+       UNBIND --> U_PROBE
+       UNBIND --> U_AUDIT
+       RUN --> STOP_FR --> FORCE
    ```
 
    **Override flag (planned, dangerous):**
@@ -2992,49 +2998,25 @@ The "10% of an antenna" mistake was applying the GPU's percent model to BT. The 
 
    **The default model — abstracted:**
 
-   ```
-   ┌─────────────────────────────────────────────────────────────────────┐
-   │ HOST (the only place that knows "this is Bluetooth")                │
-   │                                                                     │
-   │  bt_resource.ko (T65) — the BT security manager                    │
-   │    ├── ng_bluetooth + sdpd(8) + hcsecd(8) + bluetoothd-equivalent   │
-   │    ├── holds the link-key store (encrypted, at rest)                │
-   │    ├── runs pairing / PIN / passkey / OOB / numeric-comparison      │
-   │    ├── reads remote device's Class of Device (CoD) + SDP records    │
-   │    ├── dispatches to the right kernel subsystem (see CoD table)     │
-   │    └── enforces the jail's bt.* policies (slot/budget/role/peer)    │
-   │                                                                     │
-   │  Subsystem sinks (POSIX, generic, no "BT" in the name):            │
-   │    ├── sound(4) / sndbuf_a2dp(4) ──► /dev/dsp0   (headphones)       │
-   │    ├── sound(4) / sndbuf_a2dp(4) ──► /dev/dsp1   (speaker)         │
-   │    ├── hid(4) / kbdmux(4)         ──► /dev/kbd0   (keyboard)       │
-   │    ├── hid(4) / ums(4)            ──► /dev/ums0   (mouse)          │
-   │    ├── hid(4) / uhid(4)           ──► /dev/uhid0  (touch / pen)     │
-   │    ├── ng_netbt(4) / ng_pan(4)    ──► /dev/netbt  (PAN networking) │
-   │    └── ng_btsocket(4)             ──► /dev/rfcomm (serial, RFCOMM) │
-   └─────────────────────────────────────────────────────────────────────┘
-                                    │   (mediated by jail devfs ruleset)
-                                    ▼
-   ┌─────────────────────────────────────────────────────────────────────┐
-   │ JAIL (sees generic POSIX devices, no "bluetooth" in the namespace) │
-   │                                                                     │
-   │   /dev/dsp0   ← "headphones"                                        │
-   │   /dev/kbd0   ← "keyboard"                                         │
-   │   /dev/ums0   ← "mouse"                                            │
-   │   /dev/uhid0  ← "touch"                                            │
-   │   /dev/netbt  ← "network"                                          │
-   │                                                                     │
-   │   Jail userspace uses POSIX audio/input/net APIs:                   │
-   │     - ffmpeg -f oss /dev/dsp0                                      │
-   │     - X11 / Wayland via evdev                                      │
-   │     - pulseaudio / pipewire / sndio                                │
-   │                                                                     │
-   │   The jail NEVER sees:                                              │
-   │     - /dev/bluetooth*                                              │
-   │     - ng_hci / ng_l2cap / ng_rfcomm / ng_sdp                       │
-   │     - HCI commands, L2CAP sockets, SDP records                     │
-   │     - the word "bluetooth" anywhere in its namespace                │
-   └─────────────────────────────────────────────────────────────────────┘
+   ```mermaid
+   flowchart TB
+       subgraph HOST["HOST — the only place that knows this is Bluetooth"]
+           BT["bt_resource.ko (T65)<br/>the BT security manager<br/><br/>ng_bluetooth + sdpd + hcsecd + bluetoothd-equivalent<br/>holds the link-key store (encrypted, at rest)<br/>runs pairing / PIN / passkey / OOB / numeric-comparison<br/>reads remote device's CoD + SDP records<br/>dispatches to the right kernel subsystem<br/>enforces the jail's bt.* policies (slot/budget/role/peer)"]
+           DSP0["sound / sndbuf_a2dp → /dev/dsp0 (headphones)"]
+           DSP1["sound / sndbuf_a2dp → /dev/dsp1 (speaker)"]
+           KBD["hid / kbdmux → /dev/kbd0 (keyboard)"]
+           MOU["hid / ums → /dev/ums0 (mouse)"]
+           UHI["hid / uhid → /dev/uhid0 (touch / pen)"]
+           NET["ng_netbt / ng_pan → /dev/netbt (PAN networking)"]
+           RFC["ng_btsocket → /dev/rfcomm (serial, RFCOMM)"]
+       end
+       
+       HOST -->|"mediated by jail devfs ruleset"| JAIL
+       
+       subgraph JAIL["JAIL — sees generic POSIX devices, no bluetooth in the namespace"]
+           J1["/dev/dsp0 ← headphones<br/>/dev/kbd0 ← keyboard<br/>/dev/ums0 ← mouse<br/>/dev/uhid0 ← touch<br/>/dev/netbt ← network<br/><br/>Jail userspace uses POSIX audio/input/net APIs:<br/>- ffmpeg -f oss /dev/dsp0<br/>- X11 / Wayland via evdev<br/>- pulseaudio / pipewire / sndio"]
+           J2["The jail NEVER sees:<br/>- /dev/bluetooth*<br/>- ng_hci / ng_l2cap / ng_rfcomm / ng_sdp<br/>- HCI commands, L2CAP sockets, SDP records<br/>- the word bluetooth anywhere in its namespace"]
+       end
    ```
 
    **The Class-of-Device (CoD) dispatch table (planned, in `bt_resource.ko`):**
@@ -3725,77 +3707,43 @@ This is exactly the failure mode our design must prevent. The principle is now a
 
 **Why the user's friend's scenario happens (the failure mode we're designing against):**
 
-```
-┌──────────────────┐                              ┌──────────────────┐
-│ VMware hypervisor│  raw PCI passthrough         │  RAID controller │
-│                  │  ────────────────────────►   │  (e.g. LSI MR)   │
-│ - Removes device │  - Unbinds host mfi(4)       │                  │
-│   from host      │  - Gives MMIO/BARs/IRQ to VM │  - Now "owned"   │
-│ - Gives BARs to  │  - VM's mfi(4) takes over    │    by VM         │
-│   the VM         │  - Host kernel can't see it  │  - State is      │
-│                  │                              │    opaque to host│
-└──────────────────┘                              └──────────────────┘
-         │                                                │
-         │  VM shuts down (graceful)                      │
-         ▼                                                │
-   ┌──────────────────┐                                   │
-   │ Hypervisor:      │                                   │
-   │ - VM is gone     │                                   │
-   │ - Device "should"│                                   │
-   │   be back        │                                   │
-   │ - But device is  │                                   │
-   │   in some weird  │ ────────►  ???  ◄──────────────────┘
-   │   state          │   Host can't reset the device
-   │ - Host mfi(4)    │   Host doesn't even know the state
-   │   won't bind     │   Hypervisor has no abstraction
-   └──────────────────┘   Only options: reboot host, or
-                            physically power-cycle the controller
-                            (user's friend's solution)
+```mermaid
+flowchart TB
+    subgraph STEP1["Step 1: VM running, raw PCI passthrough"]
+        VM1["VMware hypervisor<br/>- Removes device from host<br/>- Gives BARs to the VM"]
+        CTRL1["RAID controller (e.g. LSI MR)<br/>- Now owned by VM<br/>- State is opaque to host"]
+        VM1 -->|"raw PCI passthrough:<br/>- Unbinds host mfi(4)<br/>- Gives MMIO/BARs/IRQ to VM<br/>- VM's mfi(4) takes over<br/>- Host kernel can't see it"| CTRL1
+    end
+    
+    subgraph STEP2["Step 2: VM shuts down (the failure mode)"]
+        VM2["Hypervisor<br/>- VM is gone<br/>- Device 'should' be back<br/>- But device is in some weird state<br/>- Host mfi(4) won't bind"]
+        FAIL((???))
+        VM2 ==>|"Host can't reset the device<br/>Host doesn't even know the state<br/>Hypervisor has no abstraction<br/>Only options:<br/>reboot host, or<br/>physically power-cycle the controller<br/>(user's friend's solution)"| FAIL
+    end
+    
+    CTRL1 -.->|"device state corrupted"| VM2
 ```
 
 The root cause: **raw passthrough is not an abstraction. The hypervisor is just a switch that connects the device to either the host or the VM. Once the device is "in" the VM, the host loses all visibility and control.**
 
 **The right design (what we ship):**
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ HOST (the only place with control plane)                             │
-│                                                                      │
-│   *_resource.ko (T12, T21, T58, T65, T69-future) — the mediator     │
-│     ├── Retains: PCI config space access (cfgspace read/write)       │
-│     ├── Retains: Power state (PCIe D0/D3hot control)                 │
-│     ├── Retains: Reset capability (FLR, SBR, device-specific)        │
-│     ├── Retains: MMIO/BAR mapping (host maps; VM gets mediated)      │
-│     ├── Retains: Interrupt routing (host arbitrates)                 │
-│     ├── Retains: DMA window control (IOMMU, VT-d)                    │
-│     ├── Retains: AER / DPC error recovery                            │
-│     ├── Retains: Stats / telemetry (T49)                             │
-│     ├── Retains: Audit / observability (T43)                         │
-│     ├── Retains: ACL / authorization (T40)                           │
-│     ├── Retains: Lifecycle hooks (bind, unbind, reset, reinit)       │
-│     └── Mediates: a "virtual function" or "mediated device" to VM    │
-│                                                                      │
-│   ┌─────────────────┐    ┌─────────────────┐    ┌────────────────┐  │
-│   │ gpu_resource.ko │    │ audio_resource  │    │ bt_resource.ko │  │
-│   │ (T21)           │    │ .ko (T58)       │    │ (T69-future)   │  │
-│   │  - NVidia / AMD │    │  - HDA / AC97   │    │  - ubt0        │  │
-│   │  - FLR + driver │    │  - codec reset  │    │  - HCI Reset   │  │
-│   │    reinit       │    │  - stream arbit │    │  - host owns   │  │
-│   │                 │    │    ration       │    │    link keys   │  │
-│   └─────────────────┘    └─────────────────┘    └────────────────┘  │
-└──────────────────────────────────────────────────────────────────────┘
-                                    │  (mediated data plane)
-                                    ▼
-   ┌─────────────────┐    ┌─────────────────┐    ┌────────────────┐
-   │ VM (bhyve)      │    │ Jail            │    │ VM (qemu)      │
-   │  - sees mdev    │    │  - sees /dev/*  │    │  - sees mdev   │
-   │    / VF         │    │    generic      │    │    / VF        │
-   │  - data plane   │    │    nodes        │    │  - data plane  │
-   │    only         │    │  - data plane   │    │    only        │
-   │                 │    │    only         │    │                │
-   │  CANNOT bypass  │    │  CANNOT bypass  │    │  CANNOT bypass │
-   │  the mediator   │    │  the mediator   │    │  the mediator  │
-   └─────────────────┘    └─────────────────┘    └────────────────┘
+```mermaid
+flowchart TB
+    subgraph HOST["HOST — the only place with control plane"]
+        MED["*_resource.ko (T12, T21, T58, T65, T69-future)<br/>the mediator<br/><br/>Retains: PCI config space, power state,<br/>reset capability, MMIO/BAR mapping,<br/>interrupt routing, DMA window control,<br/>AER / DPC, stats, audit, ACL,<br/>lifecycle hooks<br/><br/>Mediates: a virtual function or<br/>mediated device to VM"]
+        GPU["gpu_resource.ko (T21)<br/>NVidia / AMD<br/>FLR + driver reinit"]
+        AUDIO["audio_resource.ko (T58)<br/>HDA / AC97<br/>codec reset, stream arbitration"]
+        BT["bt_resource.ko (T69-future)<br/>ubt0<br/>HCI Reset, host owns link keys"]
+    end
+    
+    HOST -->|"mediated data plane"| CONSUMERS
+    
+    subgraph CONSUMERS["VM / Jail (sees mediated devices, NOT the host control plane)"]
+        V1["VM (bhyve)<br/>sees mdev / VF<br/>data plane only<br/>CANNOT bypass the mediator"]
+        V2["Jail<br/>sees /dev/* generic nodes<br/>data plane only<br/>CANNOT bypass the mediator"]
+        V3["VM (qemu)<br/>sees mdev / VF<br/>data plane only<br/>CANNOT bypass the mediator"]
+    end
 ```
 
 **The "no reboot needed" guarantee (the user's "lets avoid rebooting the host as much as possible"):**
@@ -5482,8 +5430,7 @@ pid_file=/var/run/display-broker.pid
 - `usr.sbin/displayd/stats.c` (statistics collector, T49)
 - `usr.sbin/displayd/dtrace.c` (DTrace USDT provider, T50)
 - `usr.sbin/displayd/admin_http.c` (HTTP health endpoint, T52)
-- Deprecated symlink: `usr.sbin/bhyve/displayd` → `displayd` (backward compat)
-- Migration script: `usr.sbin/bhyve/migrate-display-broker-conf.sh` (T34)
+- (No deprecated symlink or migration script — `displayd` is the canonical name from the start; nothing to migrate from)
 
 **BDP protocol + library (T39, T44):**
 - `lib/libdisplay/display_transport.h` (public header, also T4)
@@ -5558,9 +5505,9 @@ pid_file=/var/run/display-broker.pid
 - `share/man/man5/display-acl.5` (T40) — `display.acl` schema
 - `share/man/man5/display-pools.5` (multi-device) — `pools.conf` schema
 - `share/man/man7/bdp.7` (T39) — BDP wire protocol
-- `share/man/man7/display-enduser.7` (T37) — end user guide (NEW canonical, replaces bhyve-enduser)
+- `share/man/man7/display-enduser.7` (T37) — end user guide (canonical name; no "old bhyve-enduser" to replace — that was never shipped)
 - `share/man/man7/display-security.7` — security best practices
-- `share/man/man7/display-abstraction-migration.7` (T34) — migration guide from bhyve-specific names
+- `share/man/man7/display-abstraction-migration.7` (T34) — operator upgrade guide: documents the only real config change for existing operators (bhyve's `rfb=` / `tcp=` legacy form → `transport=rfb,...`); all other config is purely additive (the new `displayd` daemon / library / kernel module install alongside the existing bhyve stack)
 - `share/man/man8/displayd.8` (T47) — broker daemon (NEW canonical)
 - `share/man/man1/displayc.1` — sample client (canonical)
 - `share/man/man1/bdp-stream.1` — streaming tool (canonical)
@@ -5582,7 +5529,7 @@ pid_file=/var/run/display-broker.pid
 - `share/examples/display/pools-multi-gpu-mixed/`
 - `share/examples/display/certbot/`
 - `share/examples/display/multicast-tv/`
-- `share/examples/display/migration-from-displayd/`
+- `share/examples/display/policy-quickstart/` (T36) — recommended baseline for host policy sysctls; the only "migration" is operators adding these lines to `/etc/sysctl.conf` if they want the strict defaults
 
 **Tests (see Unit Test Strategy section for full breakdown):**
 - `tests/sys/modules/displayd/` (T12)
@@ -5705,7 +5652,7 @@ pid_file=/var/run/display-broker.pid
 
 **Backward compatibility (the v1 promise):**
 - [ ] Existing bhyve + VNC flow works unchanged
-- [ ] All legacy config keys (`rfb=`, `tcp=`, `displayd` symlink, `lib/libdisplay` symlink) work
+- [ ] All legacy config keys (`rfb=`, `tcp=`, `unix:`, `vga=`, `password=`, `wait=`) still work byte-for-byte via bhyve's own backcompat in `pci_fbuf.c` (T13)
 - [ ] Deprecation warnings print to stderr but don't block
 - [ ] No public symbol has been removed or changed in meaning
 
@@ -5722,7 +5669,7 @@ pid_file=/var/run/display-broker.pid
 - Multi-instance `console` module (concurrent bhyve + jails)
 - The `allow.fbuf` jail option must imply kbd + mouse on by default
 - The `display_transport` vtable must be small (≤ 6 ops) and self-contained
-- Generic naming: `displayd`, `libdisplay`, `displayc`, `/etc/display/` (the canonical names; no "old product" to deprecate — `fbuf_jail`, `displayd`, `displayc`, `libdisplay.so` were never shipped; see §4.7 for the real backcompat items)
+- Generic naming: `displayd`, `libdisplay`, `displayc`, `/etc/display/` (the canonical names; no "old product" to deprecate — see §4.7 for the real backcompat items: `rfb=`, `tcp=`, `allow.fbuf`, `console_init`, `rfb_init`, `libvmmapi.so`, `libjail.so`)
 - `gpu_stub` test backend is mandatory in T21; CI runs on commodity hardware without a GPU
 - `/etc/sysctl.conf` integration with example showing `vfs.zfs.vdev.min_auto_ashift=12, debug.debugger_on_panic=0, kern.sync_on_panic=0, kern.powercycle_on_panic=1`
 - `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel` (parallel); installworld/installkernel serial
@@ -9848,7 +9795,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 37. End user guide (`display-enduser.7`, with `display-enduser.7` deprecated stub)
+- [ ] 37. End user guide (`display-enduser.7` — the canonical name; no deprecated stub man page — that name is current, not old)
 
   **What to do**:
   1. Write `share/man/man7/display-enduser.7` — the **end user perspective** doc. The user asked: "think about what an end user would need to know, especially how to access, and how to secure." Sections:
@@ -9936,7 +9883,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **What to do**:
   1. Create `usr.sbin/displayd/` (new generic home) with `Makefile`, `main.c`, `broker.c`, `broker_session.c`, `broker_auth.c`, `broker_acl.c`, `broker_audit.c`, `broker_registry.c`, `broker_bridge.c`, `broker_config.c`.
-  2. The canonical binary is **`displayd`**. There is no `displayd` (that name was never shipped; nothing to deprecate).
+  2. The canonical binary is **`displayd`** (no deprecation alias, no symlink to a non-existent old name).
   3. Reads `/etc/display/display-broker.conf` at startup, then sysctls override config, then loader tunables override sysctls. **Tunable precedence: loader > sysctl > config > module default.** (See Tunables Reference §13.) No fallback path to a "bhyve" location (none exists).
   4. **Default listen is localhost over IPv6 dual-stack (security principles — see "Localhost by default" + "IPv6" design sections).** Default `listen=tcp://[::1]:8443,unix:///var/run/displayd.sock`. Public exposure requires `security.display.broker.listen_public=1` + TLS configured + ACL configured (preflight refuses otherwise).
   5. Listens on configurable socket (TCP and/or Unix), authenticates, manages sessions, fans out pixel/input to the right `display_transport` instance.
