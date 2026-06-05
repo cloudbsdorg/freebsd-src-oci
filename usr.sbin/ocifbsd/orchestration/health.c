@@ -88,7 +88,6 @@ static struct health_check_state *health_checks[MAX_HEALTH_CHECKS];
 static int health_check_count = 0;
 static pthread_mutex_t health_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool health_checker_running = false;
-static pthread_t health_checker_thread;
 
 /*
  * TCP health check
