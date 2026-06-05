@@ -4,22 +4,21 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-05 14:05 UTC (09:05 CDT) — live status
+> **Last updated**: 2026-06-05 14:25 UTC (09:25 CDT) — live status
 
-## 🎉 **PHASE 1 + 2 + 3 (image) COMPLETE — 7 SUBDIRs RE-ENABLED!**
+## 🎉🎉🎉 **ALL 15 SUBDIRs RE-ENABLED — BOOTSTRAP 100% COMPLETE!**
 
-All 5 Phase 1 SUBDIRs (cert, export, gc, logd, pam) plus
-the 2 Phase 2 SUBDIRs (network, orchestration) plus the
-image/ SUBDIR from Phase 3 have been fixed and committed.
-The end-to-end build of `ocifbsd` + all **13 active SUBDIRs**
-succeeds cleanly on FreeBSD 16.0-CURRENT.
+All 9 previously-commented-out SUBDIRs (cert, export, gc,
+image, logd, network, orchestration, pam, security) have
+been fixed and committed. The end-to-end build of
+`ocifbsd` + all **15 active SUBDIRs** succeeds cleanly on
+FreeBSD 16.0-CURRENT.
 
 - **Main binary**: `ocifbsd` (50K) builds, links, and runs.
-- **13 active SUBDIRs build clean**: api, cert, clustering,
+- **15 active SUBDIRs build clean**: api, cert, clustering,
   convert, export, gc, image, logd, metrics, namespace,
-  network, orchestration, pam, security-daemon, tpm.
-- **1 SUBDIR commented out** (remaining deferred refactor work):
-  security (rctl.c struct field fixes needed).
+  network, orchestration, pam, security, security-daemon, tpm.
+- **0 SUBDIRs commented out** — full coverage.
 
 **Phase 1 commits (all pushed to origin)**:
 - `2c33724ce60` — enable cert SUBDIR (OpenSSL 3.0 + FreeBSD 16 fixes)
@@ -34,12 +33,11 @@ succeeds cleanly on FreeBSD 16.0-CURRENT.
 
 **Phase 3 commits**:
 - `41a3643ee25` — enable image SUBDIR (PROG→LIB + libarchive)
+- `59f2465dd21` — enable security SUBDIR (LIB + rctl/mac refactor)
 
-**Re-verified at 2026-06-05 14:00 UTC**: Full `make` succeeds
-end-to-end on the VM. All 13 SUBDIRs build clean. 42/42 unit
+**Re-verified at 2026-06-05 14:20 UTC**: Full `make` succeeds
+end-to-end on the VM. All 15 SUBDIRs build clean. 42/42 unit
 tests pass via `kyua test -k Kyuafile`.
-
-**Next**: security/ rctl.c rewrite against the real rctl(2) API.
 
 **Earlier (BOOTSTRAP COMPLETE)**: `make` first succeeded
 end-to-end at 2026-06-05 07:42 UTC with the original 7 SUBDIRs
@@ -490,20 +488,33 @@ this session's fixes:
 Linker: added `md` to LIBADD for FreeBSD 16's moved-out
 SHA256_Data symbol (was in libc, now in libmd).
 
-### Subdir status: 1 of 15 SUBDIRs remain commented out (deferred refactor work)
+### Subdir status: ALL 15 SUBDIRs ACTIVE
 
 After the main binary links, build moves to the SUBDIR phase
-(15 module executables: ocifbsd-cert, ocifbsd-export, etc.).
-**14 of 15 SUBDIRs are now active and build clean** (Phase 1
-+ Phase 2 + Phase 3 image complete). The following subdir
-still needs refactor work:
+(15 module libraries: libocifbsd_image.a, libocifbsd_network.a,
+etc.). **All 15 of 15 SUBDIRs are now active and build clean**.
+Zero remaining deferred refactor work.
 
-- `security/` — rctl.c uses made-up struct rctl_usage fields
-  (exceeded, usage, resource_name, jail_name) that don't exist
-  in FreeBSD 16's actual rctl_usage API. The AI generated
-  stub code against a fictional interface. mac.c (MAC
-  labels) probably has similar issues. Deferred to follow-up
-  PR that rewrites rctl.c against the real rctl(8) API.
+**Per-SUBDIR build status** (all verified at 2026-06-05 14:20 UTC):
+
+| SUBDIR            | Build artifact                        | Notes |
+|-------------------|---------------------------------------|-------|
+| api               | `ocifbsd` (linked into main)          | Active |
+| cert              | (linked into main)                    | Active |
+| clustering        | (linked into main)                    | Active |
+| convert           | (linked into main)                    | Active |
+| export            | (linked into main)                    | Active |
+| gc                | (linked into main)                    | Active |
+| image             | `libocifbsd_image.a` (250K) + `.so.1` | Active |
+| logd              | (linked into main)                    | Active |
+| metrics           | (linked into main)                    | Active |
+| namespace         | (linked into main)                    | Active |
+| network           | `libocifbsd_network.a` (93K) + `.so.1`| Active |
+| orchestration     | `libocifbsd_orchestration.a` (258K) + `.so.1` | Active |
+| pam               | `pam_ocifbsd.so.1` (41K, PAM module)  | Active |
+| security          | `libocifbsd_security.a` (70K) + `.so.1` | Active |
+| security-daemon   | (linked into main)                    | Active |
+| tpm               | (linked into main)                    | Active |
 
 **Phase 1 COMPLETE** (2026-06-05 13:40 UTC) — cert, export, gc,
 logd, and pam all fixed, committed, and pushed. Each one
@@ -827,6 +838,7 @@ branch, and the full `.omo/drafts/` documentation tree.
 
 | Timestamp (UTC)      | Author    | Change                                                              |
 | -------------------- | --------- | ------------------------------------------------------------------- |
+| 2026-06-05 14:25:00 | mlapointe | **🎉 BOOTSTRAP 100% COMPLETE!** All 15 SUBDIRs active and build clean. Phase 3 security/ done (commit `59f2465dd21`, pushed). Converted security/ from PROG to LIB (SHLIB_NAME=ocifbsd_security.so.1). Fixed: rctl.h duplicate enum value, struct rctl_usage field mismatch, missing <stdarg.h>, dead/broken rctl_resource_sysctls[] array, sign-compare on sizeof(), C23 declaration-after-statement in mac.c, realloc without NULL check, NULL deref in mac_label_compare, 2 unused vars. Added ocifbsd_security.3 man page. libocifbsd_security.a (70K) + ocifbsd_security.so.1 (28K) build clean. All 9 previously-deferred SUBDIRs now land in main Makefile. | 59f2465dd21 |
 | 2026-06-05 14:05:00 | mlapointe | **Phase 3 image/ SUBDIR done** (commit `41a3643ee25`, pushed). Converted image/ from PROG to LIB (SHLIB_NAME=ocifbsd_image.so.1). Fixed 30+ unused vars, added <dirent.h>/<strings.h>/<json-c/json.h>, fixed archive_entry_stat() 1-arg signature, removed reference to deleted archive_read_support_format_tar_grzip(), wrapped C23 declaration-after-statement in braces. Moved archive to LIBADD+=archive (src.libnames.mk-validated). Added ocifbsd_image.3 man page. Verified: libocifbsd_image.a (250K) + ocifbsd_image.so.1 (67K) build clean. 13/15 SUBDIRs now active. Only security/ remains. | 41a3643ee25 |
 | 2026-06-05 13:50:00 | mlapointe | **Phase 2 orchestration/ SUBDIR done** (commit `3a17a8285dd`, pushed). Converted orchestration/ from PROG to LIB (SHLIB_NAME=ocifbsd_orchestration.so.1) with stubs.c that provides 6 stub implementations of ocifbsd_create_container/start/stop/delete/get_container_state/logs (real impls are internal to the main binary, override at link time). Added ocifbsd_orchestration.3 man page. Binary 65K builds. | 3a17a8285dd |
 | 2026-06-05 13:48:00 | mlapointe | **Phase 2 network/ SUBDIR done** (commit `12bf50dc15d`, pushed). Converted network/ from PROG to LIB (SHLIB_NAME=ocifbsd_network.so.1). Added ocifbsd_network.3 man page. Binary 31K builds. | 12bf50dc15d |
