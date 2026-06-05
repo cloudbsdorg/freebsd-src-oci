@@ -33,7 +33,7 @@
 
 #include <sys/param.h>
 #include <sys/stat.h>
-#include <sys/json.h>
+#include <json-c/json.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libutil.h>
