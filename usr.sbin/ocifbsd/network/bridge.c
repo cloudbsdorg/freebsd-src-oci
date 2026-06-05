@@ -75,7 +75,7 @@ struct bridge_config {
 /*
  * Create a bridge with custom configuration
  */
-int
+static int
 bridge_create_advanced(const char *name, struct bridge_config *config)
 {
 	char cmd[256];
@@ -102,7 +102,7 @@ bridge_create_advanced(const char *name, struct bridge_config *config)
 /*
  * Configure VLAN filtering on a bridge
  */
-int
+static int
 bridge_set_vlan_filtering(const char *bridge, bool enable)
 {
 	char cmd[256];
@@ -117,7 +117,7 @@ bridge_set_vlan_filtering(const char *bridge, bool enable)
 /*
  * Add a tagged VLAN interface to a bridge
  */
-int
+static int
 bridge_add_vlan(const char *bridge, const char *parent, int vlan_id)
 {
 	char vlan_if[64];
@@ -139,7 +139,7 @@ bridge_add_vlan(const char *bridge, const char *parent, int vlan_id)
 /*
  * Get bridge forwarding database (FDB) entries
  */
-int
+static int
 bridge_get_fdb(const char *bridge, char ***entries, int *nentries)
 {
 	char *output = NULL;
@@ -178,7 +178,7 @@ bridge_get_fdb(const char *bridge, char ***entries, int *nentries)
 /*
  * Add static FDB entry
  */
-int
+static int
 bridge_add_static_fdb(const char *bridge, const char *mac, const char *iface)
 {
 	return run_cmd(5, "ifconfig", (char *)bridge, "addf", (char *)mac,
@@ -188,7 +188,7 @@ bridge_add_static_fdb(const char *bridge, const char *mac, const char *iface)
 /*
  * Flush FDB entries
  */
-int
+static int
 bridge_flush_fdb(const char *bridge, bool static_only)
 {
 	if (static_only)
@@ -199,7 +199,7 @@ bridge_flush_fdb(const char *bridge, bool static_only)
 /*
  * Get bridge port statistics
  */
-int
+static int
 bridge_get_port_stats(const char *bridge, const char *port,
     uint64_t *rx_packets, uint64_t *tx_packets,
     uint64_t *rx_bytes, uint64_t *tx_bytes)
@@ -239,7 +239,7 @@ bridge_get_port_stats(const char *bridge, const char *port,
 /*
  * Set bridge priority (for spanning tree)
  */
-int
+static int
 bridge_set_priority(const char *bridge, uint16_t priority)
 {
 	char prio[16];
@@ -250,7 +250,7 @@ bridge_set_priority(const char *bridge, uint16_t priority)
 /*
  * Set bridge forward delay
  */
-int
+static int
 bridge_set_forward_delay(const char *bridge, uint16_t delay)
 {
 	char dly[16];
@@ -261,7 +261,7 @@ bridge_set_forward_delay(const char *bridge, uint16_t delay)
 /*
  * Set bridge hello time
  */
-int
+static int
 bridge_set_hello_time(const char *bridge, uint16_t hello)
 {
 	char h[16];
