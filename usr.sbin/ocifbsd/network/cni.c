@@ -88,7 +88,7 @@ struct cni_config {
 /*
  * Parse CNI configuration file
  */
-static static int
+static int
 cni_parse_config(const char *path, struct cni_config **config)
 {
 	struct cni_config *cfg;
@@ -154,7 +154,7 @@ cni_parse_config(const char *path, struct cni_config **config)
 /*
  * Find CNI configuration for network
  */
-static static int
+static int
 cni_find_config(const char *network_name, struct cni_config **config)
 {
 	DIR *dir;
@@ -203,7 +203,7 @@ cni_find_config(const char *network_name, struct cni_config **config)
 /*
  * Call CNI plugin binary
  */
-static static int
+static int
 cni_call_plugin(const char *plugin, int argc, const char **argv,
     char **output)
 {
@@ -286,7 +286,7 @@ cni_call_plugin(const char *plugin, int argc, const char **argv,
 /*
  * Build CNI environment for plugin
  */
-static static int
+static int
 cni_build_env(const char *container_id, const char *network_ns,
     const char *interface_name, char ***env, int *nenv)
 {
@@ -358,6 +358,7 @@ cni_add(const char *network_name, const char *container_id,
 	cni_build_env(container_id, netns, interface_name, &env, &nenv);
 
 	/* Call plugin */
+	char *output = NULL;
 	ret = cni_call_plugin(config->type, 0, NULL, &output);
 
 	/* Parse and return result */
