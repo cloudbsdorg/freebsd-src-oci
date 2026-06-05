@@ -44,6 +44,10 @@
 
 #include "orchestration.h"
 
+extern int mkdirp(const char *path, mode_t mode);
+
+static int rolling_update_progress(struct rolling_update_info *info);
+
 #define MAX_ROLLING_UPDATES 256
 
 /*
