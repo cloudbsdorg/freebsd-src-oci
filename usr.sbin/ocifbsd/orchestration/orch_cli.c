@@ -307,7 +307,6 @@ cmd_service_create(int argc, char **argv)
 			image = optarg;
 			break;
 		case 'N':
-			namespace = optarg;
 			break;
 		case 'r':
 			replicas = atoi(optarg);
