@@ -135,7 +135,7 @@ vnet_get_jail_status(const char *jail_name, bool *has_vnet, char ***interfaces, 
 /*
  * Configure routing within a VNET jail
  */
-int
+static int
 vnet_add_route(const char *jail_name, const char *network, const char *gateway)
 {
 	return run_cmd(7, "jexec", (char *)jail_name, "route", "add", "-net",
