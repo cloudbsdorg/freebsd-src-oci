@@ -55,42 +55,42 @@
 - [§12 — Verdict](#verdict)
 - [§13 — Execution Strategy](#execution-strategy)
 - [§14 — TODOs](#todos)
-- [§15 — Final Verification Wave](#final-verification-wave-mandatory--after-all-implementation-tasks)
+- [§15 — Final Verification Wave](#final-verification-wave-mandatory-after-all-implementation-tasks)
 - [§16 — Commit Strategy](#commit-strategy)
 - [§17 — Success Criteria](#success-criteria)
 
 ### Design sections in Context (§4)
 
 - [§4.1 — Original Request](#original-request)
-- [§4.2 — Additive KBD/Mouse model](#additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule)
+- [§4.2 — Additive KBD/Mouse model](#additive-kbdmouse-model-the-opt-out-via-fbufnokbd-fbufnomouse-rule)
 - [§4.3 — Investigation Summary](#investigation-summary)
-- [§4.4 — GPU Resource Governance](#gpu-resource-governance-third-workstream--framework-only)
+- [§4.4 — GPU Resource Governance](#gpu-resource-governance-third-workstream-framework-only)
 - [§4.5 — Preflight check framework](#preflight-check-framework-cross-cutting)
 - [§4.6 — Transport security](#transport-security-vnc-hardening)
 - [§4.7 — Backward compatibility](#backward-compatibility-the-upgrade-must-not-break-promise)
 - [§4.8 — Architecture support](#architecture-support-jails-run-everywhere)
-- [§4.9 — Console broker / multiplexer](#console-broker--multiplexer-phase-2-workstream--added-per-user-request)
-- [§4.10 — Localhost by default](#localhost-by-default-security-principle--added-per-user-request)
-- [§4.11 — IPv6 / dual-stack support](#ipv6--dual-stack-support-security--portability-principle)
-- [§4.12 — Instrumentation, statistics, diagnostics](#instrumentation-statistics-diagnostics-t49t52--added-per-user-request)
+- [§4.9 — Console broker / multiplexer](#console-broker-multiplexer-phase-2-workstream-added-per-user-request)
+- [§4.10 — Localhost by default](#localhost-by-default-security-principle-added-per-user-request)
+- [§4.11 — IPv6 / dual-stack support](#ipv6-dual-stack-support-security-portability-principle)
+- [§4.12 — Instrumentation, statistics, diagnostics](#instrumentation-statistics-diagnostics-t49t52-added-per-user-request)
 - [§4.13 — Multi-display support](#multi-display-support-added-per-user-question)
-- [§4.14 — GPU ports model](#gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports)
-- [§4.15 — Audio support](#audio-support-added-per-user-request--needed-for-chromecast-use-case)
-- [§4.16 — Cast tool design considerations](#cast-tool-design-considerations-no-implementation--added-per-user-clarification)
-- [§4.17 — Combining cast methods](#combining-cast-methods-multi-protocol-cast--design-only)
-- [§4.18 — Bluetooth considerations](#bluetooth-considerations-future--design-only)
-- [§4.19 — Mediated passthrough](#mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story)
-- [§4.20 — Multi-device / heterogeneous hardware](#multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request)
-- [§4.21 — Workload-driven GPU selection](#workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request)
+- [§4.14 — GPU ports model](#gpu-ports-model-added-per-user-clarification-it-comes-down-to-how-many-ports)
+- [§4.15 — Audio support](#audio-support-added-per-user-request-needed-for-chromecast-use-case)
+- [§4.16 — Cast tool design considerations](#cast-tool-design-considerations-no-implementation-added-per-user-clarification)
+- [§4.17 — Combining cast methods](#combining-cast-methods-multi-protocol-cast-design-only)
+- [§4.18 — Bluetooth considerations](#bluetooth-considerations-future-design-only)
+- [§4.19 — Mediated passthrough](#mediated-passthrough-the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story)
+- [§4.20 — Multi-device / heterogeneous hardware](#multi-device-heterogeneous-hardware-architectural-principle-added-per-user-request)
+- [§4.21 — Workload-driven GPU selection](#workload-driven-gpu-selection-dynamic-capability-discovery-architectural-principle-added-per-user-request)
 - [§4.22 — FreeBSD 16 target platform](#freebsd-16-target-platform-added-per-user-confirmation)
-- [§4.23 — Auto-load / zero-friction](#auto-load--zero-friction-no-operator-config-changes-required)
+- [§4.23 — Auto-load / zero-friction](#auto-load-zero-friction-no-operator-config-changes-required)
 
 ### Task & verification references
 
 - [T0 — Template validation (Wave 0)](#todos)
 - [T1–T60 — V1 implementation tasks](#todos)
 - [T61–T72 — V2/V3 design-only tasks](#todos)
-- [F1–F4 — Final verification wave](#final-verification-wave-mandatory--after-all-implementation-tasks)
+- [F1–F4 — Final verification wave](#final-verification-wave-mandatory-after-all-implementation-tasks)
 
 ---
 
@@ -110,7 +110,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 |---|---|---|---|---|
 | §1 | [TL;DR](#tldr) | Quick summary, critical path, frame size, frame rate sysctls | 3 | `## TL;DR` |
 | §2 | [Plan Navigation Index](#plan-navigation-index-agent-context-management) | This section (agent context management) | 97 | `## Plan Navigation Index (agent context management)` |
-| §3 | [Visual Overview](#visual-overview) | 7 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram). **Plan total: 21 Mermaid diagrams** — 14 additional ones are inline in design sections and other areas (MIG instances, Architecture corrected, Unified source, State machine per-adapter binding, Authorization layers, SR-IOV, Hot-plug time, GPU caps discovery pipeline, Test directory layout, Test coverage recording, Test data catalog, Parallel Execution Waves, T8 Test Procedure high-level flow, multi-display, audio sources/sinks, VMware passthrough failure, mediator pattern, BT device-class abstraction, BT bind/unbind lifecycle). | 366 | `## Visual Overview` |
+| §3 | [Visual Overview](#visual-overview) | 7 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram). **Plan total: 26 Mermaid diagrams** — 19 additional ones are inline in design sections, in the Verification Strategy, Execution Strategy, and individual task bodies (MIG instances, Architecture corrected, Unified source, State machine per-adapter binding, Authorization layers, SR-IOV, Hot-plug time, GPU caps discovery pipeline, Test directory layout, Test coverage recording, Test data catalog, Parallel Execution Waves, T8 Test Procedure high-level flow, multi-display, audio sources/sinks, VMware passthrough failure, mediator pattern, BT device-class abstraction, BT bind/unbind lifecycle, BT lifecycle integration with jail start/stop, BT default model abstracted). | 366 | `## Visual Overview` |
 | §4 | [Context](#context) | 23 design sections (§4.1–§4.23, all physically inside this section) | 758 | `## Context` |
 | §5 | [Tunables Reference](#tunables-reference) | 80+ sysctls in 13 sub-sections | 5396 | `## Tunables Reference` |
 | §6 | [Work Objectives](#work-objectives) | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5635 | `## Work Objectives` |
@@ -122,7 +122,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 | §12 | [Verdict](#verdict) | Final test summary | 7408 | `## Verdict` |
 | §13 | [Execution Strategy](#execution-strategy) | Parallel waves, dep matrix, agent dispatch | 7474 | `## Execution Strategy` |
 | §14 | [TODOs](#todos) | 60 v1 implementation tasks (T1–T60) + 4 design-only v2 (T62–T64, T68) + 7 design-only BT v2/v3 (T65–T72) + 4 final verifications (F1–F4) | 7648 | `## TODOs` |
-| §15 | [Final Verification Wave](#final-verification-wave-mandatory--after-all-implementation-tasks) | F1, F2, F3, F4 | 12891 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
+| §15 | [Final Verification Wave](#final-verification-wave-mandatory-after-all-implementation-tasks) | F1, F2, F3, F4 | 12891 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
 | §16 | [Commit Strategy](#commit-strategy) | Per-task commits | 12916 | `## Commit Strategy` |
 | §17 | [Success Criteria](#success-criteria) | Verification commands + checklist | 12920 | `## Success Criteria` |
 
@@ -133,28 +133,28 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 | § | Design section | Purpose | First line | First line content |
 |---|---|---|---|---|
 | §4.1 | [Original Request](#original-request) | What the user asked for | 760 | `### Original Request` |
-| §4.2 | [Additive KBD/Mouse model](#additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule) | Default-on kbd+mouse with fbuf, opt-out via `fbuf.nokbd` / `fbuf.nomouse`; includes HID-level controls (`fbuf.nohid`, `fbuf.allowhid`) | 764 | `### Additive KBD/Mouse model (the "opt-out via fbuf.nokbd / fbuf.nomouse" rule)` |
+| §4.2 | [Additive KBD/Mouse model](#additive-kbdmouse-model-the-opt-out-via-fbufnokbd-fbufnomouse-rule) | Default-on kbd+mouse with fbuf, opt-out via `fbuf.nokbd` / `fbuf.nomouse`; includes HID-level controls (`fbuf.nohid`, `fbuf.allowhid`) | 764 | `### Additive KBD/Mouse model (the "opt-out via fbuf.nokbd / fbuf.nomouse" rule)` |
 | §4.3 | [Investigation Summary](#investigation-summary) | What we found (3 layers) | 882 | `### Investigation Summary` |
-| §4.4 | [GPU Resource Governance](#gpu-resource-governance-third-workstream--framework-only) | GPU mediation rules (T19–T21 framework) | 899 | `### GPU Resource Governance (third workstream — framework only)` |
+| §4.4 | [GPU Resource Governance](#gpu-resource-governance-third-workstream-framework-only) | GPU mediation rules (T19–T21 framework) | 899 | `### GPU Resource Governance (third workstream — framework only)` |
 | §4.5 | [Preflight check framework](#preflight-check-framework-cross-cutting) | 20 preflight checks | 925 | `### Preflight check framework (cross-cutting)` |
 | §4.6 | [Transport security](#transport-security-vnc-hardening) | TLS 1.3, certbot, etc. | 960 | `### Transport security (VNC hardening)` |
 | §4.7 | [Backward compatibility](#backward-compatibility-the-upgrade-must-not-break-promise) | Upgrade-must-not-break promise | 1009 | `### Backward compatibility (the upgrade-must-not-break promise)` |
 | §4.8 | [Architecture support](#architecture-support-jails-run-everywhere) | Big/little endian, multi-arch | 1240 | `### Architecture support (jails run everywhere)` |
-| §4.9 | [Console broker / multiplexer](#console-broker--multiplexer-phase-2-workstream--added-per-user-request) | Broker architecture | 1325 | `### Console broker / multiplexer (Phase 2 workstream — added per user request)` |
-| §4.10 | [Localhost by default](#localhost-by-default-security-principle--added-per-user-request) | All new endpoints default to localhost | 1509 | `### Localhost by default (security principle — added per user request)` |
-| §4.11 | [IPv6 / dual-stack support](#ipv6--dual-stack-support-security--portability-principle) | IPv6 default | 1584 | `### IPv6 / dual-stack support (security + portability principle)` |
-| §4.12 | [Instrumentation, statistics, diagnostics](#instrumentation-statistics-diagnostics-t49t52--added-per-user-request) | T49–T52 design | 1702 | `### Instrumentation, statistics, diagnostics (T49–T52 — added per user request)` |
+| §4.9 | [Console broker / multiplexer](#console-broker-multiplexer-phase-2-workstream-added-per-user-request) | Broker architecture | 1325 | `### Console broker / multiplexer (Phase 2 workstream — added per user request)` |
+| §4.10 | [Localhost by default](#localhost-by-default-security-principle-added-per-user-request) | All new endpoints default to localhost | 1509 | `### Localhost by default (security principle — added per user request)` |
+| §4.11 | [IPv6 / dual-stack support](#ipv6-dual-stack-support-security-portability-principle) | IPv6 default | 1584 | `### IPv6 / dual-stack support (security + portability principle)` |
+| §4.12 | [Instrumentation, statistics, diagnostics](#instrumentation-statistics-diagnostics-t49t52-added-per-user-request) | T49–T52 design | 1702 | `### Instrumentation, statistics, diagnostics (T49–T52 — added per user request)` |
 | §4.13 | [Multi-display support](#multi-display-support-added-per-user-question) | Walls, ports, mixed resolutions | 1882 | `### Multi-display support (added per user question)` |
-| §4.14 | [GPU ports model](#gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports) | Per-port resource allocation, port policy, gpu-port-info tool | 2097 | `### GPU ports model (added per user clarification — "it comes down to how many ports")` |
-| §4.15 | [Audio support](#audio-support-added-per-user-request--needed-for-chromecast-use-case) | AC97/HDA, BDP audio messages | 2264 | `### Audio support (added per user request — needed for chromecast use case)` |
-| §4.16 | [Cast tool design considerations](#cast-tool-design-considerations-no-implementation--added-per-user-clarification) | Cast (design only) | 2555 | `### Cast tool design considerations (no implementation — added per user clarification)` |
-| §4.17 | [Combining cast methods](#combining-cast-methods-multi-protocol-cast--design-only) | Multi-protocol cast | 2750 | `### Combining cast methods (multi-protocol cast — design only)` |
-| §4.18 | [Bluetooth considerations](#bluetooth-considerations-future--design-only) | BT (design only) | 2878 | `### Bluetooth considerations (future — design only)` |
-| §4.19 | [Mediated passthrough](#mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story) | Control plane retained | 3888 | `### Mediated passthrough — the host retains the control plane (architectural principle, added per user's PCI-passthrough story)` |
-| §4.20 | [Multi-device / heterogeneous hardware](#multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request) | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 4134 | `### Multi-device / heterogeneous hardware (architectural principle, added per user request)` |
-| §4.21 | [Workload-driven GPU selection + dynamic capability discovery](#workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request) | Plug-in capability registry | 4576 | `### Workload-driven GPU selection + dynamic capability discovery (architectural principle, added per user request)` |
+| §4.14 | [GPU ports model](#gpu-ports-model-added-per-user-clarification-it-comes-down-to-how-many-ports) | Per-port resource allocation, port policy, gpu-port-info tool | 2097 | `### GPU ports model (added per user clarification — "it comes down to how many ports")` |
+| §4.15 | [Audio support](#audio-support-added-per-user-request-needed-for-chromecast-use-case) | AC97/HDA, BDP audio messages | 2264 | `### Audio support (added per user request — needed for chromecast use case)` |
+| §4.16 | [Cast tool design considerations](#cast-tool-design-considerations-no-implementation-added-per-user-clarification) | Cast (design only) | 2555 | `### Cast tool design considerations (no implementation — added per user clarification)` |
+| §4.17 | [Combining cast methods](#combining-cast-methods-multi-protocol-cast-design-only) | Multi-protocol cast | 2750 | `### Combining cast methods (multi-protocol cast — design only)` |
+| §4.18 | [Bluetooth considerations](#bluetooth-considerations-future-design-only) | BT (design only) | 2878 | `### Bluetooth considerations (future — design only)` |
+| §4.19 | [Mediated passthrough](#mediated-passthrough-the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story) | Control plane retained | 3888 | `### Mediated passthrough — the host retains the control plane (architectural principle, added per user's PCI-passthrough story)` |
+| §4.20 | [Multi-device / heterogeneous hardware](#multi-device-heterogeneous-hardware-architectural-principle-added-per-user-request) | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 4134 | `### Multi-device / heterogeneous hardware (architectural principle, added per user request)` |
+| §4.21 | [Workload-driven GPU selection + dynamic capability discovery](#workload-driven-gpu-selection-dynamic-capability-discovery-architectural-principle-added-per-user-request) | Plug-in capability registry | 4576 | `### Workload-driven GPU selection + dynamic capability discovery (architectural principle, added per user request)` |
 | §4.22 | [FreeBSD 16 target platform](#freebsd-16-target-platform-added-per-user-confirmation) | Version pin | 5243 | `### FreeBSD 16 target platform (added per user confirmation)` |
-| §4.23 | [Auto-load / zero-friction](#auto-load--zero-friction-no-operator-config-changes-required) | kld_list, rc.conf, devd, cert auto-gen, hot-plug | 5316 | `### Auto-load / zero-friction (no operator config changes required)` |
+| §4.23 | [Auto-load / zero-friction](#auto-load-zero-friction-no-operator-config-changes-required) | kld_list, rc.conf, devd, cert auto-gen, hot-plug | 5316 | `### Auto-load / zero-friction (no operator config changes required)` |
 
 (Line numbers validated against the live file via `grep -n "^### " plan.md` at the time of this table update. After any edit, re-run grep and update the table; the agent's F1 verifier does this check.)
 
@@ -170,7 +170,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 
 ### Agent Context Management (the "how to not run out of context" section)
 
-The plan is **12,989 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
+The plan is **13,039 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
 
 **The solution: structured context management per task.**
 
@@ -5452,6 +5452,7 @@ Host-wide security policy. Stricter-wins precedence.
 | `security.policy.gpu_strict` | INT | 1 | 0 = strict mode bypassed jail-wide |
 | `security.policy.cuda_percentage_max` | INT (PCT) | 0 | 0 = no host cap; else cap per consumer |
 | `security.policy.vram_percentage_max` | INT (PCT) | 0 | 0 = no host cap; else cap per consumer |
+| `security.policy.fbuf.allowhid` | INT | 0 | 0 = NO jail may use `fbuf.allowhid=1`; 1 = jails can opt in (stricter-wins; see §4.2 "HID-level controls") |
 
 ### 4. Sysctls — transport security (`security.transport.*`)
 
@@ -8183,12 +8184,14 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     - `allow.fbuf` (boolean) — enables the framebuffer for the jail
     - `fbuf.nokbd` (boolean, default false) — opt out of auto-attached kbd
     - `fbuf.nomouse` (boolean, default false) — opt out of auto-attached mouse
+    - `fbuf.nohid` (boolean, default false) — coarse-grained opt-out that disables all virtual HID devices (kbd+mouse). Shorthand for `fbuf.nokbd=1 fbuf.nomouse=1`. See §4.2 "HID-level controls".
+    - `fbuf.allowhid` (boolean, default false) — separate permission that allows the jail to access raw HID device nodes (`/dev/uhid*`). Requires `allow.fbuf=1`. Subject to host policy `security.fbuf.allowhid` (default 0; stricter-wins). See §4.2 "HID-level controls".
     - `fbuf.width` (int, default 1024) — framebuffer width
     - `fbuf.height` (int, default 768) — framebuffer height
     - `fbuf.transport` (string, default "rfb") — which transport to use
-  - Specify semantics: `allow.fbuf` on implies kbd+mouse on (unless individually disabled).
+  - Specify semantics: `allow.fbuf` on implies kbd+mouse on (unless individually disabled). `fbuf.nohid` is stricter than per-device flags (it forces both off). `fbuf.allowhid` is orthogonal to the opt-out flags and requires `allow.fbuf`.
   - Specify where each param is registered (sysctl oid? OSD? hardcoded in `prison_set_allow`?).
-  - List the `PRISON_FLAG_*` bits needed.
+  - List the `PRISON_FLAG_*` bits needed (no new PRISON_FLAG needed for `fbuf.allowhid`; it's a sub-flag in the prison struct, like `fbuf_nokbd`).
 
   **Output**: the spec markdown file.
 
@@ -8208,10 +8211,13 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - `jail-param-recipe.md` (from T3)
   - `sys/kern/kern_jail.c:4744+` — `allow.vmm_ppt` precedent
   - `usr.sbin/bhyve/pci_fbuf.c:81-85` — `COLS_DEFAULT`, `ROWS_DEFAULT` for default sizes
+  - §4.2 "HID-level controls" (additive kbd/mouse + HID design)
 
   **Acceptance Criteria**:
-  - [ ] `jail-fbuf-params.md` exists with all 6 params and their defaults
+  - [ ] `jail-fbuf-params.md` exists with all 8 params and their defaults
   - [ ] The "kbd/mouse auto-on with allow.fbuf" semantics is documented explicitly
+  - [ ] The "fbuf.nohid is stricter than per-device flags" precedence is documented
+  - [ ] The "fbuf.allowhid requires allow.fbuf and host policy" rule is documented
   - [ ] `PRISON_FLAG_PRISON_FBUF` is defined (header name proposed)
 
   **QA Scenarios**:
@@ -8219,9 +8225,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   Scenario: jail-fbuf-params.md is complete
     Tool: Bash (grep)
     Steps:
-      1. grep -E '^\* `allow\.fbuf`|^\* `fbuf\.' jail-fbuf-params.md   # 6 params
-    Expected Result: 6 matches
-    Failure Indicators: < 6 param entries
+      1. grep -E '^\* `allow\.fbuf`|^\* `fbuf\.' jail-fbuf-params.md   # 8 params
+    Expected Result: 8 matches
+    Failure Indicators: < 8 param entries
     Evidence: .sisyphus/evidence/task-6-fbuf-params.txt
   ```
 
@@ -8555,9 +8561,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 - [ ] 9. Add `fbuf` jail param registration in `kern_jail.c`
 
   **What to do** (TDD first):
-  1. Write `tests/sys/jail/atf_fbuf_params.c` — tests for: (a) `jail_set` with `allow.fbuf=1` succeeds when the kernel module is loaded, (b) `allow.fbuf=0` (default) leaves the flag unset in the prison struct, (c) `fbuf.nokbd=1` sets the nokbd bit, (d) `fbuf.nomouse=1` sets the nomouse bit, (e) `fbuf.width=800` records 800 in the prison, (f) `fbuf.height=600` records 600, (g) `fbuf.transport="rfb"` records "rfb", (h) `fbuf.nokbd=invalid` returns EINVAL, (i) unknown key `fbuf.bogus=1` returns EINVAL. Run tests — fail.
-  2. Add the params in `sys/kern/kern_jail.c` per the recipe from T3. Add `allow.fbuf` to the boolean flag set; add `fbuf.*` as OSD-registered typed params.
-  3. Add a `prison_check_fbuf(pr)` helper that returns the combined fbuf state (used by T10).
+  1. Write `tests/sys/jail/atf_fbuf_params.c` — tests for: (a) `jail_set` with `allow.fbuf=1` succeeds when the kernel module is loaded, (b) `allow.fbuf=0` (default) leaves the flag unset in the prison struct, (c) `fbuf.nokbd=1` sets the nokbd bit, (d) `fbuf.nomouse=1` sets the nomouse bit, (d2) `fbuf.nohid=1` sets the nohid bit, (d3) `fbuf.allowhid=1` sets the allowhid bit (rejected with EINVAL when `allow.fbuf=0`), (e) `fbuf.width=800` records 800 in the prison, (f) `fbuf.height=600` records 600, (g) `fbuf.transport="rfb"` records "rfb", (h) `fbuf.nokbd=invalid` returns EINVAL, (i) unknown key `fbuf.bogus=1` returns EINVAL, (j) `fbuf.nohid=1` AND `fbuf.nokbd=0` produces no kbd (nohid is stricter). Run tests — fail.
+  2. Add the params in `sys/kern/kern_jail.c` per the recipe from T3. Add `allow.fbuf` to the boolean flag set; add `fbuf.*` as OSD-registered typed params. Add `fbuf.nohid` and `fbuf.allowhid` as boolean OSD params.
+  3. Add a `prison_check_fbuf(pr)` helper that returns the combined fbuf state (used by T10). The helper computes the effective fbuf state: `(allow_fbuf) ? (nokbd | nomouse | nohid ? no-fb-input : kbd+mouse on) : off`. `fbuf.allowhid` is a separate sub-flag returned alongside.
   4. Run tests — pass.
 
   **Must NOT do**: don't add the GPU params here (those go in T21). Don't add the preflight checks (T23).
@@ -8566,13 +8572,13 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Parallelization**: Wave 2. Blocks T10, T12, T23. Blocked by T3, T6.
 
-  **References**: `jail-fbuf-params.md` (from T6), `jail-param-recipe.md` (from T3), `sys/kern/kern_jail.c:3919+` (`prison_set_allow`), `lib/libjail/jail.c:1202-1232` (`kldload_param`).
+  **References**: `jail-fbuf-params.md` (from T6), `jail-param-recipe.md` (from T3), `sys/kern/kern_jail.c:3919+` (`prison_set_allow`), `lib/libjail/jail.c:1202-1232` (`kldload_param`), §4.2 "HID-level controls" (`fbuf.nohid`, `fbuf.allowhid`).
 
   **Acceptance Criteria**:
-  - [ ] `tests/sys/jail/atf_fbuf_params.c` exists with ≥ 9 test cases
+  - [ ] `tests/sys/jail/atf_fbuf_params.c` exists with ≥ 11 test cases (added 2 for HID)
   - [ ] All cases pass via `kyua test`
   - [ ] `make -C sys/kern build` (or full `buildkernel`) succeeds
-  - [ ] `allow.fbuf` and `fbuf.*` appear in `jail -m '' | grep fbuf` output
+  - [ ] `allow.fbuf` and `fbuf.*` (including `fbuf.nohid`, `fbuf.allowhid`) appear in `jail -m '' | grep fbuf` output
 
   **QA Scenarios**:
   ```
@@ -8584,6 +8590,15 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
          jls -j testfbuf -v fbuf.nokbd
     Expected Result: All tests pass; `fbuf.nokbd` shows as 1
     Evidence: .sisyphus/evidence/task-9-fbuf-params.txt
+
+  Scenario: HID-level params (fbuf.nohid, fbuf.allowhid) are registered
+    Tool: Bash (kyua + jail(8))
+    Steps:
+      1. kyua test atf_fbuf_params
+      2. jail -c name=testhid allow.fbuf=1 fbuf.nohid=1 fbuf.allowhid=1 persist && \
+         jls -j testhid -v fbuf.nohid -v fbuf.allowhid
+    Expected Result: All tests pass; `fbuf.nohid` shows as 1, `fbuf.allowhid` shows as 1
+    Evidence: .sisyphus/evidence/task-9-fbuf-hid-params.txt
   ```
 
   **Required Context** (in agent's working memory):
@@ -8609,7 +8624,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
   - [ ] Agent outputs: "Task T-NN complete" and stops
 
-  **Commit**: YES — `kern_jail: register fbuf jail params (allow.fbuf, fbuf.nokbd, fbuf.nomouse, fbuf.{width,height,transport})`
+  **Commit**: YES — `kern_jail: register fbuf jail params (allow.fbuf, fbuf.nokbd, fbuf.nomouse, fbuf.nohid, fbuf.allowhid, fbuf.{width,height,transport})`
 
 ---
 
@@ -8736,10 +8751,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 - [ ] 22. Implement preflight check framework (built-in `sys/kern/subr_preflight.c` + loadable shim `sys/modules/preflight/`)
 
   **What to do** (TDD first):
-  1. Write `tests/sys/preflight/atf_preflight.c` — tests for: (a) `preflight_register("test.pass", ..., BLOCKING, NULL)` then `preflight_run_all` returns 0 and the report has the entry, (b) a check that returns an error code surfaces it in the report, (c) BLOCKING check failure short-circuits the runner with that error, (d) WARNING check failure logs but doesn't short-circuit, (e) deps are honored (B runs after A), (f) `preflight_unregister` removes a check, (g) duplicate name registration returns EEXIST. Run tests — fail.
+  1. Write `tests/sys/preflight/atf_preflight.c` — tests for: (a) `preflight_register("test.pass", ..., BLOCKING, NULL)` then `preflight_run_all` returns 0 and the report has the entry, (b) a check that returns an error code surfaces it in the report, (c) BLOCKING check failure short-circuits the runner with that error, (d) WARNING check failure logs but doesn't short-circuit, (e) deps are honored (B runs after A), (f) `preflight_unregister` removes a check, (g) duplicate name registration returns EEXIST, (h) `preflight_check_fbuf_allowhid_consistency` BLOCKING check: when `fbuf.allowhid=1` and `security.policy.fbuf.allowhid=0`, returns EINVAL with message "raw HID denied by host policy" (see §4.2 "HID-level controls"). Run tests — fail.
   2. Implement `sys/kern/subr_preflight.c` + `sys/sys/preflight.h`. Topological sort by `deps[]` array (not registration order).
   3. Add `sys/modules/preflight/Makefile` + `preflight.c` shim that calls the `SYSINIT` registration.
-  4. Hook the runner into `kern_jail.c` `kern_jail_set` (after the param table is processed, before the prison is committed).
+  4. Hook the runner into `kern_jail.c` `kern_jail_set` (after the param table is processed, before the prison is committed). The hook also evaluates the new `fbuf_allowhid_consistency` check (only when `allow.fbuf=1`).
   5. Hook the runner into the bhyve VMM API (a new `vm_preflight_check` or extended `vm_create`).
   6. Run tests — pass.
 
@@ -8749,15 +8764,16 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Parallelization**: Wave 2. Blocks T12, T23, T28, T33. Blocked by T3.
 
-  **References**: `sys/kern/subr_*.c` (existing subr patterns), `sys/sys/jail.h` (`struct prison`), `sys/modules/<existing>/` (Makefile pattern), `tests/sys/kern/atf_*.c` (kernel ATF examples).
+  **References**: `sys/kern/subr_*.c` (existing subr patterns), `sys/sys/jail.h` (`struct prison`), `sys/modules/<existing>/` (Makefile pattern), `tests/sys/kern/atf_*.c` (kernel ATF examples), §4.2 "HID-level controls" (`fbuf.allowhid` host policy consistency check).
 
   **Acceptance Criteria**:
   - [ ] `sys/kern/subr_preflight.c`, `sys/sys/preflight.h` exist
-  - [ ] `tests/sys/preflight/atf_preflight.c` exists with ≥ 7 test cases
+  - [ ] `tests/sys/preflight/atf_preflight.c` exists with ≥ 8 test cases (added 1 for HID)
   - [ ] All cases pass
   - [ ] `make -C sys/modules/preflight build` succeeds
   - [ ] `buildkernel` succeeds
   - [ ] `jail -c name=tpf allow.fbuf` runs the preflight (log shows `preflight:` lines)
+  - [ ] `jail -c name=tpffhid allow.fbuf=1 fbuf.allowhid=1` with `security.policy.fbuf.allowhid=0` is BLOCKED with audit log "raw HID denied by host policy"
 
   **QA Scenarios**:
   ```
@@ -8765,13 +8781,22 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Tool: Bash (kyua)
     Steps:
       1. kyua test atf_preflight
-    Expected Result: All 7+ cases pass
+    Expected Result: All 8+ cases pass
     Evidence: .sisyphus/evidence/task-22-preflight.txt
+
+  Scenario: HID consistency preflight check blocks jail start
+    Tool: Bash (jail(8) + grep)
+    Steps:
+      1. sysctl security.policy.fbuf.allowhid=0
+      2. jail -c name=hidtest allow.fbuf=1 fbuf.allowhid=1 persist
+    Expected Result: jail fails with "preflight: fbuf.allowhid: raw HID denied by host policy" in stderr; audit log entry
+    Evidence: .sisyphus/evidence/task-22-preflight-hid.txt
   ```
 
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Additive KBD/Mouse + HID-level controls (`fbuf.allowhid` + host policy consistency)
   - §4.5 Preflight check framework — the 20 checks to ship
   - T21 — gpu_resource hooks
   - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
@@ -8960,7 +8985,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 - [ ] 12. Implement `sys/modules/displayd/` kernel module
 
-  **What to do** (TDD first): write `tests/sys/jail/atf_displayd.c` — tests for: (a) creating a jail with `allow.fbuf` registers a `console` instance, (b) kbd/mouse auto-attached, (c) `fbuf.nokbd=1` skips kbd registration, (d) console is destroyed on jail_remove, (e) the fb is kernel-managed (not VMM). Run — fail. Implement `sys/modules/displayd/displayd.c` (~400 lines): module init, `jail_attach` hook, `console_create` call, kbd/ptr registration via `console_kbd_register` / `console_ptr_register`, fb allocation (kmalloc + zero), teardown on jail_remove. Run — pass.
+  **What to do** (TDD first): write `tests/sys/jail/atf_displayd.c` — tests for: (a) creating a jail with `allow.fbuf` registers a `console` instance, (b) kbd/mouse auto-attached, (c) `fbuf.nokbd=1` skips kbd registration, (c2) `fbuf.nohid=1` skips BOTH kbd and mouse registration (nohid is stricter), (c3) `fbuf.allowhid=1` creates `/dev/uhid0` in the jail (and is rejected with EINVAL when `allow.fbuf=0`), (c4) `fbuf.allowhid=1` is denied when `security.fbuf.allowhid=0` (host policy wins), (d) console is destroyed on jail_remove, (e) the fb is kernel-managed (not VMM). Run — fail. Implement `sys/modules/displayd/displayd.c` (~400 lines): module init, `jail_attach` hook, `console_create` call, kbd/ptr registration via `console_kbd_register` / `console_ptr_register`, fb allocation (kmalloc + zero), HID policy: check `fbuf.allowhid` AND `security.fbuf.allowhid`; if both true, attach `/dev/uhid*` to jail's devfs (mode 0660, owner `root:_displayd`); teardown on jail_remove. Run — pass.
 
   **Must NOT do**: no `/dev/fb0`, no PCI device. Pure kernel API.
 
@@ -8968,7 +8993,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Parallelization**: Wave 3. Blocks T15, T18. Blocked by T5, T8, T9, T10, T22.
 
-  **References**: `usr.sbin/bhyve/console.h:34-51`, `sys/modules/<existing>/` (Makefile pattern), `sys/sys/jail.h`.
+  **References**: `usr.sbin/bhyve/console.h:34-51`, `sys/modules/<existing>/` (Makefile pattern), `sys/sys/jail.h`, §4.2 "HID-level controls" (`fbuf.nohid`, `fbuf.allowhid`, host policy `security.fbuf.allowhid`).
 
   **Acceptance**: TDD pass; `make -C sys/modules/displayd build`; `buildkernel`; live: `jail -c name=fbt allow.fbuf persist` then `jls -v fbuf` shows state.
 
@@ -8994,12 +9019,18 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   | 12 | `tc_displayd_kbd_not_attached_when_nokbd` | When `fbuf.nokbd=1`, no kbd consumer is registered |
   | 13 | `tc_displayd_mouse_auto_attached` | When `fbuf.nomouse=0` (default), the module registers a ptr consumer with the console |
   | 14 | `tc_displayd_mouse_not_attached_when_nomouse` | When `fbuf.nomouse=1`, no ptr consumer is registered |
+  | 14a | `tc_displayd_nohid_disables_both_kbd_and_mouse` | When `fbuf.nohid=1` (with `fbuf.nokbd=0`, `fbuf.nomouse=0`), BOTH kbd and ptr consumers are skipped (nohid is stricter) |
+  | 14b | `tc_displayd_nohid_wins_over_nokbd_nomouse` | When `fbuf.nohid=1` AND `fbuf.nokbd=0` AND `fbuf.nomouse=0`, no kbd/ptr are registered (nohid precedence) |
+  | 14c | `tc_displayd_allowhid_creates_uhid_node` | When `fbuf.allowhid=1` AND `allow.fbuf=1` AND `security.fbuf.allowhid=1`, `/dev/uhid0` is created in the jail's devfs (mode 0660, owner `root:_displayd`) |
+  | 14d | `tc_displayd_allowhid_rejected_without_allow_fbuf` | When `fbuf.allowhid=1` AND `allow.fbuf=0`, returns EINVAL with audit log "raw HID requires allow.fbuf" |
+  | 14e | `tc_displayd_allowhid_denied_by_host_policy` | When `fbuf.allowhid=1` AND `security.fbuf.allowhid=0`, no `/dev/uhid0` is created; audit log "raw HID denied by host policy" |
+  | 14f | `tc_displayd_nohid_and_allowhid_coexist` | When `fbuf.nohid=1` AND `fbuf.allowhid=1` AND `security.fbuf.allowhid=1`, virtual kbd/ptr are absent AND `/dev/uhid0` is present (orthogonal concerns) |
   | 15 | `tc_displayd_jail_remove_tears_down` | When the prison is removed (jail removed), the module detaches and frees |
   | 16 | `tc_displayd_jail_remove_idempotent` | Double-removal of a prison is safe (no double-free) |
   | 17 | `tc_displayd_fb_is_kernel_managed` | The fb pointer is a kernel allocation, NOT mapped from VMM (`!is_vmm_backed()`) |
   | 18 | `tc_displayd_reset_in_software` | `displayd_reset(pr)` issues a software reset (no PCI FLR needed) and the fb is reusable |
   | 19 | `tc_displayd_mediator_attach_detach_reinit_hooks` | The module implements `attach()` / `detach()` / `reset()` / `reinit()` (mediator pattern) |
-  | 20 | `tc_displayd_no_devfs_nodes` | After attach, no `/dev/fb*` or `/dev/dri*` are created in the jail's devfs (verified via `devfs_rule_get()`) |
+  | 20 | `tc_displayd_no_devfs_nodes` | After attach, no `/dev/fb*` or `/dev/dri*` are created in the jail's devfs (verified via `devfs_rule_get()`). `/dev/uhid*` is exempt when `fbuf.allowhid=1` |
   | 21 | `tc_displayd_audit_event_on_attach` | On attach, an audit event is written (`displayd:attach`) |
   | 22 | `tc_displayd_audit_event_on_detach` | On detach, an audit event is written (`displayd:detach`) |
   | 23 | `tc_displayd_dtrace_probe_on_attach` | `displayd:attach` DTrace probe fires (verified via `dtrace -l`) |
@@ -9015,6 +9046,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   | 3 | `sh_displayd_jail_state_in_jls` | `jls -j fbtest -v allow.fbuf` shows 1; `jls -j fbtest -v fbuf.nokbd` shows 0 (default) |
   | 4 | `sh_displayd_nokbd_works` | `jail -c name=fbtest2 allow.fbuf=1 fbuf.nokbd=1 persist` succeeds; `fbuf.nokbd=1` in jls |
   | 5 | `sh_displayd_nomouse_works` | `jail -c name=fbtest3 allow.fbuf=1 fbuf.nomouse=1 persist` succeeds; `fbuf.nomouse=1` in jls |
+  | 5a | `sh_displayd_nohid_works` | `jail -c name=fbtest4 allow.fbuf=1 fbuf.nohid=1 persist` succeeds; `fbuf.nohid=1` in jls; `jexec fbtest4 ls /dev/ | grep -E 'kbd\|ums'` returns empty |
+  | 5b | `sh_displayd_allowhid_default_off` | `jail -c name=fbtest5 allow.fbuf=1 fbuf.allowhid=1 persist` succeeds; `fbuf.allowhid=1` in jls; WITHOUT `sysctl security.fbuf.allowhid=1`, `jexec fbtest5 ls /dev/uhid*` returns empty (host policy blocks) |
+  | 5c | `sh_displayd_allowhid_uhid_nodes` | After `sysctl security.fbuf.allowhid=1`, `jail -c name=fbtest6 allow.fbuf=1 fbuf.allowhid=1 persist`; `jexec fbtest6 ls /dev/uhid*` returns `/dev/uhid0` |
+  | 5d | `sh_displayd_allowhid_rejected_without_allow_fbuf` | `jail -c name=fbtest7 fbuf.allowhid=1 persist` returns EINVAL with audit log "raw HID requires allow.fbuf" |
   | 6 | `sh_displayd_no_devfs_nodes` | Inside jail, `ls /dev/fb* /dev/dri* /dev/gpu* 2>&1` returns empty (no nodes) |
   | 7 | `sh_displayd_kbd_inject_via_ioctl` | A test program inside the jail can `ioctl` the kbd to inject a key (verified via console input event) |
   | 8 | `sh_displayd_mouse_inject_via_ioctl` | A test program inside the jail can `ioctl` the ptr to inject a click |
@@ -9028,6 +9063,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Additive KBD/Mouse model — kbd/mouse + HID-level controls (`fbuf.nohid`, `fbuf.allowhid`)
   - §4.5 Preflight check framework — preflight fbuf checks
   - §4.8 Architecture support — PAGE_SIZE handling per arch
   - §4.22 FreeBSD 16 target — version pin
@@ -9142,24 +9178,25 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 - [ ] 15. Add jail-side example + `tests/sys/jail/fbuf/`
 
-  **What to do**: create `contrib/jail-console-example/` with a Makefile, a small C program that calls `console_create(1024, 768, malloc_fb(), CONSOLE_FB_RAW)`, registers a render callback, and exits. Add `tests/sys/jail/fbuf/` shell harness (ATF) that starts a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts the module is loaded, and tears down. Add to `tests/sys/jail/Makefile`.
+  **What to do**: create `contrib/jail-console-example/` with a Makefile, a small C program that calls `console_create(1024, 768, malloc_fb(), CONSOLE_FB_RAW)`, registers a render callback, and exits. Add `tests/sys/jail/fbuf/` shell harness (ATF) that starts a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts the module is loaded, and tears down. The harness must cover **all fbuf param combinations** (default, `nokbd=1`, `nomouse=1`, `nohid=1`, `allowhid=1` with host policy on/off). Add a second example `contrib/jail-raw-hid-example/` showing a program that opens `/dev/uhid0` and writes a HID report (only works when `fbuf.allowhid=1` + `security.policy.fbuf.allowhid=1`). Add to `tests/sys/jail/Makefile`.
 
-  **Must NOT do**: don't add a real GUI inside the jail — just prove the kernel API is reachable.
+  **Must NOT do**: don't add a real GUI inside the jail — just prove the kernel API is reachable. Don't assume `/dev/uhid*` is always present — assert host policy first.
 
   **Profile**: `unspecified-low`. **Skills**: `[]`.
 
   **Parallelization**: Wave 3. Blocks T18. Blocked by T12.
 
-  **References**: `tests/sys/jail/` (existing tests), `sys/modules/displayd/` (T12), `usr.sbin/bhyve/console.h` (T8).
+  **References**: `tests/sys/jail/` (existing tests), `sys/modules/displayd/` (T12), `usr.sbin/bhyve/console.h` (T8), §4.2 "HID-level controls".
 
-  **Acceptance**: `kyua test fbuf` passes; the example program builds and runs (no-op since no real render).
+  **Acceptance**: `kyua test fbuf` passes; the example program builds and runs (no-op since no real render); raw-HID example compiles only when `fbuf.allowhid=1` AND host policy is on.
 
-  **QA**: `kyua test tests/sys/jail/fbuf`; `./jail-console-example` exits 0.
+  **QA**: `kyua test tests/sys/jail/fbuf`; `./jail-console-example` exits 0; with host policy on, `./jail-raw-hid-example` exits 0; with host policy off, `./jail-raw-hid-example` fails with `EACCES` and audit log "raw HID denied by host policy".
 
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
   - T12 — displayd module API
+  - §4.2 Additive KBD/Mouse + HID-level controls
   - §4.5 Preflight check framework — preflight fbuf checks
   - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
@@ -9786,7 +9823,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 - [ ] 17. Documentation (`jail.conf.5`, `bhyve.8`, `display-abstraction.md`)
 
-  **What to do**: update `share/man/man5/jail.conf.5` with the new params (`allow.fbuf`, `fbuf.nokbd`, `fbuf.nomouse`, `fbuf.width`, `fbuf.height`, `fbuf.transport`, `allow.gpu`, `allow.gpu.strict`, `gpu.cores`, `gpu.memory`, `gpu.scheduler`, `gpu.memory.policy`). Update `share/man/man8/bhyve.8` and `bhyve_config.5` with the new `transport=` form and the deprecation notice for `rfb=`. Write `display-abstraction.md` (architecture overview). Write `policy-quickstart(7)`. Write the migration guide section (backcompat) per the backcompat section above. Write `display_transport_security(7)` (covers TLS, auth, audit, cert formats, hot-reload, SNI, self-signed, host policy). Write `gpu_resource(9)` (kernel API for jail consumers). Run `mandoc -Tlint` on all man pages to catch warnings.
+  **What to do**: update `share/man/man5/jail.conf.5` with the new params (`allow.fbuf`, `fbuf.nokbd`, `fbuf.nomouse`, `fbuf.nohid`, `fbuf.allowhid`, `fbuf.width`, `fbuf.height`, `fbuf.transport`, `allow.gpu`, `allow.gpu.strict`, `gpu.cores`, `gpu.memory`, `gpu.scheduler`, `gpu.memory.policy`). Each HID param must include: (1) a 1-paragraph description, (2) default value, (3) example jail.conf snippet, (4) cross-reference to `security.policy.fbuf.allowhid` host sysctl for `fbuf.allowhid`. Update `share/man/man8/bhyve.8` and `bhyve_config.5` with the new `transport=` form and the deprecation notice for `rfb=`. Write `display-abstraction.md` (architecture overview). Write `policy-quickstart(7)`. Write the migration guide section (backcompat) per the backcompat section above. Write `display_transport_security(7)` (covers TLS, auth, audit, cert formats, hot-reload, SNI, self-signed, host policy). Write `gpu_resource(9)` (kernel API for jail consumers). Run `mandoc -Tlint` on all man pages to catch warnings.
 
   **Must NOT do**: don't break `bhyve.8` mdoc syntax. Don't lose existing man content.
 
@@ -9803,6 +9840,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Additive KBD/Mouse + HID-level controls (the new `fbuf.nohid`/`fbuf.allowhid` man-page text)
   - §4.7 Backward compatibility — all compat rules
   - §4.22 FreeBSD 16 target — version pin
   - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
@@ -9829,7 +9867,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 - [ ] 18. Smoke test (build, boot, regression, jail fbuf live test, transport TLS)
 
-  **What to do**: write `tests/sys/vmm/fbuf_variants.sh` — boots a bhyve VM with each of: `rfb=127.0.0.1:5900` (legacy), `tcp=127.0.0.1:5900` (legacy), `unix:/tmp/v.sock` (legacy), `transport=rfb` (self-signed TLS), `transport=rfb,tls.cert=/etc/letsencrypt/live/.../` (certbot), `transport=rdp` (refused). Verifies VNC handshake via `nc` / `openssl s_client` / RDP probe. Write `tests/sys/jail/fbuf/load.sh` — creates a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts loaded. Write `tests/sys/policy/host_policy.sh` — sets `security.policy.legacy_allowed=0` then attempts legacy bhyve start, asserts refused. Write `tests/sys/gpu/stub_backend.sh` — verifies the `gpu_stub` backend is registered by default, sets `hw.gpu.0.stub_capacity=10496` (or 6144 for an AMD-like stub), creates a jail with `allow.gpu=0,gpu.cores=50%`, asserts the resolved cores = 5248 (or 3072). **Write `tests/sys/policy/sysctl_conf_integration.sh` — backs up `/etc/sysctl.conf`, appends `sysctl.conf.snippet` from `share/examples/security/policy-quickstart/`, runs `sysctl -f /etc/sysctl.conf`, asserts every `security.policy.*` / `security.transport.*` value is set, then restores the original `/etc/sysctl.conf`. Verifies the existing ZFS / panic / powercycle settings (e.g. `vfs.zfs.vdev.min_auto_ashift=12`, `kern.powercycle_on_panic=1`) are preserved untouched.** Run all on the FreeBSD VM (Phase 1) using the stub backend. The nvidia box (Phase 2) runs an additional suite with a real backend. Add to `tests/sys/vmm/Makefile` and `tests/sys/jail/Makefile`.
+  **What to do**: write `tests/sys/vmm/fbuf_variants.sh` — boots a bhyve VM with each of: `rfb=127.0.0.1:5900` (legacy), `tcp=127.0.0.1:5900` (legacy), `unix:/tmp/v.sock` (legacy), `transport=rfb` (self-signed TLS), `transport=rfb,tls.cert=/etc/letsencrypt/live/.../` (certbot), `transport=rdp` (refused). Verifies VNC handshake via `nc` / `openssl s_client` / RDP probe. Write `tests/sys/jail/fbuf/load.sh` — creates a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts loaded. The harness also covers **all fbuf param combinations** (default, `nokbd=1`, `nomouse=1`, `nohid=1`, `allowhid=1` with host policy on/off) and asserts that `/dev/uhid*` only appears when both `fbuf.allowhid=1` AND `security.policy.fbuf.allowhid=1`. Write `tests/sys/policy/host_policy.sh` — sets `security.policy.legacy_allowed=0` then attempts legacy bhyve start, asserts refused. Also sets `security.policy.fbuf.allowhid=0` and verifies a jail with `fbuf.allowhid=1` is BLOCKED by preflight. Write `tests/sys/gpu/stub_backend.sh` — verifies the `gpu_stub` backend is registered by default, sets `hw.gpu.0.stub_capacity=10496` (or 6144 for an AMD-like stub), creates a jail with `allow.gpu=0,gpu.cores=50%`, asserts the resolved cores = 5248 (or 3072). **Write `tests/sys/policy/sysctl_conf_integration.sh` — backs up `/etc/sysctl.conf`, appends `sysctl.conf.snippet` from `share/examples/security/policy-quickstart/`, runs `sysctl -f /etc/sysctl.conf`, asserts every `security.policy.*` / `security.transport.*` value is set (including the new `security.policy.fbuf.allowhid=0` default), then restores the original `/etc/sysctl.conf`. Verifies the existing ZFS / panic / powercycle settings (e.g. `vfs.zfs.vdev.min_auto_ashift=12`, `kern.powercycle_on_panic=1`) are preserved untouched.** Run all on the FreeBSD VM (Phase 1) using the stub backend. The nvidia box (Phase 2) runs an additional suite with a real backend. Add to `tests/sys/vmm/Makefile` and `tests/sys/jail/Makefile`.
 
   **Must NOT do**: don't require a real GPU for the GPU tests (use a stub backend).
 
@@ -9839,13 +9877,14 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **References**: `tests/sys/vmm/utils.subr` (existing harness), `tests/sys/jail/` (existing tests), `usr.sbin/bhyve/bhyve.8` (T17).
 
-  **Acceptance**: all smoke tests pass via `kyua test`; full build succeeds; full bhyve regression passes; full jail regression passes.
+  **Acceptance**: all smoke tests pass via `kyua test`; full build succeeds; full bhyve regression passes; full jail regression passes; HID combinations (default/nokbd/nomouse/nohid/allowhid) all behave as specified.
 
-  **QA**: `kyua test tests/sys/vmm/fbuf_variants.sh`; `kyua test tests/sys/jail/fbuf/load.sh`; `kyua test tests/sys/policy/host_policy.sh`.
+  **QA**: `kyua test tests/sys/vmm/fbuf_variants.sh`; `kyua test tests/sys/jail/fbuf/load.sh` (covers HID matrix); `kyua test tests/sys/policy/host_policy.sh` (includes HID policy block).
 
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
+  - §4.2 Additive KBD/Mouse + HID-level controls (param combinations + host policy)
   - §4.22 FreeBSD 16 target — build on FreeBSD 16
   - §4.8 Architecture support — cross-arch smoke tests
   - All v1 tasks T1-T17 — what was built so far
@@ -9918,13 +9957,13 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   1. Write `share/man/man7/display-abstraction-migration.7` as a single operator-focused walkthrough for users upgrading from a pre-framebuffer bhyve/jail setup. Sections:
      - **Overview** — what changed at a high level (display is now pluggable, transport is now pluggable, jails can have fb + GPU, security is on by default).
      - **For bhyve users** — the `rfb=` config key still works (legacy plaintext, warning logged). To get TLS, swap to `transport=rfb,tls.cert=...` (or rely on self-signed auto-gen). To get RDP, use `transport=rdp,...` (currently a stub). Step-by-step example of the swap, including the `sysctl.conf.snippet` integration.
-     - **For jail users** — old jail configs unchanged. To enable a framebuffer in a jail, add `allow.fbuf;` to its config. Step-by-step example. Note: the kbd/mouse come in automatically; opt out with `fbuf.nokbd` / `fbuf.nomouse`.
+     - **For jail users** — old jail configs unchanged. To enable a framebuffer in a jail, add `allow.fbuf;` to its config. Step-by-step example. Note: the kbd/mouse come in automatically; opt out with `fbuf.nokbd` / `fbuf.nomouse`. To disable BOTH at once, use `fbuf.nohid=1` (shorthand). For raw HID device access (e.g. `/dev/uhid0` for a custom input driver), set `fbuf.allowhid=1` AND `sysctl security.policy.fbuf.allowhid=1` (host policy must be on; stricter-wins).
      - **For GPU users (multi-tenant hosts)** — new sysctls under `security.policy.*` (e.g. `cuda_percentage_max`, `vram_percentage_max`). Per-jail `gpu.cores=50%` resolves against the device's native unit. Step-by-step: sysctl setup, jail config, verification with `jls -v gpu`.
      - **For certbot users** — no change. The certbot live dir is auto-discovered. Hot-reload via kqueue. `display_transport_security(7)` has the full reference; this guide has the TL;DR.
      - **For self-signed users** — no change. If you've been using `-selfsigned` or a hand-rolled openssl cert, the loader finds it. Self-signed auto-gen fires only when nothing is found anywhere.
      - **For sysadmin / cluster operators** — the host policy layer (`security.policy.*` / `security.transport.*`) lets you enforce strict security across all consumers with one set of sysctls. `policy-quickstart.conf` is the recommended baseline; `policy-quickstart(7)` documents the lines. Setting `security.policy.legacy_allowed=0` breaks old `rfb=` configs (intentional).
-     - **Compatibility matrix** — a clear table: "what works unchanged" / "what still works with a warning" / "what's new" / "what's removed (nothing)".
-     - **Troubleshooting** — common gotchas: TLS handshake fails (check cert + chain); self-signed cert warning in browser (expected for dev); preflight refuses jail start (read `jls -v preflight`); VNC client can't connect after upgrade (check `transport.tls.mode`).
+     - **Compatibility matrix** — a clear table: "what works unchanged" / "what still works with a warning" / "what's new" / "what's removed (nothing)". The new row in the matrix: `fbuf.nohid` (new shorthand), `fbuf.allowhid` (new, requires host policy), `security.policy.fbuf.allowhid` (new, default 0).
+     - **Troubleshooting** — common gotchas: TLS handshake fails (check cert + chain); self-signed cert warning in browser (expected for dev); preflight refuses jail start (read `jls -v preflight`); VNC client can't connect after upgrade (check `transport.tls.mode`); jail with `fbuf.allowhid=1` gets no `/dev/uhid*` nodes (check `security.policy.fbuf.allowhid` is `1`); jail with `fbuf.nohid=1` but expects kbd (the nohid flag disables BOTH; use per-device flags instead).
      - **Rollback** — how to disable the framework per-consumer (`allow.fbuf=0`, `allow.gpu=0`) or globally (`security.policy.allow_fbuf=0`, `security.policy.allow_gpu=0`). How to roll back a build.
   2. Cross-reference from:
      - `display-abstraction.md` (T17) — point at this guide in the "Upgrading" section
@@ -10119,13 +10158,13 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
        1. **BDP via broker** (recommended): install `displayc`, run `displayc --server <host> --user <me>`, get a list of fbs I can see, attach to mine.
        2. **VNC direct** (legacy): point any VNC client at `<vm-host>:<port>` (the `rfb=` port). Works for backward compat. No central auth.
        3. **Web**: `displayc` runs in a TUI; for web UI, use the `bdp-web` companion (out of scope for this plan, but document the hook).
-     - **How do I see my jail's screen?** — same paths, but the jail needs `allow.fbuf=1` in its config.
+     - **How do I see my jail's screen?** — same paths, but the jail needs `allow.fbuf=1` in its config. By default, virtual kbd/mouse come with it; if you don't want them, add `fbuf.nokbd=1` (or `fbuf.nomouse=1`, or `fbuf.nohid=1` for both). If you need raw HID access (e.g. a custom input driver), add `fbuf.allowhid=1` AND ask the admin to enable `security.policy.fbuf.allowhid=1` host-wide — the host policy is OFF by default for security.
      - **How do I know my connection is encrypted?** — check `transport.tls.mode` (default `required`), check the cert (self-signed → expected warning, certbot → no warning), check `security.policy.tls_required=1`.
      - **How do I see the TV in the lobby?** — multicast subscribe via `displayc --multicast-sub menu-board-lobby`.
      - **How do I publish a stream to a TV?** — `displayc --multicast-pub menu-board-lobby --source <fb>` (requires ACL on the channel).
      - **What can I see?** — run `displayc --list` to see all fbs you have permission to view. If you see nothing but root sees everything, ask admin to add you to the jail/VM's `display.acl`.
      - **What can I do?** — view (watch pixels), interact (send kbd/ptr), watch (real-time audit), audit (root only).
-     - **Troubleshooting** — common issues: TLS handshake fails, self-signed cert warning (expected for dev), preflight refuses jail start, VNC client can't connect after upgrade, multicast TTL=1 doesn't reach the TV.
+     - **Troubleshooting** — common issues: TLS handshake fails, self-signed cert warning (expected for dev), preflight refuses jail start, VNC client can't connect after upgrade, multicast TTL=1 doesn't reach the TV, `/dev/uhid*` is missing in a jail with `fbuf.allowhid=1` (host policy is blocking — contact admin to set `security.policy.fbuf.allowhid=1`).
      - **Security checklist** — a 5-item list of "is my connection secure?" (TLS on, cert verified, host sysctls set, ACL on my fbs, audit on).
   2. Cross-reference from:
      - `displayd(8)` (T47) — point at end user guide
@@ -12321,6 +12360,8 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   5. ACL: same as BDP (per-user, per-resource); user must have BDP attach right to receive HLS feed.
   6. Out of scope for v1. Tracked for v2 to enable Safari / iOS clients and consumers without a BDP-capable client.
 
+  **Acceptance** (DESIGN ONLY): design document at `share/doc/displayd-hls-design.md` exists and is ≥ 100 lines; reviewed by `oracle` agent; cross-references T60 (bdp-stream) and T47 (displayd config). No code change.
+
   **Profile**: `unspecified-high`. **Skills**: `[]`.
 
   **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
@@ -12369,6 +12410,8 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   4. Backed by `bdp-stream` (T60) for frame data; audio is muxed via libavformat.
   5. ACL: same as BDP; ANNOUNCE requires admin.
   6. Out of scope for v1. Tracked for v2 to enable ONVIF cameras / NVR / VLC clients.
+
+  **Acceptance** (DESIGN ONLY): design document at `share/doc/displayd-rtsp-design.md` exists and is ≥ 100 lines; reviewed by `oracle` agent; cross-references T60 (bdp-stream) and T47 (displayd config). No code change.
 
   **Profile**: `unspecified-high`. **Skills**: `[]`.
 
@@ -12421,6 +12464,8 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   4. ACL: same as BDP; users with attach right can read EDID.
   5. Use case: a remote ChromeOS client attaches to a Windows VM; VM's guest OS sees the real display, optimizes resolution, etc.
   6. Out of scope for v1. Tracked for v2 to enable plug-and-play display features.
+
+  **Acceptance** (DESIGN ONLY): design document at `share/doc/edid-passthrough-design.md` exists and is ≥ 80 lines; reviewed by `oracle` agent; describes how the kernel exposes the EDID blob to the jail. No code change.
 
   **Profile**: `unspecified-high`. **Skills**: `[]`.
 
@@ -12475,6 +12520,8 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
      - `RELEASED` — jail fully released; back to FREE
   5. On jail exit, `bt_resource.ko` is notified via the existing `prison_cleanup` chain (T10) and transitions through `DYING` → `RELEASED`. If the jail exited abruptly (no cleanup), the watchdog (`BT_RESOURCE_DESTROY_TIMEOUT=30s`) forces the transition.
   6. Out of scope for v1. Tracked for v2.
+
+  **Acceptance** (DESIGN ONLY): design document at `share/doc/bt-resource-design.md` exists and is ≥ 200 lines; reviewed by `oracle` agent; defines slot/budget/role/peer model and the mediator hook signature. No code change.
 
   **Profile**: `deep` (kernel + state machine). **Skills**: `[]`.
 
@@ -12531,6 +12578,8 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   3. Host pairing: BT adapter security (PIN, passkey, SSP Just Works / Numeric Comparison / Passkey Entry) is negotiated by the host, NOT the jail. The jail never sees raw HCI commands.
   4. Jail sees only the generic POSIX device (e.g., `/dev/dsp0` for headphones); the jail's `usbdevs -v` or `dmesg` shows the device as "USB audio" or similar generic name, not "BT".
   5. Out of scope for v1. Tracked for v2.
+
+  **Acceptance** (DESIGN ONLY): design document at `share/doc/bt-posix-device-mapping.md` exists and is ≥ 80 lines; reviewed by `oracle` agent; maps each BT device class to a generic POSIX device node. No code change.
 
   **Profile**: `unspecified-high`. **Skills**: `[]`.
 
