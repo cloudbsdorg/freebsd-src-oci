@@ -4,21 +4,21 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-05 13:45 UTC (08:45 CDT) — live status
+> **Last updated**: 2026-06-05 14:05 UTC (09:05 CDT) — live status
 
-## 🎉 **PHASE 1 COMPLETE — 5 SUBDIRs RE-ENABLED!**
+## 🎉 **PHASE 1 + 2 + 3 (image) COMPLETE — 7 SUBDIRs RE-ENABLED!**
 
-All 5 Phase 1 SUBDIRs (cert, export, gc, logd, pam) have been
-fixed and committed. The end-to-end build of `ocifbsd` + all
-**12 active SUBDIRs** succeeds cleanly on FreeBSD 16.0-CURRENT.
+All 5 Phase 1 SUBDIRs (cert, export, gc, logd, pam) plus
+the 2 Phase 2 SUBDIRs (network, orchestration) plus the
+image/ SUBDIR from Phase 3 have been fixed and committed.
+The end-to-end build of `ocifbsd` + all **13 active SUBDIRs**
+succeeds cleanly on FreeBSD 16.0-CURRENT.
 
 - **Main binary**: `ocifbsd` (50K) builds, links, and runs.
-- **12 active SUBDIRs build clean**: api, cert, clustering,
-  convert, export, gc, logd, metrics, namespace, pam,
-  security-daemon, tpm.
-- **4 SUBDIRs commented out** (remaining deferred refactor work):
-  image (pull.c/unpack.c/push.c deep refactor needed);
-  network + orchestration (PROG→LIB conversion needed);
+- **13 active SUBDIRs build clean**: api, cert, clustering,
+  convert, export, gc, image, logd, metrics, namespace,
+  network, orchestration, pam, security-daemon, tpm.
+- **1 SUBDIR commented out** (remaining deferred refactor work):
   security (rctl.c struct field fixes needed).
 
 **Phase 1 commits (all pushed to origin)**:
@@ -28,12 +28,18 @@ fixed and committed. The end-to-end build of `ocifbsd` + all
 - `f93983e352f` — enable logd SUBDIR (RB-tree + curl port path)
 - `727bc76597c` — enable pam SUBDIR (LIB + pam_sm_* entry points)
 
-**Re-verified at 2026-06-05 13:40 UTC**: Full `make` succeeds
-end-to-end on the VM. All 12 SUBDIRs build clean. 42/42 unit
+**Phase 2 commits**:
+- `12bf50dc15d` — enable network SUBDIR (PROG→LIB)
+- `3a17a8285dd` — enable orchestration SUBDIR (PROG→LIB + stubs.c)
+
+**Phase 3 commits**:
+- `41a3643ee25` — enable image SUBDIR (PROG→LIB + libarchive)
+
+**Re-verified at 2026-06-05 14:00 UTC**: Full `make` succeeds
+end-to-end on the VM. All 13 SUBDIRs build clean. 42/42 unit
 tests pass via `kyua test -k Kyuafile`.
 
-**Next**: Phase 2 (network/ + orchestration/ PROG→LIB conversion),
-then Phase 3 (image/ deep refactor + security/ rctl.c rewrite).
+**Next**: security/ rctl.c rewrite against the real rctl(2) API.
 
 **Earlier (BOOTSTRAP COMPLETE)**: `make` first succeeded
 end-to-end at 2026-06-05 07:42 UTC with the original 7 SUBDIRs
@@ -331,9 +337,9 @@ of exactly what changed. SSH is fine for things git can't carry
 
 ## 5. Current Status
 
-### Branch: `feature/oci-bootstrap` @ `affa222bb93`
+### Branch: `feature/oci-bootstrap` @ `41a3643ee25`
 
-**74+ commits since session start**. Major work:
+**230+ commits since session start**. Major work:
 - Makefile refactored: native is default, cross-build is opt-in.
 - README updated: leads with FreeBSD native, cross-build in §6.
 - All 78 OCI source files compile clean under FreeBSD's strict
@@ -484,37 +490,14 @@ this session's fixes:
 Linker: added `md` to LIBADD for FreeBSD 16's moved-out
 SHA256_Data symbol (was in libc, now in libmd).
 
-### Subdir status: 4 of 15 SUBDIRs remain commented out (deferred refactor work)
+### Subdir status: 1 of 15 SUBDIRs remain commented out (deferred refactor work)
 
 After the main binary links, build moves to the SUBDIR phase
 (15 module executables: ocifbsd-cert, ocifbsd-export, etc.).
-**12 of 15 SUBDIRs are now active and build clean** (Phase 1
-complete). The following 4 subdirs still need refactor work:
+**14 of 15 SUBDIRs are now active and build clean** (Phase 1
++ Phase 2 + Phase 3 image complete). The following subdir
+still needs refactor work:
 
-- `image/` — Makefile is fine, but source files are heavily
-  AI-slopped. zfs_store.c compiles clean after fixes (libmd
-  SHA256 moved out of libc; stdarg.h added; mkdirp/copy_file
-  local externs; 5 unused vars removed; sizeof(dataset) typo
-  fixed; argc removed; nested `/*` comment escaped). pull.c
-  has many issues: missing curl callback functions
-  (header_only, WriteMemoryCallback), missing json-c include,
-  CURLOPT_WRITFUNCTION typo (missing underscore-F), fopen()
-  called with 3 args, dozens of unused json_object locals.
-  unpack.c and push.c not yet attempted.
-- `network/` — Makefile declares `PROG=ocifbsd_network` but
-  the 4 .c files have NO main() function. The subdir is a
-  library, not a program. All 4 files compile clean after
-  extensive fixes (~30 commits). Link fails: no main().
-- `orchestration/` — Same kind of issue. All 7 .c files
-  compile clean after extensive fixes (json-c port path,
-  pthread.h in 2 files, mkdirp extern in 3 files, ~5
-  static additions, ~10 unused-var removals, get_physmem
-  and rolling_update_progress forward decls, bad
-  spec.namespace ref removed). Link fails for 2 reasons:
-  (1) no main() function; (2) pod.c calls
-  ocifbsd_create_container/start/stop/delete/get_container_state/
-  logs which are internal to the main ocifbsd binary, not
-  exported. Subdir is a library, not a program.
 - `security/` — rctl.c uses made-up struct rctl_usage fields
   (exceeded, usage, resource_name, jail_name) that don't exist
   in FreeBSD 16's actual rctl_usage API. The AI generated
@@ -844,6 +827,11 @@ branch, and the full `.omo/drafts/` documentation tree.
 
 | Timestamp (UTC)      | Author    | Change                                                              |
 | -------------------- | --------- | ------------------------------------------------------------------- |
+| 2026-06-05 14:05:00 | mlapointe | **Phase 3 image/ SUBDIR done** (commit `41a3643ee25`, pushed). Converted image/ from PROG to LIB (SHLIB_NAME=ocifbsd_image.so.1). Fixed 30+ unused vars, added <dirent.h>/<strings.h>/<json-c/json.h>, fixed archive_entry_stat() 1-arg signature, removed reference to deleted archive_read_support_format_tar_grzip(), wrapped C23 declaration-after-statement in braces. Moved archive to LIBADD+=archive (src.libnames.mk-validated). Added ocifbsd_image.3 man page. Verified: libocifbsd_image.a (250K) + ocifbsd_image.so.1 (67K) build clean. 13/15 SUBDIRs now active. Only security/ remains. | 41a3643ee25 |
+| 2026-06-05 13:50:00 | mlapointe | **Phase 2 orchestration/ SUBDIR done** (commit `3a17a8285dd`, pushed). Converted orchestration/ from PROG to LIB (SHLIB_NAME=ocifbsd_orchestration.so.1) with stubs.c that provides 6 stub implementations of ocifbsd_create_container/start/stop/delete/get_container_state/logs (real impls are internal to the main binary, override at link time). Added ocifbsd_orchestration.3 man page. Binary 65K builds. | 3a17a8285dd |
+| 2026-06-05 13:48:00 | mlapointe | **Phase 2 network/ SUBDIR done** (commit `12bf50dc15d`, pushed). Converted network/ from PROG to LIB (SHLIB_NAME=ocifbsd_network.so.1). Added ocifbsd_network.3 man page. Binary 31K builds. | 12bf50dc15d |
+| 2026-06-05 13:46:00 | mlapointe | **Phase 1 + 2 status doc update** (commit `7341bd8f5ef`, pushed). Marked Phase 1 complete (5 SUBDIRs re-enabled). Added Phase 2 + 3 sections. Updated header §5. | 7341bd8f5ef |
+| 2026-06-05 13:42:00 | mlapointe | **Phase 1 pam/ SUBDIR done** (commit `727bc76597c`, pushed). Converted pam/ from PROG to LIB (PAM module, SHLIB_NAME=pam_ocifbsd.so.1). Added pam_sm_authenticate, pam_sm_setcred, pam_sm_acct_mgmt entry points. Renamed pam_get_user → ocifbsd_pam_get_user (collision with PAM's built-in). Added hmac_sha256 wrapper (OpenSSL), base64_encode/decode local impls, mkdirp_local. Fixed RB_PROTOTYPE/RB_GENERATE name mismatch (group_map_tree → group_role_map_tree). Removed 11+ unused vars. Added pam_ocifbsd.8 man page. Binary 41K PAM module builds. | 727bc76597c |
 | 2026-06-05 08:45:00 | mlapointe | **Unit test suite landed**: 42/42 tests pass on VM via `kyua test`. Added `parser_test.c` (22 tests for convert/parser.c) and `k8s_test.c` (20 tests for convert/k8s.c). Renamed broken `ocifbsd_test.c` → `ocifbsd_test.c.disabled`. Switched Makefile to `ATF_TESTS_C=parser_test k8s_test` + `WARNS=3` + correct -I paths. Pinned 2 pre-existing source bugs (escape NULL returns empty string, k8s_convert_multi drops last doc). Updated this doc + README + CHANGELOG + ai-slop-backlog for BOOTSTRAP COMPLETE state. | (working tree, pending commit) |
 | 2026-06-05 03:02:00 | mlapointe | **🎉 BOOTSTRAP COMPLETE!** `make` succeeds end-to-end on FreeBSD 16. ocifbsd (50K) builds, links, runs, and shows all 8 commands (create, start, kill, delete, state, list, inspect, run). All 6 active SUBDIRs build clean: api, clustering, convert, metrics, namespace, security-daemon, tpm. 9 SUBDIRs remain commented out as deferred AI-slop refactor work. | 82bca532405
 | 2026-06-05 02:53:12 | mlapointe | Commented out orchestration/ SUBDIR. All 7 .c files (pod/stack/scheduler/health/rolling_update/orch_cli/orch_init) compile clean after ~15 fixes (json-c port path, <pthread.h> in 2 files, mkdirp extern in 3 files, ~5 static additions, ~10 unused-var removals, get_physmem+rolling_update_progress forward decls, bad spec.namespace ref). Link phase fails: no main() AND pod.c calls internal main-binary symbols (ocifbsd_create_container etc.). Same AI-slop approach as image/network/: deferred to follow-up refactor PR. | 47122a8c9dc
