@@ -179,7 +179,7 @@ vnet_configure_pf(const char *jail_name, const char *rules)
 /*
  * Set up NAT for VNET jail
  */
-int
+static int
 vnet_setup_nat(const char *jail_name, const char *external_iface, const char *internal_subnet)
 {
 	char rules[1024];
@@ -201,7 +201,6 @@ vnet_get_interface_stats(const char *jail_name, const char *interface,
     uint64_t *rx_bytes, uint64_t *tx_bytes, uint64_t *rx_packets, uint64_t *tx_packets)
 {
 	char cmd[512];
-	char *output = NULL;
 	char buf[256];
 
 	*rx_bytes = *tx_bytes = *rx_packets = *tx_packets = 0;
@@ -236,7 +235,7 @@ vnet_get_interface_stats(const char *jail_name, const char *interface,
 /*
  * Clone interface into VNET
  */
-int
+static int
 vnet_clone_interface(const char *jail_name, const char *template_if, const char *new_name)
 {
 	char cmd[512];
