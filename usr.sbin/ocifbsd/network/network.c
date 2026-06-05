@@ -51,6 +51,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sysexits.h>
+#include <uuid.h>
 
 extern int mkdirp(const char *path, mode_t mode);
 
@@ -399,7 +400,6 @@ int
 ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 {
 	uint32_t start, end, current;
-	uint32_t allocated;
 
 	if (range == NULL || addr == NULL)
 		return (-1);
