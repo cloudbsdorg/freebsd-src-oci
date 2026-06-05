@@ -4,7 +4,7 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-05 02:53 UTC (21:53 CDT) — live status
+> **Last updated**: 2026-06-05 02:55 UTC (21:55 CDT) — live status
 > **Branch**: `feature/oci-bootstrap`
 > **Owner**: REVYTECH, Inc.
 > **Target**: FreeBSD 16.0-CURRENT (native, tier-1)
@@ -406,7 +406,7 @@ this session's fixes:
 Linker: added `md` to LIBADD for FreeBSD 16's moved-out
 SHA256_Data symbol (was in libc, now in libmd).
 
-### Subdir status: 8 of 16 SUBDIRs are broken (AI-generated stubs)
+### Subdir status: 9 of 16 SUBDIRs are broken (AI-generated stubs)
 
 After the main binary links, build moves to the SUBDIR phase
 (15 module executables: ocifbsd-cert, ocifbsd-export, etc.). The
@@ -447,9 +447,15 @@ Makefiles to deeply AI-slopped C source:
   ocifbsd_create_container/start/stop/delete/get_container_state/
   logs which are internal to the main ocifbsd binary, not
   exported. Subdir is a library, not a program.
+- `security/` — rctl.c uses made-up struct rctl_usage fields
+  (exceeded, usage, resource_name, jail_name) that don't exist
+  in FreeBSD 16's actual rctl_usage API. The AI generated
+  stub code against a fictional interface. mac.c (MAC
+  labels) probably has similar issues. Deferred to follow-up
+  PR that rewrites rctl.c against the real rctl(8) API.
 
-**Pragmatic decision**: Commented out all 8 SUBDIR entries
-temporarily so the build can complete end-to-end. The 8
+**Pragmatic decision**: Commented out all 9 SUBDIR entries
+temporarily so the build can complete end-to-end. The 9
 subdirs need separate refactor PRs — the work is:
 1. cert/export/gc/logd/pam Makefiles: bad `<include>` →
    `.include` (sed mechanical fix), create missing
@@ -464,6 +470,9 @@ subdirs need separate refactor PRs — the work is:
    fine. orchestration/ also needs either stub
    ocifbsd_create_container/etc. implementations, or the
    main ocifbsd binary needs to expose these symbols.
+4. security/ source: rewrite rctl.c against the real
+   rctl(8) API (struct rctl_usage, rctl_get_racct, etc.),
+   review mac.c for similar AI-fabricated API usage.
 
 Tracked as deferred work, not blocking the bootstrap.
 

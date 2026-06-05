@@ -92,7 +92,13 @@ SUBDIR+=	namespace
 #SUBDIR+=	orchestration
 # pam: same AI-stub issue. Deferred.
 #SUBDIR+=	pam
-SUBDIR+=	security
+# security: rctl.c uses made-up struct rctl_usage fields
+# (exceeded, usage, resource_name, jail_name) that don't exist
+# in FreeBSD 16's actual rctl_usage API. The AI generated stub
+# code against a fictional interface. mac.c (MAC labels)
+# probably has similar issues. Deferred to follow-up PR that
+# rewrites rctl.c against the real rctl(8) API.
+#SUBDIR+=	security
 SUBDIR+=	security-daemon
 SUBDIR+=	tpm
 
