@@ -14,7 +14,7 @@ MAN=
 #   sudo pkg install curl
 CFLAGS+=	-I/usr/local/include
 LDFLAGS+=	-L/usr/local/lib
-LDADD+=		-lcurl
+LDADD+=		-lcurl -ljson-c
 
 WARNS?=		3
 

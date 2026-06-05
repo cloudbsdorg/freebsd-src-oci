@@ -38,6 +38,7 @@
 
 #include <arpa/inet.h>
 #include <curl/curl.h>
+#include <json-c/json.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
