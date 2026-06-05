@@ -834,8 +834,7 @@ parse_config(const char *json, size_t len, struct oci_config **config)
 
 	/* Parse config section */
 	if (json_object_object_get_ex(obj, "config", &config_obj)) {
-		json_object *entrypoint, *cmd, *env, *workingDir, *user;
-		json_object *exposed_ports;
+		json_object *env;
 
 		if (json_object_object_get_ex(config_obj, "Env", &env)) {
 			int i, n = json_object_array_length(env);
@@ -1040,14 +1039,20 @@ registry_pull(struct registry *reg, const char *reference,
 	}
 
 	/* Save manifest */
-	FILE *mf = fopen(destdir, "manifest.json", "w");
+	char manifest_path[PATH_MAX];
+	snprintf(manifest_path, sizeof(manifest_path),
+	    "%s/manifest.json", destdir);
+	FILE *mf = fopen(manifest_path, "w");
 	if (mf) {
 		fprintf(mf, "%s\n", manifest->raw);
 		fclose(mf);
 	}
 
 	/* Save config */
-	FILE *cfg = fopen(destdir, "config.json", "w");
+	char config_path[PATH_MAX];
+	snprintf(config_path, sizeof(config_path),
+	    "%s/config.json", destdir);
+	FILE *cfg = fopen(config_path, "w");
 	if (cfg) {
 		if (config)
 			fprintf(cfg, "%s\n", config->config);
