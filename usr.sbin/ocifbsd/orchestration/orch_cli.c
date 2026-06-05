@@ -286,7 +286,6 @@ cmd_service_create(int argc, char **argv)
 	struct service_spec spec;
 	char *name = NULL;
 	char *image = NULL;
-	char *namespace = "default";
 	int replicas = 1;
 	
 	static struct option longopts[] = {
@@ -550,8 +549,7 @@ static int
 cmd_stack_create(int argc, char **argv)
 {
 	char *name = NULL;
-	char *file = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "file", required_argument, NULL, 'f' },
