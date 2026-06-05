@@ -46,6 +46,8 @@
 #include <unistd.h>
 #include <sha256.h>
 
+extern int mkdirp(const char *path, mode_t mode);
+
 #include "orchestration.h"
 #include "../include/ocifbsd.h"
 
