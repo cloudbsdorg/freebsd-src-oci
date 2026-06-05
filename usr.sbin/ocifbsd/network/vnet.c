@@ -47,6 +47,8 @@
 #include <string.h>
 #include <unistd.h>
 
+extern int mkdirp(const char *path, mode_t mode);
+
 #include "network.h"
 
 /* run_cmd is static in network.c, forward-declare for use here */
@@ -140,7 +142,7 @@ vnet_add_route(const char *jail_name, const char *network, const char *gateway)
 	    (char *)network, (char *)gateway);
 }
 
-int
+static int
 vnet_delete_route(const char *jail_name, const char *network)
 {
 	return run_cmd(5, "jexec", (char *)jail_name, "route", "delete", "-net",
@@ -150,7 +152,7 @@ vnet_delete_route(const char *jail_name, const char *network)
 /*
  * Configure firewall within VNET
  */
-int
+static int
 vnet_configure_pf(const char *jail_name, const char *rules)
 {
 	char pf_rules_file[PATH_MAX];
