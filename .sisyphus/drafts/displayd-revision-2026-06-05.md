@@ -123,3 +123,67 @@ A test for the deprecation/migration path: secrets can be staged to `/etc/displa
 - Add a test for git-based transfer (verify no rsync/sftp/scp/ssh in build scripts)
 - Update F1 to verify displayd branding, auto-load, and git-only transfer
 - Update Mermaid diagram labels (some still use old paths — verify)
+
+## Title and TOC update (this turn)
+
+**User said**:
+1. "make the title 'displayd: bhyve Display Abstraction And Container Framebuffer'"
+2. "we should also have a TOC with links to the sections, and validate the first line in the tables, granted the links may solve that problem .. because if we go by line numbers, we need to tell the agent to validate that its actually the content they need"
+
+### Changes applied
+
+1. **Title updated** (line 1):
+   - Old: `# bhyve Display Abstraction + Jail Framebuffer`
+   - New: `# displayd: bhyve Display Abstraction And Container Framebuffer`
+
+2. **New `## Table of Contents` section added** at line 33 (right after TL;DR, before Plan Navigation Index). Contains:
+   - Validation protocol blockquote (3-step protocol for the agent)
+   - Top-level sections list (17 clickable anchor links)
+   - Design sections list (23 clickable anchor links)
+   - Task & verification references list
+
+3. **Plan Navigation Index tables updated** (§2):
+   - Added clickable links in the "Section" / "Design section" column (anchor-based, never drifts)
+   - Added new `First line content` column showing the actual heading text
+   - Validated all `First line` column line numbers against the live `grep -n "^## " plan.md` and `grep -n "^### " plan.md` output
+   - Removed the stale "(Line numbers are approximate; use `grep -n "^## " file.md` for the live numbers.)" disclaimer — line numbers are now validated, not approximate
+
+4. **Section "5. Section reference convention" updated** (Agent Context Management):
+   - Now recommends **clickable TOC links** as the **preferred** navigation mechanism (anchor-based, doesn't drift)
+   - Line numbers downgraded to **fallback** mechanism (must re-validate with grep before use)
+   - Added explicit verification steps for the agent (re-validate First line, re-validate First line content)
+
+5. **F1-F4 verification updated**:
+   - F1: TOC link validation, First line column validation, First line content column validation
+   - F2: Stale §3.X design section references check
+   - F3: Link-validation protocol test
+   - F4: TOC and Plan Navigation Index sync check
+
+6. **Must Have list updated** to include the link-validation protocol as a hard requirement.
+
+### Plan stats after this turn (this turn)
+
+- 12,778 lines (was 12,674 before this turn; +104 net lines for TOC + tables + F1-F4 updates)
+- 17 top-level sections (now includes the new "Table of Contents" — wait, that's an 18th section)
+
+Wait, let me recount. The "## Table of Contents" is now the 2nd top-level section (after TL;DR, before Plan Navigation Index). So now there are 18 top-level `##` sections:
+1. TL;DR
+2. Table of Contents (NEW)
+3. Plan Navigation Index
+4. Visual Overview
+5. Context
+6. Tunables Reference
+7. Work Objectives
+8. Verification Strategy
+9. Files
+10. Regeneration
+11. Failures
+12. Coverage Shortfalls
+13. Verdict
+14. Execution Strategy
+15. TODOs
+16. Final Verification Wave
+17. Commit Strategy
+18. Success Criteria
+
+The original "17 top-level sections" needs to be updated to "18 top-level sections" (added Table of Contents).

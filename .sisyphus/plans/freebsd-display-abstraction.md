@@ -1,4 +1,4 @@
-# bhyve Display Abstraction + Jail Framebuffer
+# displayd: bhyve Display Abstraction And Container Framebuffer
 
 ## TL;DR
 
@@ -30,65 +30,133 @@
 
 ---
 
+## Table of Contents
+
+> A clickable navigation index. Each link jumps to the corresponding section. The Plan Navigation Index (§2) below holds the full machine-readable tables (with first-line content) that the agent uses for validation.
+>
+> **Validation protocol (the agent MUST follow this):**
+> 1. When the agent lands on a section via a TOC link, it verifies the first line of the rendered section matches the `First line content` column in the Plan Navigation Index (§2) table.
+> 2. If they don't match, the agent updates the table immediately (with the actual line number and the actual heading text) and notes the fix in the checkpoint.
+> 3. The agent does NOT trust line numbers in the table blindly — it always re-runs `grep -n "^## " plan.md` (or the appropriate heading level) before reading a section, to detect drift.
+
+### Top-level sections
+
+- [§1 — TL;DR](#tldr)
+- [§2 — Plan Navigation Index](#plan-navigation-index-agent-context-management)
+- [§3 — Visual Overview](#visual-overview)
+- [§4 — Context](#context)
+- [§5 — Tunables Reference](#tunables-reference)
+- [§6 — Work Objectives](#work-objectives)
+- [§7 — Verification Strategy](#verification-strategy-mandatory)
+- [§8 — Files](#files)
+- [§9 — Regeneration](#regeneration)
+- [§10 — Failures](#failures)
+- [§11 — Coverage Shortfalls](#coverage-shortfalls)
+- [§12 — Verdict](#verdict)
+- [§13 — Execution Strategy](#execution-strategy)
+- [§14 — TODOs](#todos)
+- [§15 — Final Verification Wave](#final-verification-wave-mandatory--after-all-implementation-tasks)
+- [§16 — Commit Strategy](#commit-strategy)
+- [§17 — Success Criteria](#success-criteria)
+
+### Design sections in Context (§4)
+
+- [§4.1 — Original Request](#41-original-request)
+- [§4.2 — Additive KBD/Mouse model](#42-additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule)
+- [§4.3 — Investigation Summary](#43-investigation-summary)
+- [§4.4 — GPU Resource Governance](#44-gpu-resource-governance-third-workstream--framework-only)
+- [§4.5 — Preflight check framework](#45-preflight-check-framework-cross-cutting)
+- [§4.6 — Transport security](#46-transport-security-vnc-hardening)
+- [§4.7 — Backward compatibility](#47-backward-compatibility-the-upgrade-must-not-break-promise)
+- [§4.8 — Architecture support](#48-architecture-support-jails-run-everywhere)
+- [§4.9 — Console broker / multiplexer](#49-console-broker--multiplexer-phase-2-workstream--added-per-user-request)
+- [§4.10 — Localhost by default](#410-localhost-by-default-security-principle--added-per-user-request)
+- [§4.11 — IPv6 / dual-stack support](#411-ipv6--dual-stack-support-security--portability-principle)
+- [§4.12 — Instrumentation, statistics, diagnostics](#412-instrumentation-statistics-diagnostics-t49t52--added-per-user-request)
+- [§4.13 — Multi-display support](#413-multi-display-support-added-per-user-question)
+- [§4.14 — GPU ports model](#414-gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports)
+- [§4.15 — Audio support](#415-audio-support-added-per-user-request--needed-for-chromecast-use-case)
+- [§4.16 — Cast tool design considerations](#416-cast-tool-design-considerations-no-implementation--added-per-user-clarification)
+- [§4.17 — Combining cast methods](#417-combining-cast-methods-multi-protocol-cast--design-only)
+- [§4.18 — Bluetooth considerations](#418-bluetooth-considerations-future--design-only)
+- [§4.19 — Mediated passthrough](#419-mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story)
+- [§4.20 — Multi-device / heterogeneous hardware](#420-multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request)
+- [§4.21 — Workload-driven GPU selection](#421-workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request)
+- [§4.22 — FreeBSD 16 target platform](#422-freebsd-16-target-platform-added-per-user-confirmation)
+- [§4.23 — Auto-load / zero-friction](#423-auto-load--zero-friction-no-operator-config-changes-required)
+
+### Task & verification references
+
+- [T0 — Template validation (Wave 0)](#todos)
+- [T1–T60 — V1 implementation tasks](#todos)
+- [T61–T72 — V2/V3 design-only tasks](#todos)
+- [F1–F4 — Final verification wave](#final-verification-wave-mandatory--after-all-implementation-tasks)
+
+---
+
 ## Plan Navigation Index (agent context management)
 
 The user noted: *"what if the agent runs out of its context window, how do we ensure that the agent has everything relevant when looking at a task? ensuring success, or at the very least a clear understanding as it is traversing? do we need to attach section numbers or something that it will refresh on?"*. This section provides navigation aids so an agent (or a human reviewer) can find any section quickly and resume work after context loss.
 
-**Section number convention:** `[§X.Y]` is the syntax for cross-references. `§X` is the top-level section (1-11), `§X.Y` is a sub-section.
+**Section number convention:** `[§X.Y]` is the syntax for cross-references. `§X` is the top-level section (1–18 — see table below for the full list), `§X.Y` is a sub-section. Design sections (§4.1–§4.23) live inside §4 Context.
 
 **Stable anchor convention:** every section has a stable anchor in the rendered HTML. `#plan-navigation-index`, `#context`, `#design-section-bluetooth-considerations`, etc. Use these to deep-link.
 
 ### Top-level sections
 
-| § | Section | Purpose | First line |
-|---|---|---|---|
-| §1 | TL;DR | Quick summary, critical path, frame size, frame rate sysctls | 3 |
-| §2 | Plan Navigation Index | This section (agent context management) | 33 |
-| §3 | Visual Overview | 12 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram, multi-display, audio sources/sinks, VMware passthrough failure, mediator pattern, BT device-class abstraction, BT bind/unbind lifecycle) | 260 |
-| §4 | Context | 23 design sections (§4.1-§4.23, all physically inside this section) | 652 |
-| §5 | Tunables Reference | 80+ sysctls in 13 sub-sections | 5067 |
-| §6 | Work Objectives | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5306 |
-| §7 | Verification Strategy | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5642 |
-| §8 | Files | 9+ files referenced (bhyve source tree, target files) | 6761 |
-| §9 | Regeneration | regenerate.sh shipped example | 6788 |
-| §10 | Failures | Follow-up actions matrix | 6998 |
-| §11 | Coverage Shortfalls | Coverage recording | 7005 |
-| §12 | Verdict | Final test summary | 7011 |
-| §13 | Execution Strategy | Parallel waves, dep matrix, agent dispatch | 7077 |
-| §14 | TODOs | 60 v1 implementation tasks (T1-T60) + 4 design-only v2 (T62-T64, T68) + 7 design-only BT v2/v3 (T65-T72) + 4 final verifications (F1-F4) | 7237 |
-| §15 | Final Verification Wave | F1, F2, F3, F4 | 12150 |
-| §16 | Commit Strategy | Per-task commits | 12175 |
-| §17 | Success Criteria | Verification commands + checklist | 12179 |
+> **Validation rule**: when the agent reads a section via the link in the "Section" column, the first line it sees MUST equal the "First line content" column. If it doesn't, the agent updates both columns immediately and notes the fix in the checkpoint. The "First line" column holds the live line number (validated against `grep -n "^## " plan.md` after every edit to this plan).
+
+| § | Section | Purpose | First line | First line content |
+|---|---|---|---|---|
+| §1 | [TL;DR](#tldr) | Quick summary, critical path, frame size, frame rate sysctls | 3 | `## TL;DR` |
+| §2 | [Plan Navigation Index](#plan-navigation-index-agent-context-management) | This section (agent context management) | 97 | `## Plan Navigation Index (agent context management)` |
+| §3 | [Visual Overview](#visual-overview) | 12 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram, multi-display, audio sources/sinks, VMware passthrough failure, mediator pattern, BT device-class abstraction, BT bind/unbind lifecycle) | 366 | `## Visual Overview` |
+| §4 | [Context](#context) | 23 design sections (§4.1–§4.23, all physically inside this section) | 758 | `## Context` |
+| §5 | [Tunables Reference](#tunables-reference) | 80+ sysctls in 13 sub-sections | 5273 | `## Tunables Reference` |
+| §6 | [Work Objectives](#work-objectives) | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5512 | `## Work Objectives` |
+| §7 | [Verification Strategy](#verification-strategy-mandatory) | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5861 | `## Verification Strategy (MANDATORY)` |
+| §8 | [Files](#files) | 9+ files referenced (bhyve source tree, target files) | 6980 | `## Files` |
+| §9 | [Regeneration](#regeneration) | regenerate.sh shipped example | 7007 | `## Regeneration` |
+| §10 | [Failures](#failures) | Follow-up actions matrix | 7217 | `## Failures` |
+| §11 | [Coverage Shortfalls](#coverage-shortfalls) | Coverage recording | 7224 | `## Coverage Shortfalls` |
+| §12 | [Verdict](#verdict) | Final test summary | 7230 | `## Verdict` |
+| §13 | [Execution Strategy](#execution-strategy) | Parallel waves, dep matrix, agent dispatch | 7296 | `## Execution Strategy` |
+| §14 | [TODOs](#todos) | 60 v1 implementation tasks (T1–T60) + 4 design-only v2 (T62–T64, T68) + 7 design-only BT v2/v3 (T65–T72) + 4 final verifications (F1–F4) | 7457 | `## TODOs` |
+| §15 | [Final Verification Wave](#final-verification-wave-mandatory--after-all-implementation-tasks) | F1, F2, F3, F4 | 12680 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
+| §16 | [Commit Strategy](#commit-strategy) | Per-task commits | 12705 | `## Commit Strategy` |
+| §17 | [Success Criteria](#success-criteria) | Verification commands + checklist | 12709 | `## Success Criteria` |
 
 ### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition; all 23 sections physically located inside §4 after the structural reorg)
 
-| § | Design section | Purpose | First line |
-|---|---|---|---|
-| §4.1 | Original Request | What the user asked for | 654 |
-| §4.2 | Additive KBD/Mouse model | Default-on kbd+mouse with fbuf, opt-out via fbuf.nokbd/fbuf.nomouse | 658 |
-| §4.3 | Investigation Summary | What we found (3 layers) | 716 |
-| §4.4 | GPU Resource Governance (T19-T21 framework) | GPU mediation rules | 733 |
-| §4.5 | Preflight check framework | 20 preflight checks | 759 |
-| §4.6 | Transport security (VNC hardening) | TLS 1.3, certbot, etc. | 794 |
-| §4.7 | Backward compatibility | Upgrade-must-not-break promise | 843 |
-| §4.8 | Architecture support (jails run everywhere) | Big/little endian, multi-arch | 1058 |
-| §4.9 | Console broker / multiplexer | Broker architecture | 1143 |
-| §4.10 | Localhost by default (security principle) | All new endpoints default to localhost | 1315 |
-| §4.11 | IPv6 / dual-stack support | IPv6 default | 1390 |
-| §4.12 | Instrumentation, statistics, diagnostics | T49-T52 design | 1508 |
-| §4.13 | Multi-display support | Walls, ports, mixed resolutions | 1688 |
-| §4.14 | GPU ports model | Per-port resource allocation, port policy, gpu-port-info tool | 1903 |
-| §4.15 | Audio support | AC97/HDA, BDP audio messages | 2070 |
-| §4.16 | Cast tool design considerations | Cast (design only) | 2361 |
-| §4.17 | Combining cast methods | Multi-protocol cast | 2556 |
-| §4.18 | Bluetooth considerations (future) | BT (design only) | 2669 |
-| §4.19 | Mediated passthrough (architectural principle) | Control plane retained | 3700 |
-| §4.20 | Multi-device / heterogeneous hardware | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 3980 |
-| §4.21 | Workload-driven GPU selection + dynamic capability discovery | Plug-in capability registry | 4411 |
-| §4.22 | FreeBSD 16 target platform | Version pin | 5050 |
-| §4.23 | Auto-load / zero-friction (no operator config changes) | kld_list, rc.conf, devd, cert auto-gen, hot-plug | ~5200 (after §4.22) |
+> **Validation rule**: same as the top-level table — the "First line" column holds the live line number (validated against `grep -n "^### " plan.md` after every edit to this plan). The "First line content" column shows the actual heading text the agent should see when it reads the section.
 
-(Line numbers are approximate; use `grep -n "^## " file.md` for the live numbers.)
+| § | Design section | Purpose | First line | First line content |
+|---|---|---|---|---|
+| §4.1 | [Original Request](#41-original-request) | What the user asked for | 760 | `### Original Request` |
+| §4.2 | [Additive KBD/Mouse model](#42-additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule) | Default-on kbd+mouse with fbuf, opt-out via `fbuf.nokbd` / `fbuf.nomouse` | 764 | `### Additive KBD/Mouse model (the "opt-out via fbuf.nokbd / fbuf.nomouse" rule)` |
+| §4.3 | [Investigation Summary](#43-investigation-summary) | What we found (3 layers) | 822 | `### Investigation Summary` |
+| §4.4 | [GPU Resource Governance](#44-gpu-resource-governance-third-workstream--framework-only) | GPU mediation rules (T19–T21 framework) | 839 | `### GPU Resource Governance (third workstream — framework only)` |
+| §4.5 | [Preflight check framework](#45-preflight-check-framework-cross-cutting) | 20 preflight checks | 865 | `### Preflight check framework (cross-cutting)` |
+| §4.6 | [Transport security](#46-transport-security-vnc-hardening) | TLS 1.3, certbot, etc. | 900 | `### Transport security (VNC hardening)` |
+| §4.7 | [Backward compatibility](#47-backward-compatibility-the-upgrade-must-not-break-promise) | Upgrade-must-not-break promise | 949 | `### Backward compatibility (the upgrade-must-not-break promise)` |
+| §4.8 | [Architecture support](#48-architecture-support-jails-run-everywhere) | Big/little endian, multi-arch | 1180 | `### Architecture support (jails run everywhere)` |
+| §4.9 | [Console broker / multiplexer](#49-console-broker--multiplexer-phase-2-workstream--added-per-user-request) | Broker architecture | 1265 | `### Console broker / multiplexer (Phase 2 workstream — added per user request)` |
+| §4.10 | [Localhost by default](#410-localhost-by-default-security-principle--added-per-user-request) | All new endpoints default to localhost | 1437 | `### Localhost by default (security principle — added per user request)` |
+| §4.11 | [IPv6 / dual-stack support](#411-ipv6--dual-stack-support-security--portability-principle) | IPv6 default | 1512 | `### IPv6 / dual-stack support (security + portability principle)` |
+| §4.12 | [Instrumentation, statistics, diagnostics](#412-instrumentation-statistics-diagnostics-t49t52--added-per-user-request) | T49–T52 design | 1630 | `### Instrumentation, statistics, diagnostics (T49–T52 — added per user request)` |
+| §4.13 | [Multi-display support](#413-multi-display-support-added-per-user-question) | Walls, ports, mixed resolutions | 1810 | `### Multi-display support (added per user question)` |
+| §4.14 | [GPU ports model](#414-gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports) | Per-port resource allocation, port policy, gpu-port-info tool | 2025 | `### GPU ports model (added per user clarification — "it comes down to how many ports")` |
+| §4.15 | [Audio support](#415-audio-support-added-per-user-request--needed-for-chromecast-use-case) | AC97/HDA, BDP audio messages | 2192 | `### Audio support (added per user request — needed for chromecast use case)` |
+| §4.16 | [Cast tool design considerations](#416-cast-tool-design-considerations-no-implementation--added-per-user-clarification) | Cast (design only) | 2483 | `### Cast tool design considerations (no implementation — added per user clarification)` |
+| §4.17 | [Combining cast methods](#417-combining-cast-methods-multi-protocol-cast--design-only) | Multi-protocol cast | 2678 | `### Combining cast methods (multi-protocol cast — design only)` |
+| §4.18 | [Bluetooth considerations](#418-bluetooth-considerations-future--design-only) | BT (design only) | 2791 | `### Bluetooth considerations (future — design only)` |
+| §4.19 | [Mediated passthrough](#419-mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story) | Control plane retained | 3804 | `### Mediated passthrough — the host retains the control plane (architectural principle, added per user's PCI-passthrough story)` |
+| §4.20 | [Multi-device / heterogeneous hardware](#420-multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request) | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 4050 | `### Multi-device / heterogeneous hardware (architectural principle, added per user request)` |
+| §4.21 | [Workload-driven GPU selection + dynamic capability discovery](#421-workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request) | Plug-in capability registry | 4481 | `### Workload-driven GPU selection + dynamic capability discovery (architectural principle, added per user request)` |
+| §4.22 | [FreeBSD 16 target platform](#422-freebsd-16-target-platform-added-per-user-confirmation) | Version pin | 5120 | `### FreeBSD 16 target platform (added per user confirmation)` |
+| §4.23 | [Auto-load / zero-friction](#423-auto-load--zero-friction-no-operator-config-changes-required) | kld_list, rc.conf, devd, cert auto-gen, hot-plug | 5193 | `### Auto-load / zero-friction (no operator config changes required)` |
+
+(Line numbers validated against the live file via `grep -n "^### " plan.md` at the time of this table update. After any edit, re-run grep and update the table; the agent's F1 verifier does this check.)
 
 ### Task reference convention
 
@@ -201,13 +269,41 @@ RE-LOAD TRIGGERS
 
 **5. Section reference convention (for machine navigation):**
 
-When the agent reads the plan, it should:
-- Use `grep -n "§X.Y" plan.md` to find a section
-- Use `grep -n "Tnn" plan.md` to find a task
-- Use `awk '/^## §X/,/^---$/' plan.md` to extract a section
-- Use `grep -A 50 "T8\." plan.md` to get a task body
+The plan uses **two complementary** navigation mechanisms:
 
-The plan uses consistent syntax for cross-references:
+1. **Clickable TOC links** (§1 Table of Contents) — the agent (or human reviewer) follows a `[text](#anchor)` link to jump directly to a section. This is the **preferred** mechanism because it is anchor-based and does not drift when the file is edited.
+2. **Line numbers** (§2 Plan Navigation Index tables) — the agent reads a section by its line number. This is a fallback. The agent MUST re-validate line numbers with `grep` before reading, because line numbers drift when the plan is edited.
+
+**Primary navigation command (use this):**
+
+```bash
+# Follow a TOC link by its anchor (preferred — never drifts)
+sed -n '/^## §1/,/^---/p' plan.md           # extract §1 by anchor
+awk '/^## §1$/,/^---$/' plan.md              # equivalent
+```
+
+**Fallback navigation command (validate first):**
+
+```bash
+# Find the live line number of a section, then read it
+grep -n "^## §1" plan.md                      # outputs "3:## §1"
+sed -n '3,30p' plan.md                        # reads lines 3-30
+```
+
+**When the agent reads a section, it MUST verify:**
+
+1. The `First line` column in the Plan Navigation Index table matches the live line number (re-derive with `grep -n`).
+2. The `First line content` column (the actual heading text) matches the first line of the section the agent just read.
+3. If either check fails, the agent updates the table immediately and notes the fix in the checkpoint. The agent does NOT proceed to a downstream task until the table is consistent.
+
+**Section extraction (for tasks):**
+
+- Use `grep -n "Tnn" plan.md` to find a task
+- Use `awk '/^- \[ \] {N}\./,/^---$/' plan.md` to extract a task body
+- Use `grep -A 50 "T8\." plan.md` to get a task body inline
+
+**Cross-reference syntax (consistent throughout):**
+
 - `§4.18` is the Bluetooth design section
 - `[T12]` is the displayd task
 - `T12.UNIT-3` is the 3rd ATF C test in T12
@@ -238,7 +334,8 @@ If the agent's context is lost (or the user restarts the session), the recovery 
 > - **Every T-task has a "Done When" subsection** that defines the exit signal (all acceptance criteria, evidence file, commit, clean tree, checkpoint updated). The agent stops when "Done When" is met.
 > - **The agent saves a checkpoint after each task** to `.sisyphus/state/task-{N}.checkpoint.json`. The checkpoint records completed tasks, current task, last test result, and next action. The agent can resume from any checkpoint.
 > - **The plan uses consistent cross-reference syntax** (`§X.Y`, `[Tnn]`, `Tnn.UNIT-N`, `Tnn.QA-N`) so the agent can navigate by `grep` and `awk`.
-> - **The Plan Navigation Index at the top of this plan (§1.X)** lists every top-level section, design section, and the line where each starts. The agent can find any section in seconds.
+> - **The Table of Contents (§1) and the Plan Navigation Index (§2) at the top of this plan** provide two complementary navigation mechanisms: clickable anchor links (preferred) and line numbers (fallback). Both must remain in sync; the agent enforces this via the link-validation protocol.
+> - **The link-validation protocol**: when the agent follows a TOC link, it MUST verify the first line of the landed section matches the `First line content` column in the Plan Navigation Index table. If they don't match, the agent updates the table immediately and notes the fix in the checkpoint. Line numbers in the table MUST be re-validated against `grep -n "^## " plan.md` (or `^### ` for design sections) before each use.
 > - **The agent MUST re-load the current task's body and Required Context at the start of every task** — no relying on memory from previous tasks. This ensures correctness after context loss.
 
 **F1-F4 updates:**
@@ -247,15 +344,22 @@ If the agent's context is lost (or the user restarts the session), the recovery 
   - Every T-task (T1-T72, 72 total) has a "Required Context" subsection
   - Every T-task has a "Done When" subsection
   - The Plan Navigation Index is present at the top of the plan
+  - The Table of Contents (§1) is present at the top of the plan, with clickable anchor links to every top-level section and every design section in §4
   - The checkpoint file `.sisyphus/state/task-{N}.checkpoint.json` exists for each completed task
+  - **The "First line" column in the Plan Navigation Index tables matches the live `grep -n "^## " plan.md` output (top-level sections) and `grep -n "^### " plan.md` output (design sections). The agent runs both greps and compares to the table.**
+  - **The "First line content" column in the Plan Navigation Index tables matches the actual first line of each section. The agent reads each section's first line and compares.**
+  - **Every TOC link target resolves to an actual heading. The agent extracts all TOC links and confirms each anchor matches a heading slug.**
 - **F2** verifies:
   - Cross-references in the plan use the consistent syntax (`§X.Y`, `[Tnn]`)
   - No dangling references (every `§X.Y` and `[Tnn]` resolves to an actual section/task)
+  - No stale `§X.Y` references to design sections that no longer exist (e.g., the old "§3.X" design sections, which were shifted to §4.X)
 - **F3** verifies:
   - The "fresh session recovery protocol" works: kill the agent mid-task, restart, verify it resumes correctly via the checkpoint
+  - The link-validation protocol works: follow a TOC link, confirm the landed section's first line matches the documented `First line content` column
 - **F4** verifies:
   - The context-management subsections are present and consistent
   - The checkpoint files are present and well-formed
+  - The TOC and Plan Navigation Index are in sync (no drift)
 
 ---
 
