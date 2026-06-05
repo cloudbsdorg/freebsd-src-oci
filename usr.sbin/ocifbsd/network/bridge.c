@@ -105,7 +105,6 @@ bridge_create_advanced(const char *name, struct bridge_config *config)
 static int
 bridge_set_vlan_filtering(const char *bridge, bool enable)
 {
-	char cmd[256];
 
 	if (enable) {
 		run_cmd(3, "sysctl", "net.link.bridge.pfil_onlyip=0");
@@ -141,10 +140,8 @@ bridge_add_vlan(const char *bridge, const char *parent, int vlan_id)
 static int
 bridge_get_fdb(const char *bridge, char ***entries, int *nentries)
 {
-	char *output = NULL;
 	char **list = NULL;
 	int count = 0;
-	char *line, *save;
 
 	*entries = NULL;
 	*nentries = 0;
@@ -204,7 +201,6 @@ bridge_get_port_stats(const char *bridge, const char *port,
     uint64_t *rx_bytes, uint64_t *tx_bytes)
 {
 	char cmd[256];
-	char *output = NULL;
 
 	*rx_packets = *tx_packets = *rx_bytes = *tx_bytes = 0;
 
