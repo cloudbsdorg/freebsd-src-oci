@@ -34,6 +34,7 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <dirent.h>
 #include <json-c/json.h>
 #include <errno.h>
 #include <fcntl.h>
