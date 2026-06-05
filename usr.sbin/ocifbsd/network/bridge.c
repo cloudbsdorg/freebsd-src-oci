@@ -78,7 +78,6 @@ struct bridge_config {
 static int
 bridge_create_advanced(const char *name, struct bridge_config *config)
 {
-	char cmd[256];
 	int ret;
 
 	/* Create the bridge */
