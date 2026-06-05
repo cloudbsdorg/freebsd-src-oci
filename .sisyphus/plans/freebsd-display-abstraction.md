@@ -1266,6 +1266,3574 @@ pid_file=/var/run/display-broker.pid
 
 ---
 
+### Localhost by default (security principle — added per user request)
+
+The user said: *"No public facing http endpoints, if its not a legacy item, right now all connections are to be to localhost till configured elsewhere. so for everything new, unless there is a directive or configuration item, everything is exposed by default to localhost, but we will have a configuration file/sysctl/something appropriate that is secured."*
+
+This is a **cross-cutting security principle** for all new code in this plan (T38 broker, T48 multicast, T52 HTTP admin, plus any follow-on work). It is **stricter than the existing host policy layer** because it's the *default*, not an opt-in.
+
+**The rule (verbatim from the user):**
+- For all new connections / listeners / endpoints: default bind to **localhost** (`127.0.0.1` / `::1` / Unix socket).
+- For public exposure: requires an **explicit configuration item or sysctl** (e.g., `listen_public=1`).
+- That config item is **secured** — meaning the operator must also configure TLS, ACL, and audit before public exposure is allowed.
+
+**Affected components:**
+
+| Component | Default | Public exposure requires |
+|---|---|---|
+| T38 broker `listen` | `tcp://[::1]:8443,unix:///var/run/display-broker.sock` | sysctl `security.display.broker.listen_public=1` + `tls.client_ca` configured + ACL default-deny |
+| T48 multicast publisher | binds to `[::1]` for default | sysctl `multicast.publish_public=1` for cross-host |
+| T48 multicast subscriber | receives from `[::1]` if `listen_localhost_only=1` (default) | sysctl `multicast.listen_localhost_only=0` |
+| T52 HTTP admin | Unix socket only (`/var/run/display-broker.admin`) | sysctl `admin.http_listen_public=1` + mTLS required + localhost-only by default |
+| Future work | always localhost-first | always sysctl-controlled public exposure |
+
+**New sysctls:**
+
+| Sysctl | Default | Purpose |
+|---|---|---|
+| `security.display.broker.listen_public` | 0 | Must be 1 to bind broker to non-localhost interface |
+| `security.display.broker.listen_public_require_tls` | 1 | If 1, refuse `listen_public=1` unless TLS cert configured (not self-signed) |
+| `security.display.broker.listen_public_require_acl` | 1 | If 1, refuse `listen_public=1` unless ACL configured |
+| `security.display.broker.listen_public_audit` | 1 | Audit every listen_public change |
+| `security.display.broker.admin.http_listen_public` | 0 | Must be 1 to bind HTTP admin to non-localhost |
+| `security.display.broker.admin.http_listen` | (empty) | Empty = no TCP. Set to `[::1]:9090` for localhost, or `[::]:9090` only if `http_listen_public=1` |
+| `security.display.broker.multicast.listen_localhost_only` | 1 | Restrict multicast to loopback interface |
+| `security.display.broker.multicast.publish_public` | 0 | Must be 1 to publish multicast on non-loopback interface |
+
+**New preflight checks:**
+
+| Check | Severity | Purpose |
+|---|---|---|
+| `preflight.broker.listen_public_no_tls` | BLOCKING | `listen_public=1` but TLS cert is self-signed or missing |
+| `preflight.broker.listen_public_no_acl` | BLOCKING | `listen_public=1` but no client_ca configured |
+| `preflight.broker.listen_public_no_audit` | BLOCKING | `listen_public=1` but `audit_listen_changes=0` |
+| `preflight.admin.http_listen_public_no_acl` | BLOCKING | `admin.http_listen_public=1` but no client_ca |
+| `preflight.multicast.listen_localhost_only_off` | WARNING | `multicast.listen_localhost_only=0`, may leak outside loopback |
+
+**Audit on every listen change (T43 expansion):**
+
+Every change to `security.display.broker.listen*` or `security.display.broker.admin.http_listen*` is logged:
+```
+time=2026-06-05T10:23:45Z event=listen.change user=root via=sysctl
+before=tcp://[::1]:8443 after=tcp://[::]:8443
+family=inet6 listen_public=1 tls.client_ca=/etc/bhyve/clients-ca.pem
+```
+
+The audit record includes: who made the change, before/after values, all related security sysctls at the time of the change.
+
+**Documentation (T17, T29, T34, T47):**
+
+Every relevant man page adds a "Security defaults" section:
+- `bhyve(8)`: "By default, the broker binds to localhost (`[::1]`, IPv6 dual-stack). To expose publicly, see `security.display.broker.listen_public`."
+- `bhyve-display-broker(8)`: "Default listen is `[::1]:8443` (IPv6). Public exposure requires `listen_public=1` + TLS + ACL."
+- `bhyve-display-client(1)`: "Connects to whatever the operator configured."
+- `policy-quickstart(7)`: "Do NOT enable public exposure without first configuring TLS and ACL."
+
+**Relation to host policy (T35):**
+- Host policy sysctls (`security.policy.*`) are the **opt-in security** layer.
+- Localhost by default is the **opt-in exposure** layer.
+- Both work together: the operator opts in to public exposure (sysctl) AND opts in to security (TLS, ACL, audit). Both must be set for public exposure to be allowed by preflight.
+
+**TDD additions:**
+- T38: tests for default bind (no sysctl, expect `[::1]`), opt-in bind (`listen_public=1` + TLS, expect non-localhost), refusal (`listen_public=1` without TLS, expect preflight block).
+- T48: tests for multicast listen_localhost_only=1 (binds to `[::1]`), =0 (binds to all interfaces).
+- T52: tests for admin.http_listen_public=0 (refuses non-localhost), =1 (allows with mTLS).
+
+---
+
+### IPv6 / dual-stack support (security + portability principle)
+
+The user said: *"be mindful of ipv6, and ipv6 only environments, don't assume there will always be ipv4."*
+
+This is a **cross-cutting principle** for all new code in this plan. The plan does **not assume IPv4 is available** — it defaults to **IPv6 dual-stack** (which on FreeBSD with default `IPV6_V6ONLY=0` accepts both IPv4-mapped IPv6 and native IPv6 connections). IPv4 is **always** supported (we don't break IPv4 setups) — it's just not the default.
+
+**The rule:**
+- For all new bind addresses: default to **IPv6** (`[::1]` for localhost, `[::]` for public).
+- For all new multicast groups: default to **IPv6** (`ff08::/16` admin-scoped equivalent of IPv4 `239.0.0.0/8`).
+- For all new ACLs, audit logs, and config: store addresses in **canonical form** (DNS-resolved, normalized, no IPv4-mapped IPv6 if not enabled).
+- For all new tests: cover **IPv4-only**, **IPv6-only**, and **dual-stack** scenarios.
+
+**Affected components:**
+
+| Component | Default (before) | Default (after) | Notes |
+|---|---|---|---|
+| T38 broker `listen` | `tcp4://127.0.0.1:8443,unix:///var/run/display-broker.sock` | `tcp://[::1]:8443,unix:///var/run/display-broker.sock` | `tcp://` prefix = dual-stack |
+| T38 broker `listen_public` (when set) | `tcp4://0.0.0.0:8443` | `tcp://[::]:8443` | Both IPv4 and IPv6 on same socket |
+| T48 multicast `group_base` | `239.1.1.0/24` (IPv4) | `ff08::/16` (IPv6 admin-scoped) | Both still available via `group_base4` / `group_base6` |
+| T48 multicast `publish_interface` | `127.0.0.1` (loopback) | `[::1]` (IPv6 loopback) | Dual-stack |
+| T48 multicast `listen_interface` | (all interfaces) | `[::1]` if `listen_localhost_only=1` (default) | IPv6 loopback |
+| T52 HTTP admin `http_listen` | empty / `127.0.0.1:9090` | empty / `[::1]:9090` | Localhost-first |
+| T52 HTTP admin `http_listen_public` (when set) | `0.0.0.0:9090` | `[::]:9090` | Both IPv4 and IPv6 |
+| T39 BDP `servername` (TLS SNI) | IPv4 or hostname | hostname + IPv4 + IPv6 SANs | All supported |
+
+**New sysctls (IPv6 support):**
+
+| Sysctl | Default | Purpose |
+|---|---|---|
+| `security.display.broker.listen_family` | `inet6` | `inet`/`inet6`/`dual` — what family to bind. `inet6` = IPv6 dual-stack (accepts both via IPv4-mapped IPv6 if `IPV6_V6ONLY=0`). `dual` = explicit dual bind (separate IPv4 and IPv6 sockets). `inet` = IPv4 only. |
+| `security.display.broker.listen_ipv4_mapped` | 1 | If 1, allow IPv4-mapped IPv6 connections. If 0, IPv4 must come via explicit IPv4 socket. |
+| `security.display.broker.multicast.family` | `inet6` | `inet`/`inet6`/`dual` — which family for multicast. `dual` = both IPv4 and IPv6 channels. |
+| `security.display.broker.multicast.publish_interface` | `[::1]` | Publisher bind interface (IPv6 loopback by default; `[::]` for public) |
+| `security.display.broker.admin.http_listen_family` | `inet6` | Same as `listen_family` but for HTTP admin |
+
+**New preflight checks (IPv6):**
+
+| Check | Severity | Purpose |
+|---|---|---|
+| `preflight.broker.ipv6_loopback_reachable` | BLOCKING | `[::1]` is reachable (kernel IPv6 stack loaded) |
+| `preflight.broker.listen_family_supported` | BLOCKING | Requested `listen_family` is supported by the kernel |
+| `preflight.multicast.ipv6_admin_scoped_available` | WARNING | IPv6 admin-scoped multicast (`ff08::/16`) is usable |
+| `preflight.admin.http_ipv6_loopback_reachable` | BLOCKING | `[::1]:port` is reachable for HTTP admin |
+
+**Updated config defaults (broker.conf):**
+
+```
+# /etc/bhyve/display-broker.conf
+
+# IPv6-first listen. The `tcp://` prefix means dual-stack — accepts both
+# IPv6 and IPv4-mapped IPv6 (FreeBSD default IPV6_V6ONLY=0).
+listen=tcp://[::1]:8443,unix:///var/run/display-broker.sock
+
+# For public exposure (only if listen_public=1):
+# listen=tcp://[::]:8443,unix:///var/run/display-broker.sock
+# Or to bind both IPv4 and IPv6 explicitly:
+# listen=tcp4://0.0.0.0:8443,tcp6://[::]:8443,unix:///var/run/display-broker.sock
+
+# HTTP admin: localhost-first. Default = no TCP. Set http_listen to enable.
+admin_listen=unix:///var/run/display-broker.admin
+# http_listen=[::1]:9090   # localhost-only
+# http_listen_public=1     # only after http_listen is set AND mTLS configured
+
+# Multicast: IPv6 admin-scoped by default.
+multicast_group_base=ff08::/16
+multicast_ttl=1
+multicast_listen_localhost_only=1
+multicast_publish_interface=[::1]
+```
+
+**Updated loader.conf defaults:**
+
+```
+# IPv6-first. All public-exposure sysctls are 0 by default.
+display_broker_listen="tcp://[::1]:8443"
+display_broker_admin_listen="unix:///var/run/display-broker.admin"
+# display_broker_listen_public=0         # DO NOT enable without TLS + ACL
+# display_broker_admin_http_listen=""    # DO NOT enable without mTLS
+```
+
+**Audit on every listen change (T43 expansion, IPv6-aware):**
+
+Every change to `security.display.broker.listen*` is logged with the address family:
+```
+time=2026-06-05T10:23:45Z event=listen.change user=root via=sysctl
+before=tcp://[::1]:8443 after=tcp://[::]:8443
+family=inet6 listen_public=1 tls.client_ca=/etc/bhyve/clients-ca.pem
+```
+
+**Tests (IPv6 coverage):**
+
+Each task that has network behavior must include 3 test scenarios:
+1. **IPv4-only host** (no IPv6) — IPv4 bind works (uses `tcp4://`)
+2. **IPv6-only host** (no IPv4) — IPv6 bind works (uses `tcp6://` or `tcp://[::1]`)
+3. **Dual-stack host** (both) — both families work simultaneously (uses `tcp://[::1]` which accepts IPv4-mapped)
+
+For T18, T46, T52: add `tests/sys/display/broker_listen_ipv6_only.test`, `tests/sys/display/broker_listen_ipv4_only.test`, `tests/sys/display/broker_listen_dual_stack.test`.
+
+**Documentation (T17, T29, T34, T47):**
+
+Every relevant man page adds an "IPv6 / dual-stack" section:
+- `bhyve-display-broker(8)`: "Default listen is `tcp://[::1]:8443` (IPv6 dual-stack, accepts IPv4-mapped). For IPv4-only, use `tcp4://0.0.0.0:8443`. For IPv6-only, use `tcp6://[::]:8443`."
+- `bhyve(8)`: "If you previously had a bhyve VM on IPv4 only, the new default is IPv6 dual-stack. See `bhyve-display-broker(8) § IPV6`."
+- `policy-quickstart(7)`: "If your network is IPv6-only, the broker works out of the box (default listen is `[::1]`). For IPv4, add `tcp4://0.0.0.0:8443` to the listen string."
+
+**Edge cases handled:**
+- **IPv6 link-local** (`fe80::/10` with `%eth0` scope): out of scope for v1. Documented.
+- **IPv4-mapped IPv6** (`::ffff:1.2.3.4`): transparent if `IPV6_V6ONLY=0` (FreeBSD default). Audit log normalizes to canonical form.
+- **IPv6 unique local** (`fc00::/7`): supported (treated as regular IPv6).
+- **IPv4 + IPv6 on same port**: the broker can listen on both `tcp4://0.0.0.0:8443` and `tcp6://[::]:8443` simultaneously (two separate sockets). Both controlled by `listen_public`.
+
+**Relation to other principles:**
+- "Localhost by default" → "Localhost is IPv6 `[::1]` by default" (also accepts IPv4-mapped if `IPV6_V6ONLY=0`).
+- "Tunables" → `security.display.broker.listen_family` is the canonical tunable for bind family.
+- "Backward compat" → IPv4-only hosts continue to work; operator sets `listen_family=inet` or uses `tcp4://` prefix.
+
+---
+
+### Instrumentation, statistics, diagnostics (T49–T52 — added per user request)
+
+The user asked: *"now is there any instrumentation? statistics to collect?"* and *"we should look at diagnostic and debugging."*
+
+The plan includes **four orthogonal layers** for observability, each tunable, each gated by appropriate ACL/sysctls:
+
+1. **Statistics** — counters, gauges, histograms. Lock-free atomic updates. Exposed via sysctls, periodic file dump, BDP STATS message, HTTP admin endpoint, and CLI `--stats`.
+2. **Tracing** — per-session ring buffer + DTrace probes. Real-time event stream. Exposed via BDP TRACE message, dump on SIGUSR2, CLI `--trace`.
+3. **Audit** (T43) — structured event log. Augmented with stats counters.
+4. **Health** — liveness/readiness probes for orchestration (k8s-style). Exposed via HTTP `/healthz` and `/readyz`, BDP HEALTH message, sysctls.
+
+**Why all four?** They answer different questions:
+- **Stats** = "how much / how fast / how many" (counters, gauges, histograms)
+- **Trace** = "what happened, in order, for this session" (event log)
+- **Audit** = "who did what, with security context" (security events)
+- **Health** = "is this thing working right now" (binary alive/ready)
+
+**Statistics (T49):**
+
+| Layer | Counter | Gauge | Histogram | Notes |
+|---|---|---|---|---|
+| Broker sessions | `sessions_total`, `sessions_active` | `sessions_active` | `session_duration_s` | Per-session + global |
+| Broker auth | `auth_ok_total`, `auth_fail_total` | – | `auth_duration_ms` | Per-method (mTLS, PAM, OAuth) |
+| Broker bytes | `bytes_in_total`, `bytes_out_total` | `bytes_per_sec` | `frame_size_bytes` | Per-session + global |
+| Broker frames | `frames_sent_total`, `frames_dropped_total` | `frames_per_sec` | `frame_encode_ms` | Per-transport |
+| Broker list/attach | `list_req_total`, `attach_ok_total`, `attach_fail_total` | – | – | Per-resource |
+| BDP errors | `bdp_errors_total{type=...}` | – | – | Per error type |
+| Transport (RFB) | `rfb_connections_total`, `rfb_bytes_in/out` | `rfb_active` | – | Per-port |
+| Transport (BDP unicast) | same as RFB | same | same | |
+| Transport (BDP multicast) | `multicast_pub_total`, `multicast_sub_total`, `multicast_fec_recovered_total` | `multicast_subscribers`, `multicast_channels_active` | `multicast_latency_ms` | Per-channel |
+| GPU resource | `gpu_alloc_total`, `gpu_free_total`, `gpu_enforce_fail_total` | `gpu_vram_allocated`, `gpu_cores_in_use`, `gpu_consumers` | `gpu_alloc_duration_ms` | Per-device |
+| Preflight | `preflight_runs_total`, `preflight_check_pass_total`, `preflight_check_fail_total` | – | `preflight_check_duration_ms` | Per-check |
+| ACL | `acl_check_total`, `acl_deny_total` | – | `acl_resolve_us` | Per-resource |
+| Cert | `cert_reload_total`, `cert_hot_reload_total` | – | – | Per-source |
+| Tunables | – | `tunable_effective_<name>` | – | Mirror of active sysctls |
+| Errors | `errors_total{kind=...}` | – | – | Per-kind (network, crypto, protocol, kernel) |
+
+**Histogram buckets** (per-request latency): 1µs, 10µs, 100µs, 1ms, 10ms, 100ms, 1s, 10s, +Inf. Use HDR-histogram (or `lib/libhdr/`) for accurate percentile estimates (p50, p95, p99).
+
+**How to expose stats:**
+
+| Method | Format | Update frequency | Access | ACL |
+|---|---|---|---|---|
+| Sysctls | `security.display.broker.stats.*` and `kern.<module>.stats.*` | Live (atomic read) | `sysctl -a`, `sysctlbyname` | World-readable for non-sensitive; root for sensitive |
+| Stats file | `/var/run/display-broker.stats` | Every `stats.interval` (default 60s) | `cat`, parse, prometheus scraper | World-readable (no secrets) |
+| BDP STATS message | JSON or key=value | On request (BDP `0x19` / `0x1A`) | Any BDP client | Per-user (filtered) |
+| HTTP admin endpoint | Prometheus + JSON | On request | `curl http://[::1]:9090/stats` | Root-only (mTLS or localhost) |
+| CLI | Text table or JSON | On request | `bhyve-display-broker --stats` | Root for `--stats --live` |
+| BDP HEALTH message | JSON | Every 30s + on request | Any BDP client | Per-user (filtered) |
+| Periodic syslog | key=value | Every `stats.interval` | `grep stats /var/log/messages` | Root for sensitive fields |
+
+**Stats tunables (T49 + Tunables Reference):**
+- `security.display.broker.stats.enable` (default 1)
+- `security.display.broker.stats.interval` (default 60)
+- `security.display.broker.stats.path` (default `/var/run/display-broker.stats`)
+- `security.display.broker.stats.format` (default `json`, options: `json`/`prometheus`/`kv`)
+- `security.display.broker.stats.rotate` (default 1) — rename previous to .1, .2, etc.
+- `security.display.broker.stats.rotate_keep` (default 5)
+- `kern.fbuf_jail.stats` (default 0) — kernel module stats
+- `kern.gpu_resource.stats` (default 0)
+- `kern.preflight.stats` (default 0)
+
+**Tracing (T50):**
+
+**Per-session ring buffer:**
+- Size: 1 MB default (`security.display.broker.debug.trace_buffer_size`)
+- Format: structured key=value, one event per line
+- Events: `session.start`, `session.end`, `tls.handshake.start`, `tls.handshake.end`, `auth.start`, `auth.end`, `attach.start`, `attach.end`, `pixel.send`, `pixel.drop`, `input.kbd`, `input.ptr`, `error.<kind>`
+- Sample rate: `security.display.broker.debug.trace_sample_rate` (default 0 = all events)
+- On `SIGUSR2`: dump to `/var/run/display-broker.dump`
+- Per-session: BDP `0x1D TRACE_CTRL` enables/disables trace for a specific session_id
+
+**DTrace probes (FreeBSD-native USDT):**
+- `display-broker:session-start`, `display-broker:session-end`
+- `display-broker:auth-ok`, `display-broker:auth-fail`
+- `display-broker:list-req`
+- `display-broker:attach-ok`, `display-broker:attach-fail`, `display-broker:detach`
+- `display-broker:frame-send`, `display-broker:frame-drop`
+- `display-broker:input-kbd`, `display-broker:input-ptr`
+- `display-broker:error`
+- `display-broker:multicast-frame-send`, `display-broker:multicast-sub-join`, `display-broker:multicast-sub-leave`
+- `display-transport:pixel-read`, `display-transport:pixel-write`
+- `gpu-resource:alloc`, `gpu-resource:free`, `gpu-resource:enforce-ok`, `gpu-resource:enforce-fail`
+- `preflight:check-start`, `preflight:check-end`, `preflight:check-fail`
+
+**CLI trace tools:**
+- `bhyve-display-broker --trace all` — enable trace for all sessions
+- `bhyve-display-broker --trace session_id=X` — enable for one session
+- `bhyve-display-broker --dump-trace` — dump current trace buffer
+- `bhyve-display-broker --profile` — enable CPU profiling (gprof-style)
+- `dtrace -n 'display-broker:frame-send { trace(arg0); }'` — DTrace one-liner
+
+**Diagnostic tools (T50):**
+
+| Tool | Purpose | Usage |
+|---|---|---|
+| `bhyve-display-broker --check-config` | Validate config + sysctls + certs, exit 0/1 | CI gate, smoke test |
+| `bhyve-display-broker --dry-run` | Same as check-config but also exercises preflight | Pre-deploy check |
+| `bhyve-display-broker --validate-cert path` | Parse cert, check key match, expiry, chain | TLS troubleshooting |
+| `bhyve-display-broker --test-acl user resource` | Test ACL resolution | ACL debugging |
+| `bhyve-display-broker --list-tunables` | Show all sysctls and their effective values | Audit what's in effect |
+| `bhyve-display-broker --list-resources` | List all detected fbs (root-only) | Admin tool |
+| `bhyve-display-broker --list-sessions` | List all active sessions | Admin tool |
+| `bhyve-display-broker --kick session_id` | Force-disconnect a session | Abuse response |
+| `bhyve-display-broker --rotate-audit` | Rotate audit log now (also on SIGUSR1) | Log management |
+| `bhyve-display-broker --dump` | Dump broker state to file | Postmortem |
+| `bhyve-display-broker --stats --format json` | Print stats once and exit | Scripting |
+| `bhyve-display-broker --stats --format prometheus` | Print Prometheus exposition | Scraping |
+| `bhyve-display-broker --version` | Print version + build info | |
+| `bhyve-display-broker --help` | Full help | |
+
+**New BDP message types (T51 — T39 expansion):**
+- `0x19 STATS_REQ` (C→S) — request stats (filter: transport, channel, user, resource)
+- `0x1A STATS_REPLY` (S→C) — stats response (JSON or key=value)
+- `0x1B DEBUG_CMD` (C→S) — admin debug command (root only)
+- `0x1C DEBUG_REPLY` (S→C) — debug response
+- `0x1D TRACE_CTRL` (C→S) — toggle per-session trace
+- `0x1E HEALTH_REQ` (C→S) — request health status
+- `0x1F HEALTH_REPLY` (S→C) — health response
+- `0x20 HEALTH_PUSH` (S→C) — periodic broadcast to admin clients
+
+**New sysctls for stats/debug (added to Tunables Reference):**
+- `security.display.broker.stats.enable` (default 1)
+- `security.display.broker.stats.interval` (default 60)
+- `security.display.broker.stats.path` (default `/var/run/display-broker.stats`)
+- `security.display.broker.stats.format` (default `json`)
+- `security.display.broker.stats.rotate` (default 1)
+- `security.display.broker.stats.rotate_keep` (default 5)
+- `security.display.broker.debug.enable` (default 0, requires `acl_root_bypass=1`)
+- `security.display.broker.debug.trace_buffer_size` (default 1048576 = 1MB)
+- `security.display.broker.debug.trace_sample_rate` (default 0 = all)
+- `security.display.broker.debug.profile.enable` (default 0, requires CAP_SYS_ADMIN)
+- `security.display.broker.health.path` (default `/var/run/display-broker.health`)
+- `security.display.broker.admin.listen` (default `unix:///var/run/display-broker.admin`)
+- `security.display.broker.admin.http_port` (default 0 = disabled)
+
+**New preflight check (T49 expansion):**
+- `preflight.stats.writable` (WARNING) — stats path not writable
+- `preflight.debug.secure` (BLOCKING if `debug.enable=1`) — debug enabled but `acl_root_bypass=0`
+- `preflight.health.responsive` (BLOCKING) — broker health endpoint responsive
+
+**Health check endpoint (T52):**
+
+| Endpoint | Method | Returns | Purpose |
+|---|---|---|---|
+| `/healthz` | GET | 200 `{"status": "alive", "uptime_s": N}` if alive | Liveness — no auth |
+| `/readyz` | GET | 200 `{"status": "ready", "checks": {...}}` if ready | Readiness — no auth |
+| `/stats` | GET | Prometheus exposition | Metrics scrape — auth |
+| `/stats.json` | GET | JSON | Scripting — auth |
+| `/version` | GET | `{"version": "1.0.0", "build": "..."}` | No auth |
+| `/debug/dump` | GET (root-only) | Full state dump | Postmortem |
+| `/debug/pprof` | GET (root-only) | pprof-style profile | Performance |
+
+**Health "ready" criteria:**
+- All required modules loaded (`fbuf_jail`, `gpu_resource`, `preflight`)
+- All required sysctls in valid state
+- TLS cert loaded and not expired (or self-signed auto-gen ready)
+- ACL resolver initialized
+- Resource registry has at least one scan complete
+- All transports registered
+- No recent (last 60s) critical errors
+- No public-exposure sysctls set without their security prerequisites
+
+**HTTP admin server (security principle — localhost by default):**
+- Bound to `security.display.broker.admin.listen` (default Unix socket)
+- TCP HTTP listener is opt-in via `admin.http_listen` (default empty = no TCP)
+- TCP bind is restricted to localhost (`[::1]:9090`) unless `admin.http_listen_public=1` is set
+- Public TCP requires mTLS + ACL (root-only)
+- See T52 task body and "Localhost by default" + "IPv6" sections for full policy
+
+**Tasks (T49–T52):** See the TODOs section.
+
+**Relation to existing tasks:**
+- T22, T25, T26, T35, T38, T40, T41, T42, T43 — provide the modules that T49-T52 instrument / expose.
+- T43 (audit) is augmented to count events into stats counters.
+- T51 extends T39 (BDP protocol) with 8 new message types.
+- T52 adds an HTTP admin server alongside the BDP broker (localhost by default).
+
+---
+
+### Multi-display support (added per user question)
+
+The user asked: *"have we thought of multiple displays attached to a vm / jail/container?"*
+
+**Current state of the plan (the gap):** Each VM/jail has ONE framebuffer. The `pci_fbuf` is a single PCI device. The `fbuf_jail` module provides one framebuffer per jail. The console is single-instance per VM (T8 makes it multi-VM, but still one per VM). The `console_kbd_register` / `console_ptr_register` only support one consumer. This is a **significant limitation** for many real-world use cases — the plan needs a multi-display extension.
+
+**Use cases for multiple displays:**
+
+1. **Multi-monitor desktop VMs** — A Windows/Linux VM with 2-3 monitors (e.g. dev VM with code on one screen, browser on another, terminal on third).
+2. **Video walls** — Multiple screens tiled to form one large display (digital signage, control rooms, command centers).
+3. **Kiosk + control screen** — One display for users, one for admin/operator.
+4. **KVM-style wall** — A single host showing N VMs, each VM on its own display, the operator can switch between them.
+5. **Recording + live** — One display for the user, one being recorded/streamed.
+6. **Public + private** — Public-facing display + private control display in a kiosk.
+7. **Multi-head GPUs** — Real GPUs have multiple display outputs (DisplayPort ×4, HDMI ×2, etc.) — should be representable.
+8. **Per-VM tiling** — A VM with 4 displays tiled 2×2 to make one big desktop.
+
+**Design (T53 + T54 + T55):**
+
+**Per-VM / per-jail:**
+- Allow **N framebuffers** per VM/jail. N is configurable (default 1, max 8).
+- Each framebuffer has its own: id, name, width, height, transport, position (for walls), kbd/ptr enable.
+- kbd/ptr is **per-VM** (one shared keyboard/mouse for all displays of a VM) — kbd/ptr focus is on the active display. This matches real desktop VMs.
+
+**Bhyve PCI slots (T13 expansion):**
+- Each framebuffer is a separate PCI device: `pci_fbuf` at slot 0, 1, 2, ...
+- `-s 0,fbuf,id=screen0,transport=rfb,...` — primary display (slot 0)
+- `-s 1,fbuf,id=screen1,transport=rfb,...` — secondary display (slot 1)
+- The guest sees N emulated display controllers.
+
+**Jail params (T9-T12 expansion):**
+
+| Param | Default | Purpose |
+|---|---|---|
+| `fbuf.count=N` | 1 | Number of framebuffers (max 8) |
+| `fbuf.N.id` | `screenN` | Display id (used in BDP, ACL, multicast) |
+| `fbuf.N.width` | 1024 | Display N width |
+| `fbuf.N.height` | 768 | Display N height |
+| `fbuf.N.transport` | rfb | `rfb`/`bdp` (default rfb, recommends bdp) |
+| `fbuf.N.nokbd` | 0 | Opt out of kbd on this display (kbd is shared) |
+| `fbuf.N.nomouse` | 0 | Opt out of mouse on this display (mouse is shared) |
+| `fbuf.N.position` | `0,0` (or auto) | Position in a display wall (x,y) |
+
+**Backward compat:** if no `fbuf.N.*` params, default to `fbuf.count=1, fbuf.0.id=primary, fbuf.0.width=1024, fbuf.0.height=768` — current single-display behavior unchanged.
+
+**Display walls (T54):**
+
+- A "wall" is a group of displays arranged in a 2D grid.
+- `fbuf.0.position=0,0` (tile 0,0)
+- `fbuf.1.position=1920,0` (tile right of display 0)
+- `fbuf.2.position=0,1080` (tile below display 0)
+- `fbuf.3.position=1920,1080` (tile bottom-right)
+- A 2×2 wall of 4 1920×1080 displays = 1 large 3840×2160 display.
+- A new BDP resource type: `bdp_resource_wall` (or `type=wall`) with the list of display ids.
+- Client can attach to the wall and receive a composite frame.
+- Server stitches the framebuffers together on demand (with cache, only re-stitch when a frame changes).
+
+**BDP protocol changes (T55):**
+
+- `bdp_resource` extended with `displays[]` array (each: id, name, width, height, position).
+- New BDP message types:
+  - `0x21 LIST_DISPLAYS` (C→S) — list displays in a resource (filter: resource_id)
+  - `0x22 LIST_DISPLAYS_REPLY` (S→C) — array of `bdp_display`
+  - `0x23 DISPLAY_ATTACH` (C→S) — attach to a specific display (resource_id, display_id, mode)
+  - `0x24 DISPLAY_ATTACH_OK` (S→C) — display session_id, width, height, position
+  - `0x25 DISPLAY_DETACH` (C→S) — detach from a specific display
+  - `0x26 WALL_ATTACH` (C→S) — attach to a wall (resource_id, mode) — get composite
+  - `0x27 WALL_ATTACH_OK` (S→C) — wall session_id, total_width, total_height
+- Backward compat: a resource with `count=1` is treated as a single display. Old clients that don't know about displays just attach to the resource directly and get the only display.
+
+**Per-display ACL (T40 expansion):**
+
+- `display.acl.N=alice` — per-display ACL (only alice can see display N)
+- `display.acl=alice,@team` (current) — applies to all displays of the resource
+- Resolution: most specific wins. `display.acl=alice,@team` (all displays) + `display.acl.0=root` (only root sees display 0).
+- `security.display.acl_per_display` (default 1) — enables per-display ACL.
+
+**GPU governance (T19-T21 expansion):**
+
+- A VM with N displays uses 1× GPU resource but with N "heads" (display outputs).
+- `gpu.cores` is still per-VM (not per-display).
+- `gpu.memory` is still per-VM (not per-display).
+- New metric: `gpu_resource.stats.display_count` (per-consumer).
+- The `gpu_backend` vtable gets a new op: `gr_set_display_count(consumer, count)`.
+- For MIG / SR-IOV / partitionable GPUs: N displays = N MIG instances OR 1 MIG instance with N heads (depends on vendor).
+- For time-sliced GPUs: N displays share the GPU time slice proportionally.
+
+**Bandwidth and FPS (T42, T48 expansion):**
+
+- Per-display FPS: same as before (each display has its own refresh rate cap).
+- Per-resource bandwidth: `max_bandwidth_per_resource` (default 1 Gbps) — applies to the SUM of all displays of a resource.
+- Per-broker bandwidth: `max_total_bandwidth` (default 10 Gbps) — applies to the SUM of all resources.
+- Multicast channel can be per-display or per-wall (server stitches for wall channels).
+
+**Preflight checks (T53):**
+
+| Check | Severity | Purpose |
+|---|---|---|
+| `preflight.display.count_supported` | BLOCKING | `fbuf.count` is within kernel limits |
+| `preflight.display.no_position_overlap` | WARNING | Wall positions don't overlap |
+| `preflight.display.bandwidth_within_per_resource` | BLOCKING | Sum of display bandwidths ≤ `max_bandwidth_per_resource` |
+| `preflight.display.positions_form_grid` | WARNING | Wall positions form a regular grid (sanity check) |
+| `preflight.display.acl_per_display_valid` | WARNING | Per-display ACL refs an existing display index |
+
+**New sysctls (T35 expansion):**
+
+| Sysctl | Default | Purpose |
+|---|---|---|
+| `security.display.broker.max_displays_per_resource` | 8 | Max displays per VM/jail |
+| `security.display.broker.max_wall_size` | 16 | Max displays in a wall |
+| `security.display.broker.max_bandwidth_per_resource` | 1000000 | Kbps; sum of all displays of a resource |
+| `kern.fbuf_jail.max_displays_per_jail` | 4 | Kernel limit per jail |
+| `kern.bhyve.max_fbuf_devices` | 4 | Kernel limit per bhyve VM |
+| `security.display.acl_per_display` | 1 | Master switch for per-display ACL |
+
+**Mermaid diagram (multi-display):**
+
+```mermaid
+graph TB
+    subgraph JAIL["jail with fbuf.count=3"]
+        F0[fbuf.0: screen0<br/>1920x1080<br/>position=0,0]
+        F1[fbuf.1: screen1<br/>1920x1080<br/>position=1920,0]
+        F2[fbuf.2: screen2<br/>1920x1080<br/>position=0,1080]
+        KBD[Shared kbd/ptr]
+    end
+
+    subgraph BHYVE["bhyve VM with 3 PCI fbuf slots"]
+        B0[slot 0: fbuf, id=screen0]
+        B1[slot 1: fbuf, id=screen1]
+        B2[slot 2: fbuf, id=screen2]
+    end
+
+    subgraph BROKER["displayd"]
+        REG[Resource Registry]
+        ACL[ACL Resolver<br/>per-display]
+        BRIDGE[Transport Bridge]
+    end
+
+    subgraph CLIENTS["Clients"]
+        C1[Client A: attach to screen0]
+        C2[Client B: attach to screen1]
+        C3[Client C: attach to wall<br/>composite 3840x2160]
+    end
+
+    F0 --> BROKER
+    F1 --> BROKER
+    F2 --> BROKER
+    B0 --> BROKER
+    B1 --> BROKER
+    B2 --> BROKER
+
+    BROKER --> C1
+    BROKER --> C2
+    BROKER --> C3
+
+    KBD -. shared across all displays .-> F0
+    KBD -. shared .-> F1
+    KBD -. shared .-> F2
+```
+
+**Tasks added (T53-T55):**
+
+See the TODOs section.
+
+**Relation to other tasks:**
+
+- T8 (console multi-instance) — extended to N consoles per VM (for per-display kbd/ptr focus)
+- T9-T12 (jail fbuf) — extended to N framebuffers per jail via `fbuf.count=N` + `fbuf.N.*`
+- T13 (bhyve wire) — extended to multiple `-s N,fbuf,id=...,...` slots
+- T19-T21 (gpu_resource) — extended to track display count per consumer
+- T38 (broker) — extended to handle multi-display resources
+- T39 (BDP) — extended with 7 new message types (T55)
+- T40 (ACL) — extended with per-display ACL
+- T42 (transport bridge) — extended to fan out to multiple displays
+- T48 (multicast) — extended to support per-display and per-wall channels
+- T44 (libdisplay) — extended C API with `bdp_list_displays()`, `bdp_display_attach()`, `bdp_wall_attach()`
+- T45 (displayc) — extended CLI with `--display screen0`, `--wall web1-wall`
+
+**Test strategy:**
+
+- T53: create a jail with `fbuf.count=3`, verify 3 framebuffers visible inside the jail via `/dev/fb0`, `/dev/fb1`, `/dev/fb2`
+- T53: start a bhyve VM with `-s 0,fbuf,... -s 1,fbuf,... -s 2,fbuf,...`, verify 3 emulated displays in the guest
+- T53: per-display kbd/ptr focus — switch focus between displays with a hotkey
+- T54: create a 2×2 wall, attach a client via BDP WALL_ATTACH, verify composite 3840×2160
+- T54: verify stitching cache (only re-stitch when a display's frame changes)
+- T55: BDP LIST_DISPLAYS returns 3 displays for a 3-display resource
+- T55: BDP DISPLAY_ATTACH attaches to a specific display (not the resource)
+- T55: BDP WALL_ATTACH attaches to a wall and gets composite
+- T55: old BDP clients (don't know about displays) attach to a single-display resource and get the only display
+- Per-display ACL: alice can see display 0 of `web1` but not display 1
+- Backward compat: old jail configs (no `fbuf.count`) work as before, default count=1
+
+**Backward compat (summary):**
+
+| Surface | Old works? | New works? | Default in v1 |
+|---|---|---|---|
+| `fbuf` jail param (old) | ✓ | ✓ (treated as `fbuf.0.*`) | ✓ |
+| `fbuf.N.*` jail param (new) | ✗ | ✓ | ✓ |
+| `fbuf.count=1` (single display) | ✓ (default) | ✓ | ✓ |
+| `fbuf.count=3` (multi display) | ✗ | ✓ | ✓ |
+| bhyve `-s 0,fbuf,...` (single slot) | ✓ | ✓ | ✓ |
+| bhyve `-s 1,fbuf,...` (second slot) | ✗ | ✓ | ✓ |
+| BDP `ATTACH resource_id` (no display) | ✓ | ✓ (gets only display) | ✓ |
+| BDP `DISPLAY_ATTACH resource_id display_id` (specific display) | ✗ | ✓ | ✓ |
+| BDP `WALL_ATTACH resource_id` (composite) | ✗ | ✓ | ✓ |
+| `display.acl=alice` (resource-level ACL) | ✓ | ✓ | ✓ |
+| `display.acl.0=alice` (per-display ACL) | ✗ | ✓ | ✓ (when `count > 1`) |
+
+In v1: all combinations work. Old patterns continue; new patterns are opt-in.
+In v2: no breaking changes planned (multi-display is purely additive).
+
+**Mixed resolutions (the user's clarification):** the user said *"keep in mind that the displays may not always be the same resolutions"*. The plan already has per-display `fbuf.N.width` and `fbuf.N.height` (independent) and per-port resolution tracking. The wall case is the most affected: a 2×2 wall can have 4 different resolutions, e.g., `(1920×1080, 1920×1080, 3840×2160, 1920×1080)` — the wall's bounding box is computed from the **max bounds of all displays**, not assumed equal. The composite may be irregular (non-rectangular). The client receives either (a) a single stitched image with the bounding-box dimensions (inactive areas filled with a background color), or (b) a list of display rectangles, depending on the wall's `composite_mode` sysctl (default: stitched image). New preflight check `preflight.display.positions_within_bounds` verifies all positions are within the wall's computed bounding box.
+
+---
+
+### Audio support (added per user request — needed for chromecast use case)
+
+The user said: *"i have an idea of tapping into the framebuffer and using an external tool to send to a chromecast device. and with that thought... sound!!! we need to support sound !!!"*
+
+**The use case:** The user wants to take a VM's display and audio, and cast it to a chromecast device. Chromecast takes video+audio streams, so we need to expose both. The pattern is:
+1. Server captures VM framebuffer + audio
+2. External tool (ffmpeg, gstreamer, custom cast-sender) reads the streams
+3. External tool sends to chromecast via Google Cast protocol
+
+**This is a major new requirement.** The plan was video-only. We need to add audio throughout the stack.
+
+**Audio architecture (mirror of video):**
+
+| Layer | Video (existing) | Audio (new) |
+|---|---|---|
+| Source | bhyve `pci_fbuf` / jail `fbuf_jail` / `gpu_resource` | bhyve AC97/HDA / jail `/dev/dsp` / `audio_resource` (new) |
+| Wire protocol | BDP PIXEL (`0x0B`) | BDP AUDIO_FRAME (`0x32`) |
+| Transport | RFB / BDP / multicast | BDP / RTP / Opus / multicast |
+| Sink | VNC client / BDP client / TV (multicast) | VNC client (audio forward) / BDP client / chromecast / TV (multicast) |
+| ACL | `display.acl` | `display.audio.acl` |
+| Stats | `display_broker_*` | `display_broker_audio_*` |
+
+**Audio sources (T58):**
+
+1. **bhyve VMs** — emulated audio device (AC97, HDA, USB audio) is in the guest. Host captures via VMM ioctl or new kernel module. New bhyve audio module (`bhyve_audio.ko` or extension to `gpu_resource`) exposes the stream.
+2. **Jails** — `/dev/dsp` is not propagated by default. New jail param `allow.audio` enables audio. New kernel module `audio_resource.ko` mediates access (mirrors `fbuf_jail.ko`).
+3. **Direct streams** — A process (e.g., media player) publishes audio to the broker directly. Broker just relays.
+
+**Audio kernel module — `audio_resource.ko` (T58, mirrors `gpu_resource.ko`):**
+
+```c
+struct audio_resource {
+    uint32_t consumer_id;             // jail id / bhyve vm id
+    audio_format_t format;            // PCM_S16LE / PCM_F32LE / OPUS / MP3 / AAC / FLAC
+    uint32_t sample_rate;             // 48000 typical
+    uint8_t  channels;                // 2 (stereo) typical
+    struct audio_backend *backend;    // bhyve / jail / direct
+    uint8_t  input_enabled;           // mic / line-in (usually off)
+};
+```
+
+**Audio backend vtable:**
+
+```c
+struct audio_backend {
+    audio_open(consumer) → fd
+    audio_read(fd, buf, len) → ssize_t    // read encoded samples
+    audio_write(fd, buf, len) → ssize_t   // write input (mic)
+    audio_set_format(consumer, format, rate, channels) → int
+    audio_get_stats(consumer) → struct audio_stats
+};
+```
+
+**Audio formats (T57):**
+
+| Format | Sample rate | Channels | Bitrate | Use case |
+|---|---|---|---|---|
+| PCM S16LE | 48 kHz | 2 | 1.5 Mbps | Lossless, high bandwidth |
+| PCM F32LE | 48 kHz | 2 | 3 Mbps | Studio quality |
+| Opus | 48 kHz | 2 | 64-128 kbps | Network efficient, default |
+| MP3 | 44.1 kHz | 2 | 128-320 kbps | Universal compat |
+| AAC | 44.1/48 kHz | 2 | 96-256 kbps | Apple ecosystem |
+| FLAC | 44.1/48 kHz | 2 | ~700 kbps | Lossless compressed |
+
+**Default: Opus** (good quality, low bandwidth, royalty-free).
+
+**Audio + video sync (T57):**
+
+- Both video and audio frames have **PTS** (presentation timestamp, ms since stream start).
+- Client buffers both, plays in sync.
+- Drift correction: client tracks drift (audio vs video), adjusts playback rate slightly (<1%).
+- On large drift (100ms+), re-sync request.
+- Timestamps use broker's wall clock; client and broker sync via NTP-style exchange (BDP `0x37 AUDIO_SYNC`).
+
+**Audio ACL (T40 expansion):**
+
+- `display.audio.acl=alice,@team-web` — who can hear this fb's audio
+- `display.audio.acl.0=alice` — per-display audio ACL
+- Default: fall back to `display.acl` if `display.audio.acl` not set
+- For chromecast: `display.audio.acl=@tv-ops` so only TV operators hear audio
+
+**Audio sysctls (T35 expansion):**
+
+| Sysctl | Default | Purpose |
+|---|---|---|
+| `security.display.broker.audio.enable` | 1 | Master switch |
+| `security.display.broker.audio.format` | opus | Default format |
+| `security.display.broker.audio.bitrate` | 64000 | Default bitrate (bps) |
+| `security.display.broker.audio.sample_rate` | 48000 | Default sample rate (Hz) |
+| `security.display.broker.audio.channels` | 2 | Default channels (1=mono, 2=stereo) |
+| `security.display.broker.audio.buffer_ms` | 100 | Client buffer size (ms) |
+| `security.display.broker.audio.max_streams_per_consumer` | 4 | Max audio streams per VM/jail |
+| `security.display.broker.audio.max_streams_total` | 64 | Max audio streams broker-wide |
+| `security.display.broker.multicast.audio.enable` | 1 | Multicast audio on/off |
+| `kern.audio_resource.max_consumers` | 64 | Max simultaneous audio consumers |
+| `kern.audio_resource.max_streams_per_consumer` | 4 | Kernel limit per consumer |
+
+**Audio preflight checks (T23 expansion):**
+
+| Check | Severity | Purpose |
+|---|---|---|
+| `preflight.audio.source_present` | BLOCKING | Audio source exists (bhyve audio device, jail /dev/dsp, or direct) |
+| `preflight.audio.format_supported` | BLOCKING | Requested format is supported by backend |
+| `preflight.audio.sample_rate_supported` | BLOCKING | Requested sample rate is supported |
+| `preflight.audio.within_max_streams` | BLOCKING | Stream count within limits |
+| `preflight.audio.acl_set` | WARNING | No `display.audio.acl` set (will fall back to `display.acl`) |
+| `preflight.audio.device_not_busy` | BLOCKING | Audio device is not busy (single consumer per device) |
+
+**Audio stats (T49 expansion):**
+
+| Stat | Type | Purpose |
+|---|---|---|
+| `display_broker_audio_streams_active` | gauge | Currently open audio streams |
+| `display_broker_audio_bytes_sent_total` | counter | Total audio bytes sent |
+| `display_broker_audio_packets_sent_total` | counter | Total audio packets sent |
+| `display_broker_audio_packets_dropped_total` | counter | Packets dropped (network congestion) |
+| `display_broker_audio_buffer_underruns_total` | counter | Client buffer underruns (audio glitch) |
+| `display_broker_audio_sync_drift_ms` | gauge | Current audio/video sync drift (ms) |
+| `display_broker_audio_codec_in_use` | info | Current codec (Opus / PCM / etc.) |
+| `display_broker_audio_sample_rate` | info | Current sample rate (Hz) |
+
+**New BDP message types (T57):**
+
+- `0x30 AUDIO_STREAM_OPEN` (C→S) — open audio stream (resource_id, display_id, format, sample_rate, channels)
+- `0x31 AUDIO_STREAM_OPEN_OK` (S→C) — audio session_id, negotiated format, sample_rate, channels, buffer_ms
+- `0x32 AUDIO_STREAM_OPEN_FAIL` (S→C) — reason (NO_PERM, FORMAT_UNSUPPORTED, BUSY)
+- `0x33 AUDIO_FRAME` (S→C) — encoded audio data with PTS
+- `0x34 AUDIO_INPUT` (C→S) — audio input from client (e.g., mic)
+- `0x35 AUDIO_CONTROL` (C↔S) — volume, mute, format change, resync
+- `0x36 AUDIO_STREAM_CLOSE` (C→S) — close audio stream
+- `0x37 AUDIO_SYNC` (S↔C) — sync info (PTS offset, drift, clock quality)
+
+**External stream tool — `bdp-stream` (T60):**
+
+A CLI tool that connects to the broker, attaches to a fb, and dumps the video+audio stream to stdout (or a file/pipe) for consumption by external tools like ffmpeg, gstreamer, or a custom cast-sender.
+
+```
+$ bdp-stream --server localhost:8443 --user alice --fb web1 --output-format matroska | \
+  ffmpeg -i pipe:0 -c:v copy -c:a copy -f matroska - | \
+  cast-sender --device "Living Room TV" --content-url "..."
+```
+
+**Output formats:**
+- `matroska` (mkv) — universal, ffmpeg-friendly
+- `nut` (NUT) — ffmpeg's preferred intermediate format
+- `hls` (HTTP Live Streaming) — for web/CDN delivery
+- `rtp` (Real-time Transport Protocol) — for IPTV / WebRTC integration
+- `raw` (raw BDP frames) — for custom tools
+- `pipe` (transcoded H.264 + AAC) — for direct consumption by most cast tools
+
+**Chromecast transport — `cast` (T61, v2 follow-on):**
+
+For v1, the user uses `bdp-stream` + external `cast-sender`. For v2, the broker has a built-in chromecast transport:
+
+```c
+display_transport_register("cast", {
+    .init = cast_init,        // mDNS discovery of chromecast devices
+    .attach = cast_attach,    // Cast protocol connection
+    .read_pixels = cast_read, // broker fb → cast-send
+    .send_audio = cast_send,  // broker audio → cast-send
+});
+```
+
+User: `displayc --server localhost:8443 --user alice --fb web1 --cast-to "Living Room TV"`. The broker has a built-in cast sender — no external tools needed.
+
+**Why v1 uses external tool (the user's pattern):**
+
+The user explicitly said "i have an idea of tapping into the framebuffer and using an external tool to send to a chromecast device." This is a **pipe-friendly** pattern:
+- Broker is the source of the stream
+- External tool is the encoder / sender
+- External tool can be replaced (ffmpeg, gstreamer, cast-sender, custom)
+- Broker doesn't need to know about chromecast
+- Unix-style composition
+
+For v1, we provide `bdp-stream` to enable this pattern. For v2, the broker can have a built-in chromecast transport.
+
+**New jail params (T9-T12 expansion):**
+
+- `allow.audio=0|1` (default 0) — opt in to audio
+- `audio.format=opus|pcm|mp3|aac|flac` (default opus) — preferred format
+- `audio.bitrate=64000` (default) — preferred bitrate
+- `audio.sample_rate=48000` (default) — preferred sample rate
+- `audio.channels=2` (default) — 1=mono, 2=stereo
+- `audio.input=0|1` (default 0) — opt in to audio input (mic) — usually disabled for security
+
+**Backwards compat:**
+
+- VMs/jails without `allow.audio` work as before (no audio).
+- BDP clients that don't know about audio message types just ignore them.
+- Audio ACL falls back to `display.acl` if not set.
+- `bdp-stream` is a new tool; old clients use existing RFB / BDP without audio.
+- v2 chromecast transport is purely additive.
+
+**Test strategy:**
+
+- T57: BDP audio message types round-trip; audio frames delivered; sync works
+- T58: audio_resource kernel module; ACL enforced; per-stream stats
+- T59: audio routing; mixer; per-stream volume
+- T60: bdp-stream outputs valid matroska; pipes to ffmpeg successfully
+- T60: end-to-end: `bdp-stream | ffmpeg | cast-sender` → chromecast plays VM display + audio
+- T61 (v2): chromecast transport — `displayc --cast-to "Living Room TV"` plays VM
+
+**Mermaid diagram (audio):**
+
+```mermaid
+graph TB
+    subgraph SOURCES["Audio sources"]
+        BHYVE_A[bhyve: AC97/HDA emulated]
+        JAIL_A[jail: /dev/dsp]
+        DIRECT_A[direct stream<br/>media player]
+    end
+
+    subgraph BROKER["displayd"]
+        AUDIO_RES[audio_resource<br/>kernel module]
+        ACL[ACL Resolver<br/>display.audio.acl]
+        ROUTER[Audio Router / Mixer]
+        STATS[Audio Stats]
+    end
+
+    subgraph SINKS["Audio sinks"]
+        BDP_C[BDP client<br/>per-session audio]
+        MCAST[Multicast audio<br/>UDP]
+        LOCAL[Local speakers<br/>host /dev/dsp]
+        REC[Recording<br/>file]
+    end
+
+    subgraph EXTERNAL["External tools (v1)"]
+        BDPS[bdp-stream]
+        FFMPEG[ffmpeg / gstreamer]
+        CAST[cast-sender]
+        CHROMECAST[Chromecast device<br/>Living Room TV]
+    end
+
+    BHYVE_A --> AUDIO_RES
+    JAIL_A --> AUDIO_RES
+    DIRECT_A --> AUDIO_RES
+    AUDIO_RES --> ROUTER
+    ACL -.->|enforces| ROUTER
+    ROUTER --> BDP_C
+    ROUTER --> MCAST
+    ROUTER --> LOCAL
+    ROUTER --> REC
+    ROUTER --> BDPS
+    BDPS -->|pipe| FFMPEG
+    FFMPEG --> CAST
+    CAST --> CHROMECAST
+
+    STATS -.-> AUDIO_RES
+```
+
+**Tasks added (T57-T61):**
+
+See the TODOs section.
+
+**Relation to other tasks:**
+
+- T8 (console) — extended to support audio alongside video (kbd/ptr focus + audio focus)
+- T9-T12 (jail fbuf) — extended with `allow.audio`, `audio.*` params
+- T13 (bhyve wire) — extended to expose emulated audio devices
+- T25-T33 (transport security) — TLS already covers audio streams (same channel)
+- T38 (broker) — extended to handle audio streams
+- T39 (BDP) — extended with 8 new audio message types
+- T40 (ACL) — extended with `display.audio.acl`
+- T42 (bridge) — extended to fan out audio alongside video (sync via PTS)
+- T44 (libdisplay) — extended C API with audio functions
+- T45 (displayc) — extended CLI with `--audio`, `--no-audio` flags
+- T48 (multicast) — extended to support audio channels
+- T49 (stats) — audio counters, gauges, histograms
+- T50 (diagnostics) — audio trace events, DTrace probes
+- T51 (BDP stats/health/debug) — audio in STATS_REQ filter
+
+**TDD additions for audio:**
+
+- T57: BDP audio message types round-trip; audio frames delivered; sync works
+- T58: audio_resource kernel module; ACL enforced; per-stream stats
+- T59: audio routing; mixer; per-stream volume
+- T60: bdp-stream outputs valid matroska; pipes to ffmpeg successfully
+- T60: end-to-end: `bdp-stream | ffmpeg | cast-sender` → chromecast plays VM display + audio
+
+**Documentation updates (T17, T47):**
+
+- `displayd(8)`: "Audio is supported. See `display.audio.acl` for ACL."
+- `display-enduser(7)`: "How to cast to chromecast: `bdp-stream | ffmpeg | cast-sender`. See `bdp-stream(1)`."
+- `bdp-stream(1)` (new): "Pipe BDP video+audio streams to external tools."
+- `display-transport-security(7)`: "Audio is encrypted via the same TLS connection as video."
+- `policy-quickstart(7)`: "For audio, set `display.audio.acl=...` per jail."
+- `bhyve(8)`: "bhyve emulates AC97/HDA audio. To capture, use the broker or a bhyve audio ioctl."
+- `jail.conf(5)`: "To enable audio in a jail, set `allow.audio=1` and `audio.format=opus`."
+
+---
+
+### Cast tool design considerations (no implementation — added per user clarification)
+
+The user clarified: *"we aren't going to implement a chromecast broadcasting tool, but we would have to think about what one of those tools would look like and what we need to send to it, would we need to get information back? like resolution of the device the chromecast is attached to?"*
+
+**We are NOT implementing a chromecast broadcasting tool in v1.** T61 is removed/relabeled as a v2 follow-on. However, we need to **design the broker and BDP protocol with hooks** for a future cast tool. This section captures the design considerations — the "what would one look like" — so a future engineer can implement it without re-architecting.
+
+**What a chromecast broadcasting tool needs to do (conceptually):**
+
+A cast tool sits between the broker and the chromecast:
+1. **Receives** the BDP stream (video + audio) from the broker (via `bdp-stream` output)
+2. **Queries** the chromecast for its capabilities (resolution, codecs, etc.)
+3. **Transcodes** the BDP stream to chromecast-supported format (H.264 + AAC typically)
+4. **Sends** the transcoded stream to the chromecast
+5. **Receives** chromecast state updates (playback state, volume, errors)
+6. **Surfaces** the state back to the BDP client (so the user knows "buffering" or "chromecast disconnected")
+
+**What we need to send to the cast tool (input):**
+
+Same as the `bdp-stream` output — video + audio streams with PTS, plus metadata (resource_id, fb name, etc.).
+
+**What we need to get back from the chromecast (the user's question — yes, we need info back):**
+
+| Info | Source | Example | Purpose |
+|---|---|---|---|
+| **display_resolution** | EDID via HDMI / Cast protocol | 1920×1080, 3840×2160 | Transcode target resolution |
+| **display_refresh_rate** | EDID / Cast protocol | 60Hz, 120Hz | Frame rate matching |
+| **display_hdr_capable** | EDID / Cast protocol | HDR10, Dolby Vision, HLG | Codec selection |
+| **display_aspect_ratio** | EDID | 16:9, 21:9, 4:3 | Compositing |
+| **supported_video_codecs** | Cast protocol (device caps) | H.264, VP8, VP9, AV1 | Codec selection |
+| **supported_audio_codecs** | Cast protocol (device caps) | AAC, MP3, Opus, PCM | Codec selection |
+| **max_bitrate** | Cast protocol (device caps) | 50 Mbps | Bandwidth capping |
+| **current_volume** | Cast protocol (media status) | 0-100% | UI display |
+| **muted** | Cast protocol (media status) | true/false | UI display |
+| **current_state** | Cast protocol (media status) | PLAYING / PAUSED / BUFFERING / IDLE / ERROR | UI display |
+| **current_app** | Cast protocol (receiver status) | "Default Media Receiver" / "Netflix" | UI display |
+| **transport_url** | Cast protocol (media status) | http://192.168.1.10:8080/stream.m3u8 | Diagnostics |
+| **buffer_level_ms** | Cast protocol (media status) | 5000 ms | Diagnostics |
+| **latency_ms** | Cast protocol (heartbeat) | 50 ms | Diagnostics |
+| **error** | Cast protocol (status) | "CODEC_UNSUPPORTED" / "NETWORK_ERROR" | UI display + retry |
+| **network_info** | Cast protocol | IP, WiFi/Ethernet, signal strength | Diagnostics |
+| **device_name** | mDNS / Cast protocol | "Living Room TV" | UI display |
+| **device_model** | Cast protocol | "Chromecast Ultra" / "Nest Hub Max" | UI display |
+
+**How the cast tool gets this info:**
+
+- **mDNS discovery** — `_googlecast._tcp.local.` service discovery (chromecast advertises itself)
+- **Cast protocol** — protobuf over WebSocket (TLS) to chromecast's REST API
+- **EDID over HDMI** — chromecast reads the connected display's EDID to know its capabilities (resolution, refresh rate, HDR)
+- **Receiver/media status** — Cast protocol exposes the current playback state
+
+**How the cast tool reports this back to the broker / BDP client (the user's question):**
+
+**Yes, we need to get information back.** Two design options:
+
+**Option A: Surface via the broker.** The cast tool registers with the broker ("I'm a cast adapter for fb web1") and reports device info via a new BDP control channel. The broker makes this available to BDP clients via:
+- New BDP message types: `DEVICE_INFO_REQ` / `DEVICE_INFO_REPLY` (T62, design only / v2)
+- Or via STATS_REQ filter (T51, design extension)
+- The BDP client can then show "Chromecast: 4K HDR TV, playing, volume 50%"
+
+**Option B: Out-of-band control channel.** The cast tool exposes a separate HTTP/WebSocket endpoint for the BDP client to query. The BDP client can show device info without going through the broker.
+
+**For v1, we provide Option A's design hooks (T62).** The broker can be queried for device info, but the actual chromecast query is in a future tool. The design accommodates both options.
+
+**Why this matters for v1:**
+
+Even though we're not building a cast tool in v1, the **broker and BDP protocol** should be designed so that a future cast tool:
+- Can register itself with the broker ("I'm a cast adapter for fb web1")
+- Can report device info back to the broker
+- Can be queried by BDP clients
+- Can surface chromecast state in the BDP UI
+
+This is a **forward-looking design** that doesn't add complexity to v1 but enables v2.
+
+**Concrete example (the user's chromecast case):**
+
+```
+1. User starts the VM (web1)
+2. User starts the broker (displayd)
+3. User starts the cast tool (future v2): cast-tool --server localhost:8443 --user alice --fb web1 --cast-to "Living Room TV"
+4. cast-tool connects to broker, authenticates as alice, attaches to web1 (video + audio)
+5. cast-tool mDNS discovers "Living Room TV" on the network
+6. cast-tool queries chromecast: GET /device/info → display_resolution=4K, hdr=HDR10
+7. cast-tool queries chromecast: GET /supported codecs → H.264, VP9, AAC
+8. cast-tool tells broker: "I want 4K H.264 video + AAC audio for web1"
+9. broker transcodes (or bdp-stream + ffmpeg do it externally)
+10. cast-tool streams to chromecast via Cast protocol
+11. chromecast displays on TV
+12. cast-tool receives media status updates: PLAYING, volume=50, etc.
+13. cast-tool reports back to broker: "chromecast state: PLAYING, vol=50, hdr=HDR10"
+14. broker makes this available to BDP clients via DEVICE_INFO (v2)
+15. BDP client (displayc) shows: "Casting to Living Room TV: 4K HDR, playing, vol 50%"
+```
+
+**Key design questions for a future cast tool (not for v1, but documented):**
+
+1. **Who does the transcoding?** Options:
+   - Broker transcodes (CPU load on broker, low latency)
+   - bdp-stream + external ffmpeg (flexible, moderate latency)
+   - Cast tool transcodes (cast tool is the encoder, broker just relays)
+   - For v1, external ffmpeg is the recommended path.
+
+2. **Where does device state live?**
+   - In the cast tool (out-of-band)
+   - In the broker (via DEVICE_INFO protocol)
+   - In the BDP client (via DEVICE_INFO)
+   - For v1, device state is in the cast tool. For v2, broker and BDP.
+
+3. **How is device state synced?**
+   - Polling (cast tool polls chromecast every N seconds)
+   - Push (chromecast sends status updates via Cast protocol)
+   - For v1, polling. For v2, push via Cast protocol + broker relay.
+
+4. **What if the chromecast disconnects?**
+   - Cast tool reconnects (Cast protocol supports resume)
+   - Broker pauses the stream (BDP PAUSE message to client)
+   - BDP client sees "casting interrupted" and can retry
+   - For v1, behavior is "cast tool's problem". For v2, broker-mediated.
+
+5. **What about other cast-like devices?** (Apple TV, Roku, Fire TV, smart TVs with built-in cast)
+   - Each has its own protocol (AirPlay, DIAL, Miracast, vendor-specific)
+   - The "cast tool" pattern applies to all: a small tool that speaks the device protocol and consumes BDP
+   - For v1, design accommodates this. For v2, individual cast tools for each ecosystem.
+
+**What we need to send to a cast tool (input contract):**
+
+A future cast tool consumes:
+- **Stream**: video frames (with PTS, resolution, encoding) + audio frames (with PTS, format, sample rate, channels)
+- **Metadata**: resource_id, fb name, fb type (VM/jail), kbd/ptr capability
+- **ACL context**: who is the user (alice/bob/root), what they can do
+
+This is exactly what `bdp-stream` outputs today (T60). So the cast tool could be:
+```
+$ bdp-stream --server localhost:8443 --user alice --fb web1 --output-format pipe | \
+  cast-tool --device "Living Room TV" --user alice
+```
+
+**What we get back from a cast tool (output contract, v2):**
+
+A future cast tool reports:
+- **Device info** (one-shot): resolution, codecs, capabilities
+- **Device state** (streaming): current_state, volume, buffer_level, error
+
+The broker exposes this via DEVICE_INFO protocol (T62, design only).
+
+**T61 status (relabeled):**
+
+T61 is **removed from v1** and relabeled as "Design only — v2 follow-on". The cast transport is not implemented in v1. The bdp-stream tool (T60) provides the plumbing for a future cast tool to consume.
+
+**New T62 (design only, v2):**
+
+`T62: BDP device info protocol (design only — for future cast tool)`
+
+- Document the BDP message types needed:
+  - `0x38 DEVICE_INFO_REQ` (C→S) — request device info for a resource/session
+  - `0x39 DEVICE_INFO_REPLY` (S→C) — resolution, codecs, capabilities, model
+  - `0x3A DEVICE_STATE_PUSH` (S→C) — periodic state updates (state, volume, error, buffer_level)
+- Document the broker's `device_adapter` abstraction:
+  - A registered adapter that knows how to query a specific device type
+  - The cast tool registers as a `cast` adapter
+  - The broker proxies queries from BDP clients to the adapter
+- Document the bdp-stream's `device_consumer` role:
+  - `bdp-stream` outputs a stream + accepts a sidecar channel for device info
+  - The cast tool uses both
+- **NO IMPLEMENTATION in v1.** Documented for v2 / follow-on.
+
+**Implications for v1 tasks:**
+
+- T60 (bdp-stream) — extended with notes on "what a cast tool would need" (this section serves as the design)
+- T38 (broker) — no change (the design accommodates future cast tool)
+- T39 (BDP protocol) — no change (the protocol can be extended in v2)
+- T40 (ACL) — `display.audio.acl` for audio, similar concept for device control (v2)
+- T49 (stats) — no change (stats can include device info in v2)
+- T51 (BDP stats/health/debug) — no change (DEVICE_INFO can be added as a filter)
+
+**F1-F4 updates:**
+
+- F1 does NOT check T61 (not in v1)
+- F1 does NOT check T62 (design only)
+- F1 still checks T60 (bdp-stream works, pipes to ffmpeg)
+
+**Documentation updates (T17, T47):**
+
+- `display-enduser(7)`: "To cast to a chromecast or similar device, you need a cast tool that consumes `bdp-stream` output. We don't ship one in v1, but see the 'Cast tool design considerations' section for what one would look like."
+- `bdp-stream(1)`: "Outputs BDP video+audio streams. Can be piped to ffmpeg, gstreamer, or a custom cast tool that transcodes for the target device and queries its capabilities."
+- `display-transport-security(7)`: "Future cast tools will use the same TLS layer."
+
+**Why this design is good (even without implementing the cast tool):**
+
+- The broker and BDP protocol are **forward-compatible** with a future cast tool.
+- The `bdp-stream` tool provides the **plumbing** for a cast tool to consume.
+- The design considerations are **documented** are so a future engineer can implement the cast tool.
+- The **operator's choice** is preserved: use ffmpeg + cast-sender, or a custom tool, or wait for v2's built-in support.
+
+---
+
+### Combining cast methods (multi-protocol cast — design only)
+
+The user asked: *"how can we combine the two (or more standard/popular) casting methods"*. The answer is: **don't combine the wire protocols — combine the *plumbing* in front of them**. The same `bdp-stream` byte stream can drive any cast target via small per-protocol adapter tools. Our v1 ships the unified front-end; the per-protocol back-ends are v2/follow-on.
+
+**Why not merge the protocols themselves:**
+
+- Google Cast (Chromecast) is TLS+WebSocket+JSON-protobuf (proprietary, BSD-licensed library `libcastv2` or reverse-engineered `pychromecast`).
+- Apple AirPlay is RTSP+reverse-HTTP+RTP/RTCP+FairPlay+ALAC/AAC-ELD (proprietary, requires Apple-issued FairPlay certs for HD content).
+- Miracast is RTSP+RTP+WFD-P2P (Wi-Fi Direct) on port 7236.
+- Roku ECP is plain HTTP with custom headers on port 8060.
+- Amazon Fire TV is ADB (Android Debug Bridge) for control + a media session.
+- DLNA is UPnP HTTP + HLS/DASH.
+
+They are radically different on the wire. Merging them in one daemon means implementing 4+ full state machines, 4+ key/cert stores, 4+ discovery stacks, and being legally encumbered (FairPlay). A unified cast layer is not realistic in v1, and the v2 cast tools don't need it to be unified — they need a **unified source** they all consume from.
+
+**The unified source: `bdp-stream` + BDP device-info protocol (T60 + T62-design)**
+
+```
+                          +------------------+
+                          |  bdp-stream (T60)|  <-- single source of pixels+audio+metadata
+                          |  unix pipe or TCP|
+                          +--------+---------+
+                                   |
+        +-------------+------------+--------------+--------------+-------------+
+        |             |            |              |              |             |
+   cast-chromecast  cast-airplay  cast-miracast  cast-roku    cast-firetv   cast-dlna
+        (v2)           (v2)         (v2)         (v2)          (v2)          (v2)
+        |             |            |              |              |             |
+   +----v----+   +----v----+   +---v----+    +----v----+    +----v----+    +---v----+
+   | mDNS    |   | mDNS    |   | Wi-Fi  |    | mDNS    |    | ADB     |    | UPnP   |
+   | _google-|   | _airplay|   | Direct |    | _roku.  |    | tcp:5555|    | UDP    |
+   | cast    |   | _raop   |   | P2P    |    | _tcp    |    | discovery|  | 1900   |
+   +---------+   +---------+   +--------+    +---------+    +----------+   +--------+
+```
+
+Each v2 cast tool is a thin (~2000-5000 LoC) adapter. They all share:
+- The BDP consumer (libdisplay) — already in v1 (T44)
+- The `bdp-stream` byte format — already in v1 (T60)
+- The device-info sidecar channel — designed in v1 (T62), implemented in v2
+- The HLS/RTSP/HTTP endpoint that the broker exposes for them to fetch — designed in v1 (T63/T64, design only), implemented when needed
+
+**What we need to expose in v1 broker so any cast tool can drive it:**
+
+1. **HLS / M3U8 endpoint** (T63-design): chromecast loads HLS URLs natively; AirPlay 2 accepts HLS; Miracast gateways can transcode from HLS. The broker exposes `http://localhost:8088/fbuf/web1/playlist.m3u8` with a refresh and a `live.m3u8` variant. Chromecast fetches this URL.
+
+2. **RTSP endpoint** (T64-design): AirPlay and Miracast both speak RTSP. The broker exposes `rtsp://localhost:8554/fbuf/web1` (anonymous, no auth, bind localhost). Cast tools do their own protocol-specific auth on top.
+
+3. **HTTP live image endpoint** (T63-design): for Roku and Fire TV (which poll a still-image URL), broker exposes `http://localhost:8088/fbuf/web1/frame.jpg` returning the latest frame as JPEG.
+
+4. **mDNS advertiser** (T65-design, future BT-coupled): the broker advertises our *display surfaces* as `_bhyve-display._tcp.local` (or `_freebsd-display._tcp.local` post-rename) so:
+   - The cast tool can find them without out-of-band config
+   - Apple TV's "Screen Mirroring" picker lists our VMs/jails (when we ship an AirPlay *receiver* in v3+)
+   - Smart TVs in the room can be discovered by hostname instead of IP
+
+5. **Device-info sidecar** (T62-design): the cast tool queries the broker for the target display surface's capabilities (resolution, max FPS, audio format, EDID-derived info from the VM's emulated GPU). The broker returns the EDID info from the emulated GPU (already available via `pci_fbuf`) + the audio capabilities from `audio_resource.ko`.
+
+**Why this design is the right shape:**
+
+- v1 stays small: just the broker, BDP, bdp-stream, and the HLS/RTSP/HTTP/mDNS endpoints as *designed seams* (not necessarily implemented in v1, but the *plumbing* is reserved in the config and the man pages).
+- v2 cast tools are independent packages. They can be in-tree or in `ports/`. The dependency on `libdisplay` is the only thing tying them to FreeBSD core.
+- The operator can mix-and-match: cast one VM to a chromecast and another to an Apple TV simultaneously.
+- The same plumbing works for headless VMs (no GPU, just `gpu_stub` → HLS → chromecast) and full-passthrough GPUs (real EDID → accurate capabilities).
+
+**Cast-tools-defined-in-future (T62-T64 design only — not v1):**
+
+| Task | Cast target | Wire protocol | Auth | Notes |
+|---|---|---|---|---|
+| T62-design | (broker side) | BDP device-info | BDP mTLS | Returns EDID, audio caps, GPU vendor |
+| T63-design | (broker side) | HTTP+HLS+JPEG | mTLS (T38) | Chromecast/Roku/FireTV consumer |
+| T64-design | (broker side) | RTSP+SDP | anon (localhost) | AirPlay/Miracast consumer |
+| T65-future | cast-chromecast | CASTV2 / mDNS `_googlecast._tcp` | TLS to chromecast | H.264+AAC+Opus |
+| T66-future | cast-airplay | RTSP+AirPlay2+HLS / mDNS `_airplay._tcp` | FairPlay for HD | AAC-ELD+ALAC+H.264 |
+| T67-future | cast-miracast | RTSP+WFD / Wi-Fi Direct | PIN | H.264+PCM |
+| T68-future | cast-roku | ECP HTTP | none (LAN only) | JPG+HLS |
+| T69-future | cast-firetv | ADB+media session | pairing | HLS+H.264+AAC |
+| T70-future | cast-dlna | UPnP+HLS | none | DLNA-compliant TVs |
+
+**Cross-cast common abstractions (in v1 libdisplay, future use in v2 cast tools):**
+
+```c
+/* libdisplay cast integration seam (DESIGN ONLY in v1, no impl) */
+struct display_cast_target {
+    const char      *name;           /* "Living Room TV" */
+    const char      *model;          /* "Chromecast Ultra" */
+    uint32_t         width, height;  /* from EDID */
+    uint8_t          refresh_hz;     /* 60, 120 */
+    bool             hdr;            /* HDR10, Dolby Vision, HLG */
+    uint32_t         max_bitrate;    /* bps */
+    uint32_t         video_codecs;   /* bitmask of BDP_VIDEO_CODEC_* */
+    uint32_t         audio_codecs;   /* bitmask of BDP_AUDIO_CODEC_* */
+    uint8_t          current_volume; /* 0-100 */
+    bool             muted;
+    uint8_t          state;          /* PLAYING/PAUSED/BUFFERING/IDLE/ERROR */
+};
+
+/* T62 will define a register/unregister/query API; v1 has the header
+ * struct, no implementation, no symbol exports. */
+```
+
+**The user-facing story (v1, in `display-enduser(7)` and `display-cast(7)`):**
+
+> To cast a VM or jail's display to a TV, video wall, or set-top box, use a cast tool that consumes `bdp-stream` output. We do not ship a cast tool in v1, but the broker's HLS, RTSP, and HTTP endpoints are designed to be consumed by third-party cast tools (`cast-chromecast`, `cast-airplay`, `cast-miracast`, `cast-roku`, `cast-firetv`). For ad-hoc casting, you can pipe `bdp-stream` to `ffmpeg` and serve the output via any HTTP server.
+
+**F1-F4 updates:**
+
+- F1 does NOT check T62, T63, T64 (design only)
+- F1 does NOT check T65-T70 (cast tools, future)
+- F1 DOES check that the broker's `cast.*` config namespace exists (so the design seam is present, even if the cast tools are not)
+- F2 (Code Quality) does NOT find cast protocol code in v1
+- F4 (Scope Fidelity) flags any v1 PR that includes cast protocol code as scope creep
+
+---
+
+### Bluetooth considerations (future — design only)
+
+The user clarified: *"a bluetooth device is all in... typically... so think about that... i just saw something about allocating 10% of a bluetooth device... thats not going to really work at all"*. And earlier: *"when bluetooth becomes something we want to do, we need tunables, and to give the vm/jail/resource access to those devices, by default they are not included, just like this displayd, we have to tell the resource to use it"*.
+
+This is the **displayd pattern restated for BT**, but with the **correct resource model**:
+
+> **Deny-default. Explicit opt-in. Host policy always wins. The resource (BT adapter) does not just appear inside the VM/jail — the operator must *tell the resource* to be used. And the resource is a single radio — you allocate it as a whole, then budget its *use* (slots, bandwidth, time, roles) — not by carving it into percentages.**
+
+**Why "10% of a Bluetooth device" is the wrong model:**
+
+A Bluetooth adapter is a single physical radio chip with a single antenna (or two, with MIMO on BT 5.x). It has no "10% of itself" to give. You cannot slice an antenna the way you can slice a GPU's CUDA cores. The right model is:
+
+- **GPU** = a pool of *divisible compute resources* (cores, memory, shaders, ports). Percentages are natural: "give this VM 25% of the GPU's CUDA cores."
+- **BT adapter** = a *single shared radio*. You don't divide the radio; you **time-share** it, **budget** it, **slot** it, and **role-limit** it. "Give this jail 3 of 7 BT classic connection slots, 100 kbps of bandwidth, and 'slave only' role" — that is the right shape.
+
+The same lesson applies more broadly:
+- **GPU**: cores ÷ %, memory ÷ %, ports ÷ N (all divisible) → percent model
+- **Audio**: sample rate (fixed), channels (2, 6, 8), bit depth (16/24) → channels/depth model
+- **BT**: connection slots (7 classic, 255 LE), bandwidth (3 Mbps EDR), roles (master/slave/advertiser/scanner), peers (per-BD_ADDR whitelist) → slot/budget/role/peer model
+- **Framebuffer**: width × height × bpp × refresh — all divisible, so count + size model
+
+The "10% of an antenna" mistake was applying the GPU's percent model to BT. The corrected model: **the radio is allocated as a whole, then its *capacity* is split via slot/budget/role/peer budgets.**
+
+**The corrected pattern (T65-design):**
+
+| Concern | v1 pattern (displayd) | v2 pattern (bt_resource, design only) |
+|---|---|---|
+| **Deny default** | `allow.fbuf=0` (T10), `allow.gpu=0` (T20), `allow.display=0` (broker) | `allow.bt=0` (planned) |
+| **Opt-in jail param** | `allow.fbuf=1`, `allow.gpu=1`, `allow.display=1` | `allow.bt=1` (planned) |
+| **Resource handle** | `fbuf.name=web1`, `gpu.adapter=nvidia0` | `bt.adapter=ubt0` (planned) |
+| **Resource model** | `gpu.share_percent=25` (divisible: cores/mem/ports) | **`bt.max_slaves_classic=3` of 7** (slot), **`bt.max_le=10` of 255** (slot), **`bt.max_bandwidth_bps=100000`** (budget), **`bt.role=slave`** (role), **`bt.peer_whitelist="aa:bb:..."`** (peer) |
+| **Override escape hatch** | `gpu.allow_no_gpu=1` (T20) | `bt.allow_no_adapter=1` (planned) |
+| **No device nodes in jail** | "don't create the nodes in dev" (T20) | "no `/dev/bluetooth*` in jails" (planned) |
+| **Resource mediation kernel module** | `fbuf_jail.ko` (T12), `gpu_resource.ko` (T21) | `bt_resource.ko` (T69, future) |
+| **Audio mediation module** | `audio_resource.ko` (T58) | (same module also covers A2DP) |
+| **Host policy sysctls** | `security.policy.fbuf.deny_default=1`, `security.policy.gpu.deny_default=1` | `security.policy.bt.deny_default=1` (planned) |
+| **Host share cap** | `hw.gpu.0.share.percent_max=50` (divisible) | **`hw.bt.0.limits.max_slaves_classic=7`** (hard spec limit), **`hw.bt.0.limits.max_le=255`**, **`hw.bt.0.limits.max_bandwidth_bps=3000000`**, **`hw.bt.0.limits.max_inquiry_per_min=6`**, **`hw.bt.0.limits.max_pair_per_hour=10`**, **`hw.bt.0.limits.max_advertising_sets=8`**, **`hw.bt.0.limits.max_acl_entries=64`** (per-jail peer whitelist size) |
+| **Per-tenant cap** | `security.gpu.per_jail_max=25` | Same (planned, per-tenant caps mirror the host limits) |
+| **Stricter-wins precedence** | `security.policy.*` always wins | Same (planned) |
+| **Preflight hook** | T22 framework, 20 checks | T22 framework, future BT preflight (planned) |
+| **ACL** | `display.acl` (T40), per-fb per-user | Same (T40), future `device ... type bt-hid allow user alice` |
+| **Audit log** | T43, "alice attached to fb web1" | T43, future "alice paired BT device to jail web1" |
+| **DTrace probes** | 25+ probes (T50) | Mirrored: `bt-resource:pair-start`, etc. (planned) |
+| **Stats** | T49, per-fb per-transport | T49, future per-bt-adapter (slots used, bandwidth, peers connected, pairs/day) |
+| **Backwards compat** | Old names work, deprecated symlinks | Same convention (planned) |
+
+**What the user gets in v1 even though we don't ship BT:**
+
+- Documentation in `display-enduser(7)` and `display-resource(9)` describing the BT support roadmap, with the "deny-default, tell the resource, allocate the whole radio then budget its use" pattern explained
+- Architectural seam placeholders in the `display_backend` and `audio_backend` headers (commented `/* Reserved for future BT support */`)
+- A `security.bt.*` and `hw.bt.*` sysctl namespace is **reserved** in the OID allocation table (T35) but contains **no live sysctls** in v1 (returns `ENOENT` if queried)
+- The Tunables Reference has a "Future: bluetooth" section listing the planned sysctls and jail params, and **a callout noting that BT uses slot/budget/role/peer model, not percent model**
+- `gpu_resource.ko` and `audio_resource.ko` are the implementation template; their pattern is referenced by future `bt_resource.ko`, **with the explicit caveat that the model is different (slot/budget/role/peer vs. percent)**
+- F1-F4 do **not** check any BT code (none exists in v1)
+
+**The architectural seams we're leaving (DESIGN ONLY, no impl):**
+
+1. **`bt_resource.ko` — mediates BT H/W access across VMs/jails (T65-design)**
+   - Mirrors `gpu_resource.ko` (T21) and `audio_resource.ko` (T58) **on the sysctl/ACL/audit/stats axes**, but uses a **different resource model** (slot/budget/role/peer, not percent)
+   - **Jail params** (planned, all default to deny/no-access):
+     - `allow.bt=0|1` — default **0**. When 0, jail sees no BT H/W at all (no /dev nodes, no enumeration, no SDP, nothing). When 1, jail gets a mediated view per the other params.
+     - `bt.adapter=ubt0|hci0|...` — which adapter to expose. Must match an existing adapter or jail start fails (with override `bt.allow_no_adapter=1` to bypass and start anyway, same as `gpu.allow_no_gpu=1`).
+     - `bt.max_slaves_classic=0..7` — default **0**. Max BT classic slave connections this jail may hold (of 7 spec max).
+     - `bt.max_le=0..255` — default **0**. Max LE connections this jail may hold (of 255 spec max).
+     - `bt.max_bandwidth_bps=0..3000000` — default **0** (= no traffic). Aggregate air-time budget across all this jail's connections.
+     - `bt.max_inquiry_per_min=0..6` — default **0** (= no scans). Inquiry scan rate limit (DoS protection).
+     - `bt.max_pair_per_hour=0..N` — default **0** (= no pairing). Pairing rate limit (DoS protection).
+     - `bt.max_advertising_sets=0..8` — default **0** (= no advertising). LE advertising set count.
+     - `bt.max_acl_entries=0..64` — default **0** (= no whitelist). Per-jail peer whitelist size (BD_ADDR list).
+     - `bt.peer_whitelist="aa:bb:cc:dd:ee:ff,11:22:33:44:55:66"` — default **empty**. BD_ADDRs this jail may talk to. Empty = no peers (all rejected).
+     - `bt.role=slave|master|advertiser|scanner|any` — default **slave**. What BT role this jail may take. `slave` is safest (no scatternet surprises).
+     - `bt.classic=0|1` — default **0**. Whether this jail may use BT classic at all.
+     - `bt.le=0|1` — default **0**. Whether this jail may use BT LE at all.
+   - **Host policy sysctls (planned, all default to deny/strict)**:
+     - `security.bt.policy.deny_default=1` — global deny (mirrors `security.policy.fbuf.deny_default=1`)
+     - `security.bt.policy.override_deny=0` — override-deny is OFF by default
+     - `security.bt.resource.enumerate=0` — default **0**: do NOT enumerate paired BT devices into jail's view (privacy)
+     - `security.bt.audit.pair=1` — log every pair event to audit (T43)
+     - `security.bt.audit.unpair=1` — log every unpair event to audit
+     - `security.bt.audit.connect=1` — log every connect event
+     - `security.bt.audit.disconnect=1` — log every disconnect event
+   - **Per-adapter sysctls (planned)**:
+     - `hw.bt.0.limits.max_slaves_classic=7` — spec max (operator can lower, never raise)
+     - `hw.bt.0.limits.max_le=255` — spec max
+     - `hw.bt.0.limits.max_bandwidth_bps=3000000` — EDR cap
+     - `hw.bt.0.limits.max_inquiry_per_min=6` — host inquiry cap
+     - `hw.bt.0.limits.max_pair_per_hour=10` — host pair cap (DoS)
+     - `hw.bt.0.limits.max_advertising_sets=8` — LE advertiser sets
+     - `hw.bt.0.limits.max_acl_entries=64` — per-jail peer whitelist size
+     - `hw.bt.0.pair.allow=1` — host-level pair toggle (default 1; 0 disables pairing system-wide)
+     - `hw.bt.0.pair.persist=/var/db/bluetooth` — link-key store path
+     - `hw.bt.0.pair.policy=secure-simple` — SSP policy: `secure-simple` (default, ECDH P-256) | `just-works` | `numeric-comparison` | `passkey` | `out-of-band`
+     - `hw.bt.0.privacy.le_privacy=1` — LE privacy (random resolvable address rotation, default 1)
+     - `hw.bt.0.legacy_pairing=0` — disallow legacy (pre-SSP) pairing, default 0 (only SSP)
+     - `hw.bt.0.classic_enabled=1` — host-level BT classic toggle (default 1)
+     - `hw.bt.0.le_enabled=1` — host-level LE toggle (default 1)
+   - **Pattern: deny-default, override-explicit, sysctl-stricter-wins**
+   - No `/dev/bluetooth*` nodes in jails (mirrors the "no `/dev/dri` in jails" rule)
+   - **v1: no kernel module, no jail params, no sysctls. Just a documentation comment in the design notes that the seam is reserved. The OID namespace `security.bt.*` and `hw.bt.*` is reserved in T35's OID table but contains no live sysctls in v1 (returns `ENOENT` if queried).**
+
+2. **`bt_hid` display_backend (T66-design)**
+   - A new `display_backend` registered as `BT_HID`
+   - Plugs a paired BT keyboard / mouse / touch / pen into the same `kbdmouse_consume()` pipeline as USB HID
+   - Pairing: `ng_bluetooth` + `sdpd` + `hcsecd` already handle this
+   - HOGP (HID over GATT) for LE; classic HID for BT classic keyboards
+   - The `kbdmouse` input pipeline (T14) does not need to change — only the backend that feeds it
+   - **v1: design sketch in `display_backend.h` comments, no code.**
+
+3. **`a2dp` and `le_audio` audio_backends (T67-design)**
+   - Plug into the audio pipeline (T57) the same way AC97 / HDA do
+   - A2DP source: VM/jail pipes audio out to a BT headset/speaker
+   - A2DP sink: VM/jail captures audio from a BT mic/headset
+   - LE Audio / Auracast: same multicast-UDP-style pattern as T48, but using `iso` HCI channels
+   - LC3 codec support (the mandatory BT 5.2 codec, royalty-free)
+   - **v1: design sketch in `audio_backend.h` comments, no code.**
+
+4. **`bt_resource` security and pairing integration (T68-design)**
+   - Pairing events emit DTrace USDT probes (`bt-resource:pair-start`, `bt-resource:pair-complete`, `bt-resource:auth-fail`) — mirrors `gpu-resource:*`
+   - Per-device ACL in `display.acl` (T40) — `device "Living Room BT Keyboard" type bt-hid allow user alice`
+   - Audit log integration (T43) — "alice paired BT device to jail web1"
+   - Stats per `bt.adapter` (T49) — pairs today, active slaves, bandwidth, ACL-rejected connections
+   - **v1: design notes in `display-broker(8)`, no code.**
+
+5. **Host passthrough exclusivity — the host MUST NOT touch a jail-owned adapter (T65-design supplement)**
+
+   The user clarified: *"with a bluetooth device, the host system can only act as a passthrough, we need to make sure nothing else on the host tries to use said device. so we need to block it off"*. This is a separate concern from "which jail gets the adapter" — it's about the **adapter's exclusive ownership by the jail/VM and host detach lifecycle**.
+
+   **The model:**
+
+   An adapter is in one of three states at any moment:
+
+   - `host` (default) — the host owns the adapter. `ng_bluetooth` is attached. `hcsecd(8)`, `sdpd(8)`, `bluetooth(1)`, `hccontrol(8)`, `l2ping(8)`, and any host userspace can open the device. The host's `kbdmouse` and `audio` pipelines can use paired BT HID / A2DP devices that ride on this adapter.
+   - `jail:<jid>` — the named jail (or VM) owns the adapter. The host's BT stack is **detached** and the host's `/dev/bluetooth*` node is hidden. Host userspace cannot open the device. Host's `ng_bluetooth` node for this HCI is severed. Host's `hcsecd` link-key store is **not** consulted (jail has its own store, or shares a configured one).
+   - `free` — unbound. The adapter is not attached to the host and not attached to any jail. The kernel will not bring up the HCI driver until something claims it. This is the post-detach / pre-bind state.
+
+   **Binding sysctls (planned, per-adapter, default `host`):**
+
+   ```bash
+   sysctl hw.bt.0.binding=host            # default — host owns it
+   sysctl hw.bt.0.binding=free            # unbound, HCI driver quiesced
+   sysctl hw.bt.0.binding=jail:42         # bound to jail jid=42
+   sysctl hw.bt.0.owner_jid=0             # read-only, 0 = no owner / host
+   sysctl hw.bt.0.detached_at=0           # read-only, epoch seconds, 0 = never
+   sysctl hw.bt.0.detach_reason=""        # read-only, "jail-start" | "manual" | "operator-override" | ""
+   ```
+
+   **Binding transitions:**
+
+   - `host → jail:<jid>`: only allowed if `<jid>` has `allow.bt=1` and `bt.adapter=<name>`. The kernel detaches host BT stack, removes the cdev from the host's `/dev` namespace, severs the `ng_bluetooth` HCI node, flushes pending host connections (refuses if active, unless `bt.force_detach=1`), and reports the new state via DTrace + audit.
+   - `jail:<jid> → host`: only allowed if the jail is stopped (or the jail is forcibly killed, in which case re-attach is mandatory on cleanup). The kernel re-attaches `ng_bluetooth`, recreates the host `/dev/bluetooth*` node, and resumes any host userspace that was waiting.
+   - `host → free`: manual operator action. Useful for service / re-binding without a jail.
+   - `free → host`: manual operator action. Brings the HCI driver back up on the host.
+   - `jail:A → jail:B`: not allowed. The first jail must release first. (Prevents a "tug of war" between jails.)
+
+   **What the host sees when the adapter is `jail:<jid>`:**
+
+   - The `/dev/bluetooth0` (or `ubt0` cdev) is **not** present in the host's `/dev`. `ls /dev/bluetooth*` returns nothing.
+   - `ngctl list` shows no `bt3c`/`ubt` node attached to the HCI.
+   - `hccontrol -n ubt0 inquiry` returns `No such device`.
+   - `sdpd(8)`, if running, will not advertise or browse via this adapter.
+   - `hcsecd(8)` link-key store for this adapter is paused (or moved to the jail's mediated view).
+   - Any host userspace that had the device open gets `ENXIO` on next I/O and the fd is invalidated.
+   - The host's `bluetooth(1)`, `hccontrol(8)`, `l2ping(8)`, `rfcomm_pppd(8)`, `obexapp(1)`, etc. all report the adapter as absent.
+   - **The host's BT keyboard / mouse / headset, if previously paired to this adapter, stops working** (this is the operator's intent — the whole radio went to the jail).
+
+   **What the jail sees:**
+
+   - The jail gets a mediated view of the adapter via `bt_resource.ko` (T65). The cdev is exposed inside the jail as `/dev/bluetooth0` (or whatever), with the same major/minor the host would have seen, but all I/O is gated by the `bt.*` jail params.
+   - The jail's `ng_bluetooth` (or its mediated equivalent) operates the HCI exactly as the host would have.
+   - Pairing, inquiry, ACL, advertising, etc. all use the jail's policies (the `bt.*` jail params from T65-design), not the host's.
+   - The jail's link-key store is its own (default `/var/db/bluetooth` inside the jail, or a host-configured shared store via `bt.pair.persist=...`).
+
+   **Lifecycle integration with jail start/stop:**
+
+   ```
+   jail start (allow.bt=1, bt.adapter=ubt0)
+     │
+     ├─► preflight check: BT_HOST_DETACHED (hw.bt.0.binding == "host" || "free")
+     │
+     ├─► preflight check: BT_ADAPTER_EXISTS
+     │
+     ├─► bind: hw.bt.0.binding: host → jail:<jid>
+     │     │
+     │     ├─► detach host ng_bluetooth from ubt0
+     │     ├─► hide /dev/bluetooth* from host
+     │     ├─► SDT_PROBE(bt-resource, host-detach)
+     │     ├─► audit_log("host detached from ubt0 for jail web1 (jid=42)")
+     │     ├─► DDI_GONE: existing host fds get ENXIO
+     │     │
+     │     └─► expose mediated cdev inside jail
+     │
+     ├─► jail runs, BT stack inside jail operates normally
+     │
+   jail stop (graceful)
+     │
+     ├─► unbind: hw.bt.0.binding: jail:<jid> → host
+     │     │
+     │     ├─► revoke jail's mediated cdev
+     │     ├─► re-attach host ng_bluetooth to ubt0
+     │     ├─► re-create /dev/bluetooth* in host
+     │     ├─► SDT_PROBE(bt-resource, host-attach)
+     │     └─► audit_log("host re-attached to ubt0 after jail web1 stopped")
+     │
+   jail stop (forced, jail killed)
+     │
+     └─► kernel forcibly rebinds to host, same as graceful stop
+   ```
+
+   **Override flag (planned, dangerous):**
+
+   - `bt.force_detach=1` (jail param, default **0**). When 1, the kernel will detach the host even if the host is mid-operation (active connections, pairing, etc.). The host's active connections are dropped without graceful close. The audit log records `detach_reason="operator-override"`. A pre-flight warning is issued (not a hard fail, since the operator asked for it).
+
+   **Pre-flight check (T22 framework extension):**
+
+   | Check ID | Name | Default | Severity |
+   |---|---|---|---|
+   | `BT_HOST_DETACHED` | `hw.bt.0.binding == "host" \|\| "free"` (jail start) | enforced | error |
+   | `BT_HOST_REATTACHABLE` | `hw.bt.0.binding == "jail:<this_jid>"` (jail stop) | enforced | error |
+   | `BT_NO_DOUBLE_BIND` | sum of active jail-owners of this adapter == 1 | enforced | error |
+
+   **DTrace probes (T50 extension):**
+
+   ```
+   bt-resource:host-detach
+     args: char *adapter, int jid
+   bt-resource:host-attach
+     args: char *adapter, int jid, int reason    /* reason: 0=normal, 1=force, 2=jail-killed */
+   bt-resource:bind-jail
+     args: char *adapter, int jid
+   bt-resource:bind-free
+     args: char *adapter
+   bt-resource:bind-rejected
+     args: char *adapter, int jid, int reason    /* reason: enum EBUSY, EACCES, EALREADY, ... */
+   bt-resource:host-active-on-detach
+     args: char *adapter, int active_conns, int active_pairs
+   ```
+
+   **Audit log (T43 extension):**
+
+   ```
+   YYYY-MM-DDTHH:MM:SSZ host detached from ubt0 for jail web1 (jid=42) reason=jail-start
+   YYYY-MM-DDTHH:MM:SSZ host re-attached to ubt0 after jail web1 stopped reason=normal
+   YYYY-MM-DDTHH:MM:SSZ host re-attached to ubt0 after jail web1 killed reason=jail-killed
+   YYYY-MM-DDTHH:MM:SSZ host detach of ubt0 forced despite 3 active connections reason=operator-override operator=root
+   ```
+
+   **Stats (T49 extension, per-adapter):**
+
+   ```c
+   struct bt_host_state_stats {
+       int     current_binding;        /* 0=host, 1=jail, 2=free */
+       int     owner_jid;              /* 0 if host/free */
+       time_t  last_detach_at;         /* epoch seconds, 0 = never */
+       time_t  total_time_in_jail;     /* cumulative seconds bound to any jail */
+       time_t  total_time_in_host;     /* cumulative seconds bound to host */
+       uint64_t detach_count;          /* lifetime detaches */
+       uint64_t forced_detach_count;   /* lifetime forced detaches (operator override) */
+       uint64_t rejected_bind_count;   /* lifetime bind attempts rejected (busy/already) */
+   };
+   ```
+
+   **Mirror this pattern with GPU passthrough (T21 follow-up question, see "Open questions" below):**
+
+   The same exclusive-ownership pattern applies when a GPU is *fully* passed to a VM (not shared at 25% — fully passed at 100%). The host's `nvidia.ko` (or `amdgpu.ko`, or `i915.ko`) must not bind to the device when it's owned by a VM. This is a known pain point in existing GPU passthrough setups (you have to `vfio-pci` the device, blacklist the host driver, etc.). The right model is the same: `hw.gpu.0.binding=host|vm:<id>|free`, with detach on VM start and re-attach on VM stop. **This is a follow-up question for the user, not added to v1 in this turn** — see "Open questions" at the end of this section.
+
+   **What the user gets in v1 even though we don't ship BT:**
+
+   - The `hw.bt.0.binding` / `hw.bt.0.owner_jid` / `hw.bt.0.detached_at` OID names are **reserved** in T35's OID table (returns `ENOENT` if queried in v1).
+   - The `bt.force_detach` jail param is documented in the man page but not implemented in v1.
+   - The T22 framework is generic enough to add `BT_HOST_DETACHED` later without a framework change.
+   - The DTrace probe names are reserved in `bt_resource_provider.h` (header comment in v1) so external tools can compile against them.
+   - The audit log schema is forward-compatible (existing T43 audit fields can carry the new event types).
+   - F1 verifies the OID names are reserved.
+
+   **v1 documentation includes:**
+
+   - `display-enduser(7)` gets a "Planned: bluetooth passthrough" section explaining: "When BT support lands, dedicating a Bluetooth adapter to a jail will *remove* the adapter from the host. The host's BT keyboard, mouse, headset, etc. that ride on this adapter will stop working while the jail is running. This is the intentional model — the whole radio is dedicated. There is no partial-share mode for Bluetooth."
+   - `jail.conf(5)` gets a "Future: bluetooth" section with the deny-default rules and the host-detach callout.
+   - `security(7)` / `bt-security(7)` (future man page) gets the full binding model.
+
+   **Why the host-exclusivity pattern is essential, not optional:**
+
+   The user is right: if the host and the jail both have access to the same BT radio, you get:
+   - **Race conditions** — both stacks try to send HCI commands, frames collide
+   - **Inconsistent state** — the host's link-key store diverges from the jail's
+   - **Privacy leak** — the host can see which devices the jail pairs with (and vice versa)
+   - **Security violation** — the jail's ACL could be bypassed by the host sending HCI commands "on the jail's behalf"
+   - **DoS amplification** — the host can spam scans / pair requests that consume the jail's bandwidth budget
+   - **Audit pollution** — the audit log can't tell which actions came from the host vs the jail
+
+   The whole radio is exclusive. The "share the radio" question only applies *within* the jail's view (slot/budget/role/peer), not between host and jail. Host vs jail is always one-or-the-other.
+
+   **F1-F4 updates:**
+
+   - F1 does NOT check the binding sysctls are live in v1 (they are reserved, not implemented)
+   - F1 DOES verify the OID names `hw.bt.0.binding`, `hw.bt.0.owner_jid`, `hw.bt.0.detached_at`, `hw.bt.0.detach_reason` are reserved in T35's OID table
+    - F1 DOES verify `display-enduser(7)` and `jail.conf(5)` mention the host-detach model
+    - F2 (Code Quality) does NOT find binding code
+    - F4 (Scope Fidelity) flags any v1 PR that adds BT binding code as scope creep
+
+6. **Device-class abstraction — the host negotiates BT security, the jail sees generic devices (T65-design supplement)**
+
+   Answers user message 5 (*"so the host will negotiate the bluetooth connection, passwords / pinds / whatever security, and how do we represent it to the jail? like do we recognize the headphones and give a generic sound device that says headphones?"*) and user message 6 (*"like will the jail know its actually a bluetooth device? should the jail know that its bluetooth?"*).
+
+   **The design rule: by default, the jail does NOT know it's Bluetooth. Raw BT access is an explicit, audited opt-in escape hatch (`bt.raw_access=1`).**
+
+   **The default model — abstracted:**
+
+   ```
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ HOST (the only place that knows "this is Bluetooth")                │
+   │                                                                     │
+   │  bt_resource.ko (T65) — the BT security manager                    │
+   │    ├── ng_bluetooth + sdpd(8) + hcsecd(8) + bluetoothd-equivalent   │
+   │    ├── holds the link-key store (encrypted, at rest)                │
+   │    ├── runs pairing / PIN / passkey / OOB / numeric-comparison      │
+   │    ├── reads remote device's Class of Device (CoD) + SDP records    │
+   │    ├── dispatches to the right kernel subsystem (see CoD table)     │
+   │    └── enforces the jail's bt.* policies (slot/budget/role/peer)    │
+   │                                                                     │
+   │  Subsystem sinks (POSIX, generic, no "BT" in the name):            │
+   │    ├── sound(4) / sndbuf_a2dp(4) ──► /dev/dsp0   (headphones)       │
+   │    ├── sound(4) / sndbuf_a2dp(4) ──► /dev/dsp1   (speaker)         │
+   │    ├── hid(4) / kbdmux(4)         ──► /dev/kbd0   (keyboard)       │
+   │    ├── hid(4) / ums(4)            ──► /dev/ums0   (mouse)          │
+   │    ├── hid(4) / uhid(4)           ──► /dev/uhid0  (touch / pen)     │
+   │    ├── ng_netbt(4) / ng_pan(4)    ──► /dev/netbt  (PAN networking) │
+   │    └── ng_btsocket(4)             ──► /dev/rfcomm (serial, RFCOMM) │
+   └─────────────────────────────────────────────────────────────────────┘
+                                    │   (mediated by jail devfs ruleset)
+                                    ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ JAIL (sees generic POSIX devices, no "bluetooth" in the namespace) │
+   │                                                                     │
+   │   /dev/dsp0   ← "headphones"                                        │
+   │   /dev/kbd0   ← "keyboard"                                         │
+   │   /dev/ums0   ← "mouse"                                            │
+   │   /dev/uhid0  ← "touch"                                            │
+   │   /dev/netbt  ← "network"                                          │
+   │                                                                     │
+   │   Jail userspace uses POSIX audio/input/net APIs:                   │
+   │     - ffmpeg -f oss /dev/dsp0                                      │
+   │     - X11 / Wayland via evdev                                      │
+   │     - pulseaudio / pipewire / sndio                                │
+   │                                                                     │
+   │   The jail NEVER sees:                                              │
+   │     - /dev/bluetooth*                                              │
+   │     - ng_hci / ng_l2cap / ng_rfcomm / ng_sdp                       │
+   │     - HCI commands, L2CAP sockets, SDP records                     │
+   │     - the word "bluetooth" anywhere in its namespace                │
+   └─────────────────────────────────────────────────────────────────────┘
+   ```
+
+   **The Class-of-Device (CoD) dispatch table (planned, in `bt_resource.ko`):**
+
+   The CoD is a 24-bit field reported by every BT device, structured as:
+   - **Major Class** (8 bits): `0x01 Computer`, `0x02 Phone`, `0x03 LAN/Network`, `0x04 Audio/Video`, `0x05 Peripheral (HID)`, `0x06 Imaging`, `0x08 Toy`, `0x09 Health`, ...
+   - **Minor Class** (8 bits): subtype within Major (e.g. `0x04 0x05` = Wearable headset device)
+   - **Service Class** (11 bits): bitfield (`0x100 Audio`, `0x200 Telephony`, `0x400 Information`, `0x10000 Limited Discoverable`, `0x8000 Object Transfer`, ...)
+
+   | CoD Major + Service | Recognized as | Jail device node | Kernel subsystem |
+   |---|---|---|---|
+   | `0x04 Audio/Video` + `0x100 Audio` | headphones / speaker / mic | `/dev/dsp<N>` (A2DP) | `sound(4)` + `sndbuf_a2dp(4)` |
+   | `0x04 Audio/Video` + `0x200 Telephony` | headset (HFP) | `/dev/dsp<N>` (SCO) | `sound(4)` + `ng_btsocket(4)` |
+   | `0x05 Peripheral` + `0x80 Keyboard` | BT keyboard | `/dev/kbd<N>` | `kbdmux(4)` + `kbd(4)` |
+   | `0x05 Peripheral` + `0x80 Mouse` | BT mouse | `/dev/ums<N>` | `ums(4)` + `evdev` |
+   | `0x05 Peripheral` + `0x80 Combo` | combo kbd+mouse | `/dev/kbd<N>` + `/dev/ums<N>` | `kbdmux(4)` + `ums(4)` |
+   | `0x05 Peripheral` + `0x80 Joystick` | BT gamepad | `/dev/uhid<N>` | `uhid(4)` + `evdev` |
+   | `0x05 Peripheral` + `0x80 Digitizer` | BT touch / pen | `/dev/uhid<N>` | `uhid(4)` + `evdev` |
+   | `0x03 LAN/Network` + `0x10000 PAN` | BT network (PAN/NAP) | `ng_netbt` node | `netgraph(4)` + `ng_pan(4)` |
+   | `0x02 Phone` | BT phone (OBEX) | `/dev/rfcomm<N>` | `ng_btsocket(4)` + `rfcomm(4)` |
+   | `0x06 Imaging` | camera / printer | (out of scope v1) | — |
+   | anything else | unknown | rejected by `bt.peer_whitelist` (default empty) | — |
+
+   **The dispatch is automatic and zero-config.** The host's `bt_resource.ko` matches the CoD when the pairing completes, looks up the kernel subsystem, and exports a generic device node into the jail's devfs.
+
+   **How pairing works (the user asked: "the host will negotiate the bluetooth connection, passwords / pinds / whatever security"):**
+
+   ```
+   Pairing flow (host-driven):
+
+   1. Jail's userspace or operator triggers a "scan for devices" action
+      (e.g. via the broker's BDP DEVICE_INFO_REQ, or a host admin command).
+      Note: this is the ONLY way pairing is initiated; the jail itself
+      cannot initiate pairing unless bt.pair.mode=jail.
+
+   2. Host's bt_resource.ko runs an HCI Inquiry (host-side, since the
+      adapter is bound to the jail's view but the *host* does the security
+      work). Scans for 10.24s (BT classic) or until LE scan window expires.
+
+   3. Discovered devices are reported back to the broker and the jail's UI
+      (e.g. bdp-cast shows "Living Room Headphones discovered"). The jail
+      sees a generic list, NOT raw HCI events.
+
+   4. Operator (or jail, if bt.pair.mode=jail) selects a device to pair.
+
+   5. Host's hcsecd(8) runs the SSP (Secure Simple Pairing) handshake:
+      - ECDH P-256 key exchange
+      - Authentication: Just Works / Numeric Comparison / Passkey / OOB
+        (per hw.bt.0.pair.policy sysctl)
+      - For "Numeric Comparison" (BT 2.1+): the host's PIN/passkey prompt
+        appears on the host console (or via the broker's UI). The jail
+        never sees the 6-digit number unless the operator chooses to
+        forward it.
+      - For "Passkey" (legacy): the host prompts; jail never sees the
+        passkey.
+      - For "Just Works" (BT 2.1+ default for many IoT devices):
+        NO prompt; the connection is authenticated by ECDH only.
+        This is the LEAST secure mode and is gated by hw.bt.0.pair.policy
+        != just-works in the BT preflight checks.
+
+   6. Host stores the link key in /var/db/bluetooth (encrypted at rest
+      with the host's _displayd user's key, not world-readable).
+
+   7. Host's bt_resource.ko CoD-dispatches the newly-paired device:
+      - headphones → /dev/dsp0 in the jail
+      - keyboard → /dev/kbd0 in the jail
+      - etc.
+
+   8. The jail's userspace sees the device appear (via /dev devfs event,
+      or by stat()ing /dev/dsp0 etc.) and starts using it as a normal
+      audio/input device.
+
+   9. Pairing event is logged to the audit trail (T43):
+      "alice paired 'Living Room Headphones' (BD_ADDR aa:bb:cc:dd:ee:ff,
+       CoD 0x240404 = stereo headphones) to jail web1 (jid=42) on adapter
+       ubt0, SSP=numeric-comparison, host-uid=root"
+   ```
+
+   **Jail-side pairing mode (opt-in, dangerous):**
+
+   By default, `bt.pair.mode=host` (host does pairing). With `bt.pair.mode=jail` (opt-in, requires `security.bt.policy.override_deny=1`), the jail MAY do its own pairing. The jail then sees raw BT protocol:
+   - `/dev/bluetooth0` (HCI)
+   - `ng_hci`, `ng_l2cap`, `ng_l2cap_pdu`, `ng_rfcomm`, `ng_sdp` netgraph nodes
+   - `hccontrol(8)`, `bluetoothctl(1)`, `obexapp(1)`, `l2ping(8)`, etc.
+
+   This is for advanced use cases:
+   - BT scanners / sniffers (security research)
+   - Custom BT applications (LE beacons, iBeacon / Eddystone)
+   - Compatibility with existing BT user-space tools that don't know about our abstraction
+
+   When `bt.pair.mode=jail` is on:
+   - The jail's userspace runs its own `sdpd(8)` and `hcsecd(8)` (or shares the host's via a separate path)
+   - The jail's link-key store is `/var/db/bluetooth` inside the jail
+   - The host's link-key store is unchanged
+   - The jail can pair with anyone (subject to its own `bt.peer_whitelist` and `bt.max_pair_per_hour`)
+   - All pairing events are still logged to the host's audit trail (T43) via a forwarded event
+
+   **Pre-flight check (T22 framework extension):**
+
+   | Check ID | Name | Default | Severity |
+   |---|---|---|---|
+   | `BT_PAIR_MODE_VALID` | `bt.pair.mode` is `host` (default) or `jail` (with override) | enforced | error if jail mode without override |
+   | `BT_DISPATCH_TABLE` | Every CoD in the paired set has a known dispatch (or is in `bt.peer_whitelist`) | enforced | warn if unknown CoD |
+   | `BT_RAW_ACCESS_REQUIRES_OVERRIDE` | `bt.raw_access=1` requires `security.bt.policy.override_deny=1` | enforced | error |
+
+   **DTrace probes (T50 extension):**
+
+   ```
+   bt-resource:pair-start
+     args: char *adapter, char *peer_bdaddr, uint32_t cod, int jid
+   bt-resource:pair-complete
+     args: char *adapter, char *peer_bdaddr, uint32_t cod, int jid, int policy, int success
+   bt-resource:cod-dispatch
+     args: char *adapter, char *peer_bdaddr, uint32_t cod, char *subsystem, char *jail_devnode
+   bt-resource:devfs-export
+     args: char *adapter, char *peer_bdaddr, char *jail_devnode, int jid
+   bt-resource:raw-access-granted
+     args: char *adapter, int jid, char *operator
+   bt-resource:raw-access-rejected
+     args: char *adapter, int jid, char *operator, int reason
+   ```
+
+   **Audit log (T43 extension):**
+
+   ```
+   YYYY-MM-DDTHH:MM:SSZ pair-complete adapter=ubt0 peer=aa:bb:cc:dd:ee:ff cod=0x240404 (stereo-headphones) jid=42 ssp=secure-simple operator=root
+   YYYY-MM-DDTHH:MM:SSZ cod-dispatch adapter=ubt0 peer=aa:bb:cc:dd:ee:ff cod=0x240404 subsystem=sound devnode=/dev/dsp0 jid=42
+   YYYY-MM-DDTHH:MM:SSZ devfs-export adapter=ubt0 peer=aa:bb:cc:dd:ee:ff devnode=/dev/dsp0 jid=42
+   YYYY-MM-DDTHH:MM:SSZ raw-access-granted adapter=ubt0 jid=42 operator=root reason=debug-sniff
+   ```
+
+   **Stats (T49 extension, per-pair):**
+
+   ```c
+   struct bt_pair_stats {
+       char        peer_bdaddr[18];     /* "aa:bb:cc:dd:ee:ff" */
+       uint32_t    cod;                 /* Class of Device */
+       char        cod_label[32];       /* "stereo-headphones" */
+       time_t      paired_at;           /* epoch seconds */
+       char        paired_by[64];       /* operator or "jail" or "host" */
+       uint64_t    bytes_sent;          /* cumulative (post-dispatch) */
+       uint64_t    bytes_received;
+       uint64_t    disconnect_count;    /* lifetime */
+       char        last_disconnect_reason[32]; /* "operator-force" | "out-of-range" | "host-detach" | "jail-stop" | "timeout" */
+   };
+   ```
+
+   **What "the jail sees a generic device" looks like in practice:**
+
+   The jail's `dmesg` shows:
+   ```
+   dsp0: <A2DP audio sink> on bt0  (no mention of "bluetooth" or "bt_resource")
+   kbd0: <HID keyboard> on bt1        (no "bluetooth" prefix)
+   ums0: <HID mouse> on bt1           (no "bluetooth" prefix)
+   ```
+
+   The jail's `devinfo -v` shows:
+   ```
+   dsp0
+     class=audio
+     driver=snd_a2dp_consumer         (the jail's userspace sees this name, but doesn't know it's BT)
+   kbd0
+     class=input
+     driver=ukbd
+   ```
+
+   The jail's `pciconf -lv` does NOT show a BT controller. The jail's `usbconfig` does NOT show a BT dongle. The jail's `kenv` does NOT have `hw.bt.*` sysctls visible (they live in the host, not the jail's devfs view).
+
+   **The `bt.raw_access=1` escape hatch (for advanced users):**
+
+   ```ini
+   # jail.conf — ADVANCED: raw BT access (jail does its own pairing)
+   bt {
+       allow.bt = 1;
+       bt.adapter = "ubt0";
+       bt.pair.mode = "jail";           # opt into jail-side pairing
+       bt.raw_access = 1;               # expose /dev/bluetooth0 + ng_*
+       bt.role = "master";              # advanced use, may need master role
+       # NB: requires security.bt.policy.override_deny=1 on the host
+   }
+   ```
+
+   With this, the jail sees `/dev/bluetooth0`, `ng_hci`, `ng_l2cap`, `ng_sdp`, `ng_rfcomm`, etc. — the full raw BT stack. The jail can run its own `bluetoothctl(1)` equivalent, do its own pairing, sniff packets, etc. This is a power-user mode; the audit trail records every raw HCI command.
+
+   **Why the default is "jail does NOT know it's BT":**
+
+   - **Security**: the jail's userspace cannot bypass the CoD dispatch by sending raw HCI commands
+   - **Privacy**: the jail doesn't learn the BD_ADDR of paired devices (only "headphones" / "keyboard")
+   - **Simplicity**: jail userspace uses POSIX audio/input APIs that already work
+   - **Compatibility**: any existing application that uses `/dev/dsp0` works inside the jail without modification
+   - **Least surprise**: a developer who runs `pulseaudio` inside the jail gets sound output, period; they don't have to know that the audio path is BT-A2DP-over-LC3-over-HCI-over-USB
+   - **Single source of truth for security**: only the host runs `hcsecd(8)` (or `bt_security_manager`); only the host has the link keys
+   - **Mirrors how real hardware works**: when a Linux laptop has BT audio, the user's PulseAudio doesn't know it's BT either; it just sees a `/dev/snd` device. Same model.
+
+   **F1-F4 updates:**
+
+   - F1 verifies the CoD dispatch table is documented in `display-resource(9)` (future man page)
+   - F1 verifies `jail.conf(5)` documents `bt.pair.mode` (default `host`) and `bt.raw_access` (default `0`)
+   - F2 (Code Quality) verifies no `ng_hci` / `ng_l2cap` symbols are visible in the jail's devfs unless `bt.raw_access=1`
+   - F4 (Scope Fidelity) flags any v1 PR that exposes raw BT to jails as scope creep
+
+7. **Jail termination — resource cleanup lifecycle (T65-design supplement)**
+
+   Answers user message 3 (*"and what if a jail terminates, how do we ensure resources are properly freed? like in bluetooth?"*).
+
+   **The problem: jail termination has many shapes, and every one must clean up correctly.**
+
+   | Termination cause | Trigger | Cleanup owner | Latency bound |
+   |---|---|---|---|
+   | `jail -r <jid>` (graceful) | operator | kernel jail subsystem | seconds |
+   | `jail -rk <jid>` (forced) | operator | kernel jail subsystem (forcibly) | seconds |
+   | last process exits (graceful) | last process `exit(2)` | kernel | seconds |
+   | last process killed (SIGKILL) | signal | kernel | milliseconds |
+   | last process panics | kernel | kernel | milliseconds |
+   | host panic / reboot | host kernel | host kernel (unclean) | N/A |
+   | jail `exec`'d to new binary | `execve(2)` | **NO cleanup** (same jid, same jail) | N/A |
+   | jail cloned from parent | `jail(2)` clone | child gets fresh `allow.bt=0` | N/A |
+
+   **The state machine (per-adapter binding):**
+
+   ```
+            bind                    unbind
+   HOST ──────────────► JAIL:<jid> ──────────────► HOST
+     ▲                    │   │                       ▲
+     │                    │   │                       │
+     │   cleanup-         │   │  cleanup-             │  cleanup-
+     │   timeout          │   │  failure              │  failure
+     │   (force-release)  │   │  (retry once)         │  (stays in
+     │                    │   │                       │   host, audit)
+     │                    │   ▼                       │
+     │                    │ DYING                     │
+     │                    │   │                       │
+     │                    │   │ cleanup ok            │
+     │                    │   └─────────────► HOST ───┘
+     │                    │
+     │                    └─► RELEASED (transient, immediately → HOST)
+     │
+     └──► FREE (manual operator action: hw.bt.0.binding=free)
+              │
+              │   bind (jail or host)
+              └─────────► JAIL:<jid> or HOST
+   ```
+
+   **The reference-counted binding (handles all termination cases):**
+
+   ```c
+   struct bt_binding {
+           int             b_state;          /* BINDING_HOST, BINDING_JAIL, BINDING_FREE, BINDING_DYING */
+           int             b_jid;            /* owner jail id, 0 if host/free */
+           uint64_t        b_generation;     /* incremented on every state change */
+           struct refcount b_refcount;       /* prevents reaping while in use */
+           struct task     b_cleanup_task;   /* runs in taskqueue, not in jail context */
+           struct callout  b_cleanup_callout;/* for BT_RESOURCE_DESTROY_TIMEOUT */
+           int             b_cleanup_retries;/* retry-on-failure counter */
+           time_t          b_bind_at;        /* epoch seconds */
+           time_t          b_unbind_at;      /* epoch seconds, 0 if not yet */
+   };
+   ```
+
+   **Cleanup is invoked by a `prison_cleanup` callback chain in `kern_jail.c`** (same mechanism as `fbuf_jail.ko` cleanup in T12 and `gpu_resource.ko` cleanup in T21). The chain runs in this order:
+
+   1. **Jail enters `PRISON_STATE_DYING`** (set by `kern_jail.c` when last process exits or `jail -r`/`jail -rk` is called)
+   2. **`bt_resource_prison_cleanup(prison)` is called** as part of the cleanup chain
+   3. **`bt_resource.ko` walks its binding table** and finds the entry with `b_jid == prison->pr_id`
+   4. **State transition: `JAIL → DYING`** (atomic compare-and-swap on `b_state`)
+   5. **`b_generation++`** — any subsequent `ng_hci` / `snd_a2dp` / `kbdmux` I/O on the jail's mediated cdev returns `ENXIO` (generation mismatch)
+   6. **Forcibly revoke all open file descriptors in the jail** (the kernel's `fdrevoke()` walks the jail's fd table)
+   7. **Drain in-flight operations** with a `BT_RESOURCE_DESTROY_TIMEOUT` (default 30s, sysctl-tunable)
+   8. **Drop active BT connections** gracefully (or forcibly, depending on `b_force_detach` flag)
+   9. **Drop pending pairing / inquiry / advertising** (cancel any in-flight HCI commands)
+   10. **Hand off link keys to the host's `/var/db/bluetooth`** (if `bt.pair.mode=host`, the keys stay with the host anyway; if `jail`, the keys are saved to the jail's `/var/db/bluetooth` which is about to be unmounted — so we copy them out first)
+   11. **Re-attach `ng_bluetooth` to the HCI device on the host** (same as item 5's "host re-attach")
+   12. **Re-create the host's `/dev/bluetooth*` node** (cdevsw re-attach)
+   13. **Resume the host's `hcsecd(8)` and `sdpd(8)`** for this adapter
+   14. **State transition: `DYING → RELEASED → HOST`** (atomic)
+   15. **`b_generation++` again** (in case anything was queued)
+   16. **Audit log: "host re-attached to ubt0 after jail web1 (jid=42) stopped, reason=normal"**
+   17. **DTrace: `bt-resource:host-attach`** fires with `reason=0` (normal)
+   18. **Stats updated**: `total_time_in_jail += now - b_bind_at`, `detach_count++`
+
+   **Idempotency:** every step is idempotent. Calling the cleanup twice (e.g. SIGKILL during cleanup) is a no-op the second time. The `b_state` machine prevents re-entrancy.
+
+   **Failure modes and recovery:**
+
+   | Failure | Detection | Recovery | Audit |
+   |---|---|---|---|
+   | `ng_bluetooth` re-attach fails (driver in bad state) | `ng_make_node_common()` returns NULL | retry up to 3 times with 100ms backoff; if still fails, set `b_state=DYING` permanently, log error, leave adapter in `FREE` | `detach_reason="cleanup-failed"` |
+   | Host `cdev` re-create fails (name collision) | `make_dev()` returns NULL | use a unique suffix (e.g. `/dev/bluetooth0.42` to disambiguate, or unlink the stale node first) | audit warning |
+   | Active connection won't drop gracefully | timeout after 5s | force-drop (sends HCI Disconnect, doesn't wait for LMP response) | `disconnect_reason="force-drop-on-cleanup"` |
+   | Cleanup takes too long | `BT_RESOURCE_DESTROY_TIMEOUT` exceeded (default 30s) | forcibly transition to `RELEASED`, log warning, leave host in a "recovering" state | `detach_reason="cleanup-timeout"` |
+   | Host was already partially using the adapter when cleanup runs (race) | `ng_hci` re-attach reports "already attached" | detach first, then re-attach | audit info |
+
+   **Edge cases:**
+
+   - **Jail `exec`'d**: the jail's jid is unchanged, so no cleanup runs. The new process inherits the jail's mediated BT view. This is correct.
+   - **Jail cloned (child jail from parent)**: the child starts with `allow.bt=0` and no binding. The parent keeps its binding. No cleanup.
+   - **Jail renamed**: the jid is unchanged, so the binding lookup still works. No cleanup.
+   - **Jail promoted (VNET upgrade)**: the jid is unchanged; no cleanup. (VNET promotion is rare and orthogonal.)
+   - **Jail demoted (VNET downgrade)**: the jid is unchanged; no cleanup.
+   - **Nested jail inside a BT-enabled jail**: nested jails inherit `allow.bt=1` from the parent (jails are not isolated against parent in the BT-binding sense). The nested jail sees the same mediated view. If the parent jail terminates, the nested jails are also torn down (standard jail semantics), and the cleanup runs once for the parent.
+   - **Host panic**: no cleanup runs. Adapter comes back with `b_state=HOST` (default). The jail's binding is lost. On reboot, the host's `bluetooth(1)` shows the adapter as `host` bound. Audit log entry: "host recovered adapter ubt0 after panic, prior jid=42 binding lost".
+   - **Jail has many open fds to the BT device**: `fdrevoke()` walks the jail's fd table. Each fd in the jail is invalidated. The jail's process gets `EBADF` on next use, which is the standard FreeBSD pattern.
+
+   **The `BT_RESOURCE_DESTROY_TIMEOUT` sysctl (planned):**
+
+   ```bash
+   sysctl security.bt.resource.destroy_timeout=30     # default 30 seconds
+   sysctl hw.bt.0.destroy_timeout=30                  # per-adapter override
+   sysctl security.bt.resource.destroy_max_retries=3  # retry-on-failure cap
+   ```
+
+   **Pre-flight check (T22 framework extension):**
+
+   | Check ID | Name | Default | Severity |
+   |---|---|---|---|
+   | `BT_NO_DOUBLE_BIND` | sum of active jail-owners of this adapter == 1 | enforced | error |
+   | `BT_CLEANUP_VERIFIED` | At jail stop, `bt_resource.ko` reports cleanup OK (within timeout) | enforced | error if timeout |
+   | `BT_GENERATION_ADVANCED` | After cleanup, `b_generation` increased by exactly 2 (DYING + RELEASED transitions) | enforced | warn |
+
+   **DTrace probes (T50 extension):**
+
+   ```
+   bt-resource:cleanup-start
+     args: char *adapter, int jid, int reason    /* reason: 0=normal, 1=force, 2=panic, 3=timeout */
+   bt-resource:cleanup-step
+     args: char *adapter, int jid, int step, int result
+   bt-resource:cleanup-complete
+     args: char *adapter, int jid, int result, time_t duration_ms
+   bt-resource:cleanup-failed
+     args: char *adapter, int jid, int step, int errno
+   bt-resource:fd-revoked
+     args: char *adapter, int jid, int fd_count
+   ```
+
+   **Audit log (T43 extension):**
+
+   ```
+   YYYY-MM-DDTHH:MM:SSZ jail web1 (jid=42) entering dying state
+   YYYY-MM-DDTHH:MM:SSZ bt-resource cleanup-start adapter=ubt0 jid=42 reason=normal
+   YYYY-MM-DDTHH:MM:SSZ bt-resource cleanup-step adapter=ubt0 step=fd-revoke result=ok fd-count=3
+   YYYY-MM-DDTHH:MM:SSZ bt-resource cleanup-step adapter=ubt0 step=connection-drop result=ok dropped=2
+   YYYY-MM-DDTHH:MM:SSZ bt-resource cleanup-step adapter=ubt0 step=ng-reattach result=ok
+   YYYY-MM-DDTHH:MM:SSZ bt-resource cleanup-step adapter=ubt0 step=devfs-recreate result=ok
+   YYYY-MM-DDTHH:MM:SSZ bt-resource cleanup-complete adapter=ubt0 jid=42 result=ok duration=120ms
+   YYYY-MM-DDTHH:MM:SSZ host re-attached to ubt0 after jail web1 stopped reason=normal
+   ```
+
+   **Stats (T49 extension):**
+
+   ```c
+   struct bt_jail_lifecycle_stats {
+       time_t  total_time_in_jail;       /* cumulative seconds bound to any jail */
+       time_t  last_bind_at;             /* epoch seconds */
+       time_t  last_unbind_at;           /* epoch seconds, 0 if still bound */
+       time_t  longest_jail_session;     /* seconds */
+       uint64_t detach_count;            /* lifetime binds/unbinds */
+       uint64_t cleanup_failure_count;   /* lifetime cleanup failures (timeout, ng-reattach fail) */
+       uint64_t fd_revoke_count;         /* lifetime fds revoked during cleanup */
+       uint64_t connection_drop_count;   /* lifetime BT connections dropped during cleanup */
+   };
+   ```
+
+   **F1-F4 updates:**
+
+   - F1 verifies `sys/kern/kern_jail.c` has the `prison_cleanup` callback chain documented (design check, not impl check)
+   - F1 verifies the `bt_resource.ko` state machine is documented in `display-resource(9)`
+   - F1 verifies `security.bt.resource.destroy_timeout` is reserved in T35's OID table
+   - F2 (Code Quality) does NOT find any implementation in v1
+   - F4 (Scope Fidelity) flags any v1 PR that adds BT cleanup code as scope creep
+
+8. **Force-disconnect authorization and audit (T65-design supplement)**
+
+   Answers user message 4 (*"and if we have tooling to force a disconnection, was the user actually allowed to perform that request?"*).
+
+   **The problem: a "force disconnect" tool is a privileged operation. The user running the tool must be authorized, the target must be valid, the action must be audited, and the user should not be able to abuse it.**
+
+   **Authorization layers (defense in depth):**
+
+   ```
+   ┌──────────────────────────────────────────────────────────────────────┐
+   │ Layer 1: CLI tool (displayc / btctl / displayd-ctl)                  │
+   │   - Checks: operator uid/gid == 0 OR gid ∈ {_displayd, _bt_admin}   │
+   │   - Checks: target resource is owned by operator OR operator is root│
+   │   - Refuses with EACCES if either fails                              │
+   │   - Logs the authorization decision locally                          │
+   └──────────────────────────────────────────────────────────────────────┘
+                                    │  (BDP message, mTLS, signed)
+                                    ▼
+   ┌──────────────────────────────────────────────────────────────────────┐
+   │ Layer 2: broker (displayd, T38)                                      │
+   │   - Re-validates: BDP mTLS cert CN matches an authorized user       │
+   │   - Re-validates: ACL in display.acl grants "disconnect" to user    │
+   │   - Re-validates: target resource exists and is in operator's scope │
+   │   - Refuses with EACCES BDP message if any fails                     │
+   │   - Logs the authorization decision to broker's audit (T43)         │
+   └──────────────────────────────────────────────────────────────────────┘
+                                    │  (kernel ioctl, mTLS-attested)
+                                    ▼
+   ┌──────────────────────────────────────────────────────────────────────┐
+   │ Layer 3: kernel (bt_resource.ko + kern_jail.c)                       │
+   │   - Re-validates: caller has CAP_PRIV_DISCONNECT or is in jail root │
+   │   - Re-validates: target BT peer is in fact connected to a jail     │
+   │   - Refuses with EACCES ioctl return if any fails                   │
+   │   - Logs the authorization decision to kernel audit (T43)           │
+   └──────────────────────────────────────────────────────────────────────┘
+   ```
+
+   **Three layers, each independent. The kernel is the final gatekeeper.** A bug in the CLI tool cannot bypass the kernel check. A bug in the broker cannot bypass the kernel check. The kernel's check is the only one that can actually *cause* the disconnect, so it is the only one that matters for security.
+
+   **The `display.acl` action: `disconnect` (T40 extension):**
+
+   ```ini
+   # display.acl — per-user / per-resource / per-action ACL
+   # (extends the v1 ACL model from T40 with new actions)
+
+   # Default: deny
+   * * * deny
+
+   # alice can attach to her own jails
+   alice jail:web1 fbuf attach allow
+   alice jail:web1 fbuf view allow
+   alice jail:web1 audio attach allow
+   alice jail:web1 bt attach allow
+
+   # alice CANNOT force-disconnect anyone (she's not root)
+   alice * * disconnect deny
+
+   # root can do anything
+   root * * * allow
+
+   # _bt_admin group: can force-disconnect but only their own sessions
+   @_bt_admin user:self * disconnect allow
+   @_bt_admin * * disconnect deny
+
+   # _security group: can audit-log-read but not disconnect
+   @_security * audit-read allow
+   @_security * * disconnect deny
+   ```
+
+   **ACL actions for BT (new in T40-design extension):**
+
+   - `pair` — initiate pairing (default deny; root only)
+   - `unpair` — remove a paired device (default deny; root only)
+   - `connect` — connect a jail to a paired peer (default deny)
+   - `disconnect` — force-disconnect a peer from a jail (default deny; root or @_bt_admin with scope)
+   - `view` — see peer status in BDP STATS (default allow for own scope)
+   - `audit-read` — read the audit log (default deny; @_security only)
+
+   **The force-disconnect tool flow (planned, T66-future CLI):**
+
+   ```bash
+   $ btctl disconnect --adapter ubt0 --peer aa:bb:cc:dd:ee:ff --reason "abuse"
+   [sudo] password for alice: ********
+   Error: EACCES — user 'alice' is not authorized to force-disconnect peer aa:bb:cc:dd:ee:ff
+          (required: root OR @_bt_admin with scope=user:self)
+          See `man display-acl` and `displayd-ctl acl whoami` for your effective permissions.
+   ```
+
+   ```bash
+   $ sudo btctl disconnect --adapter ubt0 --peer aa:bb:cc:dd:ee:ff --reason "abuse"
+   Authorization check (kernel): PASS (uid=0)
+   Authorization check (broker): PASS (root grants * disconnect)
+   Authorization check (cli):    PASS (uid=0)
+   Sending disconnect to kernel...
+   Kernel: disconnecting peer aa:bb:cc:dd:ee:ff from jail web1 (jid=42) on adapter ubt0
+   Audit: 2026-06-05T14:23:11Z force-disconnect adapter=ubt0 peer=aa:bb:cc:dd:ee:ff jid=42 operator=root(uid=0) reason="abuse"
+   Peer disconnected.
+   ```
+
+   **Authorization specifics for the broker's BDP message (T38 extension):**
+
+   - The CLI tool opens a BDP mTLS connection to the broker
+   - Sends a new BDP message type `0x3D BDP_FORCE_DISCONNECT_REQ` (planned for v2) with payload: `{adapter, peer_bdaddr, jid, reason_text}`
+   - The broker checks: client cert CN/SAN maps to a user; user's ACL grants `disconnect` for this target
+   - If authorized, broker sends `0x3E BDP_FORCE_DISCONNECT_ACK` and forwards the request to the kernel via the kernel-broker IPC channel
+   - The kernel re-validates (defense in depth) and performs the disconnect
+   - The kernel returns `0x3F BDP_FORCE_DISCONNECT_RESULT` to the broker with success/failure
+   - The broker returns `0x40 BDP_FORCE_DISCONNECT_DONE` to the CLI
+   - All four steps are logged to the audit trail
+
+   **In v1 (no BT yet), the BDP message types `0x3D-0x40` are NOT defined.** The design is forward-compatible. When T66-future lands, the BDP protocol can be extended without breaking v1 clients.
+
+   **Rate limiting (DoS prevention):**
+
+   - `security.bt.admin.disconnect_per_minute=10` (default) — operator can issue at most 10 disconnects/minute
+   - `security.bt.admin.disconnect_per_hour=100` (default) — at most 100/hour
+   - After 3 failed authorization attempts in 60s, the operator's session is locked out for 5 minutes (preventing brute-force ACL probing)
+   - Cooldown escalates: 1s, 5s, 30s, 5min, 1hr
+   - Rate-limited requests still get logged (as `rate-limited` events) but do not consume the operator's actual disconnect budget
+
+   **Audit trail (T43 extension):**
+
+   ```
+   YYYY-MM-DDTHH:MM:SSZ authz-check adapter=ubt0 action=disconnect operator=alice(uid=1001) result=DENY reason=EACCES-required-root
+   YYYY-MM-DDTHH:MM:SSZ authz-check adapter=ubt0 action=disconnect operator=root(uid=0) result=ALLOW
+   YYYY-MM-DDTHH:MM:SSZ force-disconnect adapter=ubt0 peer=aa:bb:cc:dd:ee:ff jid=42 operator=root(uid=0) reason="abuse" layer=cli
+   YYYY-MM-DDTHH:MM:SSZ force-disconnect adapter=ubt0 peer=aa:bb:cc:dd:ee:ff jid=42 operator=root(uid=0) reason="abuse" layer=broker
+   YYYY-MM-DDTHH:MM:SSZ force-disconnect adapter=ubt0 peer=aa:bb:cc:dd:ee:ff jid=42 operator=root(uid=0) reason="abuse" layer=kernel
+   YYYY-MM-DDTHH:MM:SSZ disconnect-result adapter=ubt0 peer=aa:bb:cc:dd:ee:ff jid=42 result=ok
+   YYYY-MM-DDTHH:MM:SSZ rate-limit adapter=ubt0 operator=mallory(uid=666) action=disconnect result=RATE-LIMITED reason=10-per-minute-exceeded
+   ```
+
+   **DTrace probes (T50 extension):**
+
+   ```
+   bt-resource:authz-check
+     args: char *adapter, char *action, char *operator, int result, int reason
+   bt-resource:force-disconnect
+     args: char *adapter, char *peer_bdaddr, int jid, char *operator, char *reason_text
+   bt-resource:rate-limit
+     args: char *operator, char *action, int current, int limit
+   ```
+
+   **Stats (T49 extension):**
+
+   ```c
+   struct bt_authz_stats {
+       uint64_t authz_checks_total;
+       uint64_t authz_checks_allow;
+       uint64_t authz_checks_deny;
+       uint64_t force_disconnect_total;
+       uint64_t rate_limit_hits;
+       uint64_t lockout_count;
+   };
+   ```
+
+   **What "was the user actually allowed" means in practice:**
+
+   - The CLI tool checks ACL **before** sending the request (UX: fast feedback, no wasted round trip)
+   - The broker re-checks ACL **on receipt** (security: CLI bugs cannot bypass)
+   - The kernel re-checks **on ioctl** (security: broker bugs cannot bypass)
+   - The audit log records **all three** decisions (forensics: who said yes, who said no, and at which layer)
+   - The disconnect cannot happen unless **all three** layers say yes
+   - The operator sees "EACCES" or "ALLOW" with the specific reason (so they know *why* a request was denied)
+
+   **Pre-flight check (T22 framework extension):**
+
+   | Check ID | Name | Default | Severity |
+   |---|---|---|---|
+   | `BT_ACL_HAS_DISCONNECT_FOR_ROOT` | `root * * disconnect allow` is in `display.acl` (or no `disconnect` rule, which defaults to root) | enforced | warn |
+   | `BT_RATE_LIMIT_CONFIGURED` | `security.bt.admin.disconnect_per_minute` is set (not 0) | enforced | warn if 0 (unlimited) |
+   | `BT_AUDIT_LOCK_ON` | `security.bt.audit.lock=1` is set (cannot be unset without reboot) | enforced | warn |
+
+   **F1-F4 updates:**
+
+   - F1 verifies the `display.acl` action `disconnect` is documented in `display-acl(5)` (v1)
+   - F1 verifies the rate-limit sysctls `security.bt.admin.disconnect_per_minute` are reserved in T35's OID table
+   - F1 verifies `security.bt.audit.lock` is reserved in T35's OID table
+   - F2 (Code Quality) does NOT find any force-disconnect implementation in v1
+   - F4 (Scope Fidelity) flags any v1 PR that adds force-disconnect code as scope creep
+
+
+
+
+**The "tell the resource to use it" flow (concrete jail.conf snippet, design only):**
+
+```ini
+# jail.conf — future BT-enabled jail (DESIGN ONLY, not v1)
+# NOTE: BT uses slot/budget/role/peer model, NOT percent model
+
+web1 {
+    host.hostname = "web1.example.com";
+
+    # ... existing jail config ...
+
+    # === Display ===
+    allow.fbuf = 1;          # T10 — kernel-backed framebuffer
+    fbuf.name = "web1";      # T10
+    allow.gpu = 0;           # T20 — no GPU passthrough
+    allow.display = 1;       # T38 — broker connection
+
+    # === Bluetooth (future, T69) ===
+    # Deny-default. Operator must explicitly opt in AND
+    # allocate the radio (whole or not at all) AND
+    # budget its use (slots, bandwidth, time, peers, role).
+    allow.bt = 1;                        # T69 — explicitly opt in
+    bt.adapter = "ubt0";                 # T69 — which adapter
+    bt.role = "slave";                   # T69 — slave only (no scatternet)
+    bt.classic = 1;                      # T69 — may use BT classic
+    bt.le = 1;                           # T69 — may use BT LE
+    bt.max_slaves_classic = 3;           # T69 — at most 3 of 7 classic slaves
+    bt.max_le = 10;                      # T69 — at most 10 of 255 LE connections
+    bt.max_bandwidth_bps = 100000;       # T69 — 100 kbps aggregate
+    bt.max_inquiry_per_min = 1;          # T69 — 1 inquiry scan per minute
+    bt.max_pair_per_hour = 2;            # T69 — 2 pair attempts per hour (DoS)
+    bt.max_advertising_sets = 2;         # T69 — 2 LE advertiser sets
+    bt.max_acl_entries = 8;              # T69 — at most 8 peer whitelist entries
+    bt.peer_whitelist = "aa:bb:cc:dd:ee:ff,11:22:33:44:55:66";  # only these peers
+    # bt.allow_pair is FORBIDDEN — pair/unpair is host-only
+    # bt.allow_inquiry is FORBIDDEN — use bt.max_inquiry_per_min
+}
+```
+
+```bash
+# Host sysctls for the BT resource (future, T69)
+# Per-adapter limits (the radio's full capacity)
+sysctl hw.bt.0.limits.max_slaves_classic=7        # spec max
+sysctl hw.bt.0.limits.max_le=255
+sysctl hw.bt.0.limits.max_bandwidth_bps=3000000   # 3 Mbps EDR
+sysctl hw.bt.0.limits.max_inquiry_per_min=6
+sysctl hw.bt.0.limits.max_pair_per_hour=10        # DoS cap
+sysctl hw.bt.0.limits.max_advertising_sets=8
+sysctl hw.bt.0.limits.max_acl_entries=64
+
+# Per-adapter security/policy
+sysctl hw.bt.0.pair.allow=1
+sysctl hw.bt.0.pair.policy=secure-simple          # SSP, ECDH P-256
+sysctl hw.bt.0.privacy.le_privacy=1               # LE random addresses
+sysctl hw.bt.0.legacy_pairing=0                   # SSP only, no legacy
+sysctl hw.bt.0.classic_enabled=1
+sysctl hw.bt.0.le_enabled=1
+
+# Host-wide policy
+sysctl security.bt.policy.deny_default=1          # global deny
+sysctl security.bt.policy.override_deny=0         # no override
+sysctl security.bt.resource.enumerate=0           # no paired-device enumeration
+sysctl security.bt.audit.pair=1                   # log pair events
+sysctl security.bt.audit.unpair=1
+sysctl security.bt.audit.connect=1
+sysctl security.bt.audit.disconnect=1
+```
+
+**Pre-flight check hooks (future, T22 framework extension):**
+
+When `bt_resource.ko` is implemented, these preflight checks would be added to the existing T22 framework:
+
+| Check ID | Name | Default |
+|---|---|---|
+| `BT_NO_JAIL_NODES` | No `/dev/bluetooth*` nodes created in jail | enforced |
+| `BT_KEYSTORE_READABLE` | `/var/db/bluetooth` readable by `_displayd` (not world) | enforced |
+| `BT_PAIR_POLICY_SECURE` | `hw.bt.0.pair.policy != just-works` | enforced |
+| `BT_LEGACY_DISABLED` | `hw.bt.0.legacy_pairing = 0` | enforced |
+| `BT_LE_PRIVACY_ON` | `hw.bt.0.privacy.le_privacy = 1` | enforced |
+| `BT_DENY_DEFAULT` | `security.bt.policy.deny_default = 1` | enforced |
+| `BT_ADAPTER_EXISTS` | `bt.adapter` matches a real adapter (unless `bt.allow_no_adapter=1`) | enforced |
+| `BT_JAIL_SLOTS_OK` | sum of `bt.max_slaves_classic` across jails ≤ `hw.bt.0.limits.max_slaves_classic` | enforced |
+| `BT_JAIL_LE_OK` | sum of `bt.max_le` across jails ≤ `hw.bt.0.limits.max_le` | enforced |
+| `BT_JAIL_BW_OK` | sum of `bt.max_bandwidth_bps` across jails ≤ `hw.bt.0.limits.max_bandwidth_bps` | enforced |
+| `BT_JAIL_PEER_OK` | `bt.peer_whitelist` size ≤ `bt.max_acl_entries` AND ≤ `hw.bt.0.limits.max_acl_entries` | enforced |
+| `BT_PAIR_NOT_IN_JAIL` | `allow.bt=1` jails do NOT have `bt.allow_pair` (operator-only) | enforced |
+
+The T22 framework already supports adding new check functions; these would be added in a future boulder, not v1.
+
+**Concrete future BT workstream (T65-T72, design only — NOT in v1 boulder):**
+
+| Task | What it is | v1 status | v2 status |
+|---|---|---|---|
+| T65-design | `bt_resource.ko` design notes (slot/budget/role/peer model) | Doc only | Future kernel module |
+| T66-design | `bt_hid` display_backend design notes | Doc only | Future display_backend |
+| T67-design | `a2dp` and `le_audio` audio_backends design notes | Doc only | Future audio_backends |
+| T68-design | BT pairing / ACL / audit / stats integration | Doc only | Future integration |
+| T69-future | (real) `bt_resource.ko` kernel module | — | Future boulder |
+| T70-future | (real) `bt_hid` display_backend | — | Future boulder |
+| T71-future | (real) `a2dp` / `le_audio` audio_backends | — | Future boulder |
+| T72-future | Auracast broadcast audio | — | Future boulder (after FreeBSD LE Audio lands) |
+
+**Why this approach is right:**
+
+- The user has the architectural seams **documented** — they can defend the design to a reviewer asking "did you think about bluetooth?" with a yes
+- The **resource model is correct** — slot/budget/role/peer, not percent
+- The **deny-default, opt-in, host-policy-wins** pattern is consistent with everything else in v1
+- No v1 work is added — the user's "implementation will come later" is honored
+- The freebsd pipeline work (LE Audio, Auracast) is a **dependency** for any real BT work; we don't engage with that
+- The patterns we ship in v1 (resource mediation, multicast, ACL, audit, stats) are exactly the patterns BT will need
+- The Tunables Reference reserves the OID namespace so v2 doesn't collide
+- A future engineer can read the v1 plan, see "bt_resource.ko uses slot/budget/role/peer model (not percent), and mirrors gpu_resource.ko on the sysctl/ACL/audit/stats axes", and write the module
+- The user's mental model — "all in, time-shared, deny-default, tell the resource" — is captured in the design and in the future `jail.conf` example
+
+**F1-F4 updates:**
+
+- F1 does NOT check T65-T68 (design only)
+- F1 does NOT find any BT code in v1 (none exists)
+- F1 DOES verify the `security.bt.*` and `hw.bt.*` OID namespaces are *reserved* in T35's OID table (returns ENOENT, no live sysctls)
+- F1 DOES verify the `display_backend.h` and `audio_backend.h` headers contain the "Reserved for future BT support" seam comment
+- F1 DOES verify the Tunables Reference contains a callout that "BT uses slot/budget/role/peer model, not percent model"
+- F2 (Code Quality) does NOT find BT code
+- F4 (Scope Fidelity) flags any v1 PR that adds BT code as scope creep
+
+---
+
+### Mediated passthrough — the host retains the control plane (architectural principle, added per user's PCI-passthrough story)
+
+The user told a real-world cautionary tale: *"a friend of mine was a bit misguided and did a pci pass through on vmware of a raid controller to a virtual machine. and even if the virtual machine was properly shut down, the controller itself needed to be powered down to work correctly again. that is because pci passthrough doesn't do an abstraction."* And: *"lets make sure that we can keep using whatever device properly through abstractions. lets avoid rebooting the host as much as possible."*
+
+This is exactly the failure mode our design must prevent. The principle is now a **hard architectural rule, not a guideline**:
+
+> **We do NOT do raw PCI passthrough. Every device a VM/jail touches is mediated by a host kernel module (`*_resource.ko`) that retains the control plane. The VM/jail gets a mediated *data plane* view. The host can reset, re-initialize, and re-attach the device after the VM/jail exits — without a host reboot, without a device power cycle, without physical intervention.**
+
+**Why the user's friend's scenario happens (the failure mode we're designing against):**
+
+```
+┌──────────────────┐                              ┌──────────────────┐
+│ VMware hypervisor│  raw PCI passthrough         │  RAID controller │
+│                  │  ────────────────────────►   │  (e.g. LSI MR)   │
+│ - Removes device │  - Unbinds host mfi(4)       │                  │
+│   from host      │  - Gives MMIO/BARs/IRQ to VM │  - Now "owned"   │
+│ - Gives BARs to  │  - VM's mfi(4) takes over    │    by VM         │
+│   the VM         │  - Host kernel can't see it  │  - State is      │
+│                  │                              │    opaque to host│
+└──────────────────┘                              └──────────────────┘
+         │                                                │
+         │  VM shuts down (graceful)                      │
+         ▼                                                │
+   ┌──────────────────┐                                   │
+   │ Hypervisor:      │                                   │
+   │ - VM is gone     │                                   │
+   │ - Device "should"│                                   │
+   │   be back        │                                   │
+   │ - But device is  │                                   │
+   │   in some weird  │ ────────►  ???  ◄──────────────────┘
+   │   state          │   Host can't reset the device
+   │ - Host mfi(4)    │   Host doesn't even know the state
+   │   won't bind     │   Hypervisor has no abstraction
+   └──────────────────┘   Only options: reboot host, or
+                            physically power-cycle the controller
+                            (user's friend's solution)
+```
+
+The root cause: **raw passthrough is not an abstraction. The hypervisor is just a switch that connects the device to either the host or the VM. Once the device is "in" the VM, the host loses all visibility and control.**
+
+**The right design (what we ship):**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ HOST (the only place with control plane)                             │
+│                                                                      │
+│   *_resource.ko (T12, T21, T58, T65, T69-future) — the mediator     │
+│     ├── Retains: PCI config space access (cfgspace read/write)       │
+│     ├── Retains: Power state (PCIe D0/D3hot control)                 │
+│     ├── Retains: Reset capability (FLR, SBR, device-specific)        │
+│     ├── Retains: MMIO/BAR mapping (host maps; VM gets mediated)      │
+│     ├── Retains: Interrupt routing (host arbitrates)                 │
+│     ├── Retains: DMA window control (IOMMU, VT-d)                    │
+│     ├── Retains: AER / DPC error recovery                            │
+│     ├── Retains: Stats / telemetry (T49)                             │
+│     ├── Retains: Audit / observability (T43)                         │
+│     ├── Retains: ACL / authorization (T40)                           │
+│     ├── Retains: Lifecycle hooks (bind, unbind, reset, reinit)       │
+│     └── Mediates: a "virtual function" or "mediated device" to VM    │
+│                                                                      │
+│   ┌─────────────────┐    ┌─────────────────┐    ┌────────────────┐  │
+│   │ gpu_resource.ko │    │ audio_resource  │    │ bt_resource.ko │  │
+│   │ (T21)           │    │ .ko (T58)       │    │ (T69-future)   │  │
+│   │  - NVidia / AMD │    │  - HDA / AC97   │    │  - ubt0        │  │
+│   │  - FLR + driver │    │  - codec reset  │    │  - HCI Reset   │  │
+│   │    reinit       │    │  - stream arbit │    │  - host owns   │  │
+│   │                 │    │    ration       │    │    link keys   │  │
+│   └─────────────────┘    └─────────────────┘    └────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+                                    │  (mediated data plane)
+                                    ▼
+   ┌─────────────────┐    ┌─────────────────┐    ┌────────────────┐
+   │ VM (bhyve)      │    │ Jail            │    │ VM (qemu)      │
+   │  - sees mdev    │    │  - sees /dev/*  │    │  - sees mdev   │
+   │    / VF         │    │    generic      │    │    / VF        │
+   │  - data plane   │    │    nodes        │    │  - data plane  │
+   │    only         │    │  - data plane   │    │    only        │
+   │                 │    │    only         │    │                │
+   │  CANNOT bypass  │    │  CANNOT bypass  │    │  CANNOT bypass │
+   │  the mediator   │    │  the mediator   │    │  the mediator  │
+   └─────────────────┘    └─────────────────┘    └────────────────┘
+```
+
+**The "no reboot needed" guarantee (the user's "lets avoid rebooting the host as much as possible"):**
+
+For every device we mediate, the host MUST be able to:
+
+| Step | What happens | Mechanism |
+|---|---|---|
+| 1. VM/jail exits (or is killed) | Kernel tears down mediated cdev / mdev / VF | `prison_cleanup` callback chain (item 7) |
+| 2. Host's `*_resource.ko` issues a **device reset** | PCI FLR (Function-Level Reset), HDA codec RESET, BT HCI Reset, etc. | Standard PCIe / device-spec reset commands |
+| 3. Host's `*_resource.ko` **re-initializes** the host driver | Driver's `attach()` runs again, device enters D0 | `device_probe_and_attach()` or equivalent |
+| 4. Device is **back in service** on the host | Host userspace can open it again | Standard cdev create / node visible |
+| **Total time** | Sub-second for FLR + reinit (typically 50-500ms) | DTrace-measured |
+| **Host reboot required?** | **NO** | n/a |
+| **Device power cycle required?** | **NO** | n/a |
+| **Physical intervention?** | **NO** | n/a |
+
+**The reset mechanism per device class (designed, not yet implemented):**
+
+| Device | Reset command | Reinit mechanism | Audit event |
+|---|---|---|---|
+| **GPU (T21)** | PCI FLR (Function-Level Reset) via PCIe capability | `nvidia_attach()` / `amdgpu_attach()` / `i915_attach()` re-runs | `gpu-resource:device-reset` |
+| **Audio (T58)** | HDA `RESET` codec command (verb 0x7FF) | `hdac_attach()` re-runs; PCM streams re-initialized | `audio-resource:device-reset` |
+| **BT (T65/T69)** | HCI Reset command (`0x0C03`) | `ng_bluetooth` re-attaches to `ubt0`; `hcsecd(8)` and `sdpd(8)` resume | `bt-resource:device-reset` |
+| **Framebuffer (T12)** | `vt_destroy()` + cdev revoke | `fbuf_jail_attach()` re-runs on next jail | `fbuf-jail:device-reset` |
+| **Storage (future, not in v1)** | NVMe Controller Reset (CC.EN 1→0→1) or AHCI HBA Reset | `nvme_attach()` / `ahci_attach()` re-runs | `storage-resource:device-reset` (future) |
+| **Network (future, not in v1)** | `if_reset()` for NIC, PHY reset for copper | `if_attach()` re-runs | `net-resource:device-reset` (future) |
+
+**What "no raw passthrough" means concretely:**
+
+- We do NOT use `vfio-pci` (Linux) or its FreeBSD equivalent to give a device's BARs directly to a VM
+- We do NOT use IOMMU pass-through (VT-d) without going through `*_resource.ko`
+- We do NOT allow `bhyve -s <pci_slot>,passthrough` style direct passthrough (which is what the user's friend did with VMware)
+- Every device-class mediator is a `*_resource.ko` kernel module that:
+  - Owns the device's control plane
+  - Exports a mediated view (mdev, VF, cdev, sysfs)
+  - Implements `attach()` / `detach()` / `reset()` / `reinit()` hooks
+  - Has audit + DTrace + stats + ACL
+
+**The "but what if a device can't be reset in software" question:**
+
+Some devices cannot be reset in software (e.g. some ancient NICs, some exotic HBAs, devices with broken firmware). For these:
+
+- We **do not** add them to the mediated set in v1
+- A future boulder can add a "raw passthrough (dangerous)" mode that prints a giant "you will need to reboot the host after this VM exits" warning
+- A preflight check `DEVICE_CAN_RESET` rejects devices that lack FLR, SBR, or vendor-specific reset
+- The user can override (`security.policy.device.must_reset=0`) but gets a logged warning
+
+**Preflight check (T22 framework extension, future):**
+
+| Check ID | Name | Default | Severity |
+|---|---|---|---|
+| `DEVICE_HAS_FLR` | Device supports PCI Function-Level Reset | enforced | error (unless override) |
+| `DEVICE_HAS_DRIVER_REINIT` | Host driver can re-attach after FLR | enforced | error |
+| `DEVICE_RESET_TEST_OK` | At adapter-bind time, kernel issues a test FLR and verifies the device re-appears in `pciconf -lv` | enforced | error |
+
+**DTrace probes (T50 extension, per-resource):**
+
+```
+*-resource:device-reset-start
+  args: char *adapter, int reset_type    /* 0=FLR, 1=SBR, 2=vendor, 3=HCI, 4=HDA, ... */
+*-resource:device-reset-complete
+  args: char *adapter, int reset_type, int result, time_t duration_ms
+*-resource:device-reinit-start
+  args: char *adapter, char *driver
+*-resource:device-reinit-complete
+  args: char *adapter, char *driver, int result
+*-resource:reset-failed
+  args: char *adapter, int reset_type, int errno
+```
+
+**Audit log (T43 extension):**
+
+```
+YYYY-MM-DDTHH:MM:SSZ device-reset adapter=nvidia0 type=PCI-FLR reason=jail-exit result=ok duration=120ms operator=root
+YYYY-MM-DDTHH:MM:SSZ device-reinit adapter=nvidia0 driver=nvidia reason=jail-exit result=ok
+YYYY-MM-DDTHH:MM:SSZ device-reset adapter=ubt0 type=HCI reason=jail-stop result=ok duration=80ms
+YYYY-MM-DDTHH:MM:SSZ device-reinit adapter=ubt0 driver=ng_bluetooth reason=jail-stop result=ok
+```
+
+**Stats (T49 extension):**
+
+```c
+struct device_lifecycle_stats {
+        time_t  last_reset_at;
+        time_t  last_reinit_at;
+        uint64_t reset_count;
+        uint64_t reset_failure_count;
+        uint64_t reinit_count;
+        uint64_t reinit_failure_count;
+        time_t  total_reset_time_ms;     /* cumulative */
+        time_t  longest_reset_ms;        /* high-water mark */
+        char    last_reset_reason[64];   /* "jail-exit" | "host-recovery" | "operator-reset" | "error-recovery" */
+};
+```
+
+**Why this design prevents the user's friend's scenario:**
+
+| The user's friend's scenario | Our mediated design |
+|---|---|
+| Raw PCI passthrough of RAID controller | Mediated passthrough via `*_resource.ko` |
+| Hypervisor removes device from host | Host's `*_resource.ko` retains the control plane (PCI config space, power, reset) |
+| VM's driver takes over | VM gets a mediated mdev / VF (data plane only) |
+| VM shuts down gracefully | Host's `*_resource.ko` runs `prison_cleanup` → FLR → driver reinit → device back in service |
+| Host kernel can't see device state | Host's `*_resource.ko` has full visibility (it never gave it up) |
+| Device is in weird state | FLR clears all state to a known-good baseline |
+| Host driver won't bind | Driver's `attach()` re-runs after FLR, in a clean state |
+| User powers down controller / reboots host | **NOT NEEDED** — `*_resource.ko` did it in software |
+| Total downtime | Hours (user's friend) vs **<1 second** (our design) |
+
+**The principle is now a "Must Have" in Work Objectives:**
+
+This is added below to the Work Objectives → Must Have section:
+
+> - **No raw PCI passthrough.** All device access is mediated by `*_resource.ko` modules (T12, T21, T58, T65, future). The host retains the control plane (PCI config space, power state, reset, reinit). The VM/jail gets a mediated data plane (mdev / VF / cdev). On VM/jail exit, the host can reset and re-attach the device in software, without a host reboot, without a device power cycle, without physical intervention. The user's friend's scenario (RAID controller needing power cycle after VM exit) is **architecturally prevented** for every device we mediate.
+
+**The principle is also a "Must NOT Have" guardrail:**
+
+> - **No `vfio-pci`-style raw BAR passthrough.** We do not give a device's MMIO space directly to a VM. We do not bypass the mediator. We do not allow `bhyve -s <slot>,passthrough` direct passthrough. Every device-class has a `*_resource.ko` mediator in the middle.
+
+**Edge case: what if the user actually NEEDS raw passthrough (e.g. a device with no FLR)?**
+
+We don't ship it in v1. The preflight check `DEVICE_HAS_FLR` rejects it. The operator can override with `security.policy.device.must_reset=0` but gets:
+
+- A `device-raw-passthrough-enabled` audit event
+- A `device-raw-passthrough-warning` DTrace probe
+- A "this VM will need a host reboot when it exits" warning in `display-enduser(7)`
+- A `device-must-be-power-cycled` man-page section
+
+This is the *escape hatch*, not the default. And the audit makes it visible.
+
+**F1-F4 updates:**
+
+- F1 verifies that every `*_resource.ko` task body (T12, T21, T58, T65, future) explicitly states the mediator pattern in its "What to do" section
+- F1 verifies that `display-enduser(7)` and `display-resource(9)` document the "no raw passthrough" rule
+- F1 verifies that the `device-reset` DTrace probes and audit events are reserved in the design (not implemented in v1)
+- F2 (Code Quality) does NOT find any `vfio-pci` style direct BAR mapping in v1
+- F2 verifies the `*_resource.ko` modules have `attach()` / `detach()` / `reset()` / `reinit()` hooks (when implemented)
+- F4 (Scope Fidelity) flags any v1 PR that introduces raw passthrough as a guardrail violation
+
+**Concrete design sketch — what `*_resource.ko` looks like (per-device template):**
+
+```c
+/* Common pattern for all *_resource.ko mediators */
+
+struct resource_mediator {
+        device_t            rm_dev;          /* the PCI device */
+        struct resource     *rm_cfg;         /* PCI config space (retained by host) */
+        struct resource     *rm_mem;         /* MMIO (host maps, VM gets mediated subset) */
+        int                 rm_jid;          /* current owner, 0 = host */
+        uint64_t            rm_generation;   /* incremented on every bind/unbind/reset */
+        struct refcount     rm_refcount;     /* prevents reaping while in use */
+        int                 rm_reset_type;   /* PCI_FLR, HCI_RESET, HDA_RESET, ... */
+        int                 (*rm_reset)(struct resource_mediator *);
+        int                 (*rm_reinit)(struct resource_mediator *);
+        /* audit, DTrace, stats, ACL — see T43, T50, T49, T40 */
+};
+
+static int
+mediator_attach(device_t dev)
+{
+        struct resource_mediator *rm = ...;
+        /* Standard mediator init: config space, power state, mediator registration */
+        rm->rm_reset = device_specific_reset;   /* FLR, HCI, HDA, etc. */
+        rm->rm_reinit = device_specific_reinit; /* driver_attach() */
+        /* ... */
+        return (0);
+}
+
+static int
+mediator_detach(struct resource_mediator *rm)
+{
+        /* Idempotent: safe to call twice */
+        /* Steps: 1) revoke mediated cdev, 2) FLR, 3) driver reinit, 4) re-attach to host */
+        SDT_PROBE(*-resource, device, reset, start, rm->rm_dev, rm->rm_reset_type, 0, 0, 0);
+        int error = rm->rm_reset(rm);  /* FLR / HCI / HDA reset */
+        if (error == 0) {
+                error = rm->rm_reinit(rm);  /* driver reinit */
+        }
+        SDT_PROBE(*-resource, device, reset, complete, rm->rm_dev, rm->rm_reset_type, error, ticks, 0);
+        audit_log_device_reset(rm, error);
+        stats_count_device_reset(rm, error);
+        return (error);
+}
+```
+
+This is the template that T12, T21, T58, T65 (and future T69 storage) all follow. Each module specializes `rm_reset` and `rm_reinit` for its device class. The rest is boilerplate.
+
+**Why this design is the right shape:**
+
+- The user's friend's story is exactly the failure mode of raw passthrough. We don't ship raw passthrough.
+- The mediator pattern is industry-standard: NVIDIA vGPU, Intel GVT-g, AMD SR-IOV, VFIO mediated devices, VMware vDGA, SR-IOV with PF/VF, FreeBSD's own `nvmf(4)` / `if_iov` are all examples of the same pattern.
+- The host can always recover the device in software, because the host never gave up the control plane.
+- The reset+reinit is auditable, observable, and recoverable. When something goes wrong (and it will), there's a forensic trail.
+- The "no reboot needed" guarantee is verifiable: a test that boots a VM, binds a device, kills the VM, and checks the device is back on the host — all in <1 second — is part of the design's acceptance criteria.
+- A future engineer reading this section can build any new `*_resource.ko` by following the template. The pattern is established.
+
+---
+
+### Multi-device / heterogeneous hardware (architectural principle, added per user request)
+
+The user asked: *"add in a mixed / multi gpu hardware configuration to consider, in fact multiple devices of any type"*. The current plan assumes a single adapter per device class (indexed by `0`: `nvidia0`, `ubt0`, `hda0`). That assumption breaks the moment a host has two GPUs, two BT adapters, an integrated GPU + a discrete GPU, or a mix of vendors. This section establishes the consistent model.
+
+**The principle: every mediator module (`*_resource.ko`) exposes a uniform enumeration, addressing, grouping, and hot-plug API. The model is identical across GPU, audio, BT, framebuffer, and future device classes.**
+
+**The four sub-concerns:**
+
+1. **Enumeration** — how the host knows what adapters exist
+2. **Addressing** — how a jail/VM names a specific adapter (or set of adapters)
+3. **Grouping / pooling** — how a jail/VM names a *named set* of adapters with one config token
+4. **Hot-plug** — what happens when adapters come and go at runtime
+
+**1. Enumeration (the canonical name + alias model):**
+
+Every adapter has THREE names:
+- **Canonical name** (stable, operator-friendly): `vendor.model.serial` — e.g. `nvidia.RTX-A5000.1234567890`
+- **Kernel alias** (existing FreeBSD convention): `class<idx>` — e.g. `nvidia0`, `nvidia1`, `amdgpu0`, `ubt0`, `ubt1`, `hda0`, `hdac0`
+- **PCI BDF** (hardware identity, never changes): `pci0:1:0:0` — bus 0, device 1, function 0
+
+The canonical name is the source of truth for jail/VM config. The kernel alias is for backward compat. The PCI BDF is for sysctl/audit forensics.
+
+| Adapter | Canonical | Kernel alias | PCI BDF |
+|---|---|---|---|
+| NVIDIA RTX A5000 #1 | `nvidia.RTX-A5000.1234567890` | `nvidia0` | `pci0:1:0:0` |
+| NVIDIA RTX A5000 #2 | `nvidia.RTX-A5000.9876543210` | `nvidia1` | `pci0:2:0:0` |
+| AMD Radeon Pro W6600 | `amd.Radeon-Pro-W6600.ABC123` | `amdgpu0` | `pci0:3:0:0` |
+| Intel UHD 770 (iGPU) | `intel.UHD-770.0` | `i9150` | `pci0:0:2:0` |
+| USB BT adapter #1 | `usb.bt-0a12:0001.A1B2C3D4E5F6` | `ubt0` | `usb0:1:0:0` |
+| USB BT adapter #2 | `usb.bt-0a12:0001.F6E5D4C3B2A1` | `ubt1` | `usb0:2:0:0` |
+| HDA codec (onboard) | `intel.HDA-ALC1220.0` | `hda0` | `pci0:31:0:0` |
+| USB audio | `usb.audio-CM6631.0123` | `uaudio0` | `usb0:3:0:0` |
+
+**Sysctl enumeration (planned, per-device-class):**
+
+```bash
+# List all GPUs
+sysctl hw.gpu.adapters
+# nvidia.RTX-A5000.1234567890 nvidia0 pci0:1:0:0 vendor=10de device=2236 class=0x030000 ports_max=4 flr=1
+# nvidia.RTX-A5000.9876543210 nvidia1 pci0:2:0:0 vendor=10de device=2236 class=0x030000 ports_max=4 flr=1
+# amd.Radeon-Pro-W6600.ABC123 amdgpu0 pci0:3:0:0 vendor=1002 device=73bf class=0x030000 ports_max=4 flr=1
+# intel.UHD-770.0 i9150 pci0:0:2:0 vendor=8086 device=4680 class=0x030000 ports_max=3 flr=1
+
+# Look up an adapter by canonical name
+sysctl hw.gpu.adapter.nvidia.RTX-A5000.1234567890
+# alias=nvidia0 bdf=pci0:1:0:0 vendor=10de device=2236 ports_max=4 flr=1 ...
+
+# Look up an adapter by kernel alias
+sysctl hw.gpu.adapter.0
+# canonical=nvidia.RTX-A5000.1234567890 bdf=pci0:1:0:0 ...
+
+# List all BT adapters
+sysctl hw.bt.adapters
+# usb.bt-0a12:0001.A1B2C3D4E5F6 ubt0 usb0:1:0:0 vendor=0a12 product=0001 bdaddr=AA:BB:CC:DD:EE:FF hci_rev=0x0c lmp_sub=0x420c le=1 classic=1 flr=0
+# usb.bt-0a12:0001.F6E5D4C3B2A1 ubt1 usb0:2:0:0 vendor=0a12 product=0001 bdaddr=11:22:33:44:55:66 hci_rev=0x0c lmp_sub=0x420c le=1 classic=1 flr=0
+```
+
+**2. Addressing (how a jail names an adapter):**
+
+Three forms in `jail.conf` (and equivalent in `bhyve -s ...`):
+
+```ini
+# Form 1: specific canonical name (preferred — stable across reboots, hardware swaps)
+gpu.adapter = "nvidia.RTX-A5000.1234567890";
+
+# Form 2: kernel alias (backward compat with existing FreeBSD conventions)
+gpu.adapter = "nvidia0";
+
+# Form 3: PCI BDF (for sysadmin's who know their hardware)
+gpu.adapter = "pci0:1:0:0";
+
+# Form 4: wildcard — host picks the best available
+gpu.adapter = "any";
+
+# Form 5: comma-separated list — jail can use ANY of these (host arbitrates)
+gpu.adapter = "nvidia0,nvidia1";
+```
+
+**Adapter-selection algorithm (when `gpu.adapter=any`):**
+
+```
+1. Load `security.gpu.priority_pool` (ordered list of pool names, default: "default")
+2. For each pool in priority order:
+     Load `security.gpu.pool.<name>.adapters` (ordered list of canonical names)
+     For each adapter in pool:
+       If adapter is present AND `hw.gpu.<idx>.share.percent_max > 0` AND no jail currently owns it:
+         Pick this adapter
+         Return
+3. If no adapter found:
+   If `gpu.allow_no_gpu=1`: start without GPU (with override)
+   Else: jail start fails with EAGAIN
+```
+
+**3. Grouping / pooling:**
+
+Operators define named pools in `/etc/display/pools.conf` (or via sysctl). A jail references a pool by name. The pool resolves to one or more adapters at jail start time.
+
+```ini
+# /etc/display/pools.conf (planned, future)
+[gpu.pool.ml-cluster]
+adapters = nvidia.RTX-A5000.1234567890, nvidia.RTX-A5000.9876543210
+priority = high
+share_percent_per_jail_max = 30
+notes = "ML training pool — 2x A5000, prefer newer first"
+
+[gpu.pool.kiosk]
+adapters = intel.UHD-770.0
+priority = low
+share_percent_per_jail_max = 50
+notes = "Kiosk displays — integrated GPU only"
+
+[gpu.pool.any]
+adapters = nvidia0, amdgpu0, i9150
+priority = medium
+share_percent_per_jail_max = 25
+notes = "Fallback — any GPU"
+
+[bt.pool.lab]
+adapters = ubt0, ubt1
+max_slaves_classic_per_jail = 3
+max_le_per_jail = 10
+notes = "Lab BT — both adapters, no jail gets more than 3/7 classic or 10/255 LE"
+
+[audio.pool.studio]
+adapters = hda0, uaudio0
+max_channels_per_jail = 8
+notes = "Studio audio — onboard + USB"
+```
+
+**Jail config (using pools):**
+
+```ini
+# jail.conf
+ml-trainer {
+    allow.gpu = 1;
+    gpu.adapter_group = "ml-cluster";   # named pool
+    gpu.ports = 4;                       # host decides which adapter(s) to take 4 ports from
+    gpu.share_percent = 30;              # jail may use up to 30% of any pool adapter
+    # No need to know which specific GPU — host picks
+}
+
+kiosk {
+    allow.gpu = 1;
+    gpu.adapter = "intel.UHD-770.0";    # specific adapter (overrides pool)
+    gpu.ports = 1;
+    gpu.share_percent = 50;
+}
+
+research {
+    allow.gpu = 1;
+    gpu.adapter_group = "ml-cluster";
+    gpu.ports = 8;                       # 8 ports across 2 adapters (4 each)
+    gpu.share_percent = 50;
+    # Wall mode: the 2x A5000s together drive one 7680x2160 wall
+}
+```
+
+**Sysctl representation of pools:**
+
+```bash
+# Read a pool
+sysctl security.gpu.pool.ml-cluster.adapters
+# nvidia.RTX-A5000.1234567890,nvidia.RTX-A5000.9876543210
+
+sysctl security.gpu.pool.ml-cluster.priority
+# high
+
+sysctl security.gpu.pool.ml-cluster.share_percent_per_jail_max
+# 30
+
+# Add an adapter to a pool (operator action, audit-logged)
+sysctl security.gpu.pool.ml-cluster.adapters=nvidia.RTX-A5000.1234567890,nvidia.RTX-A5000.9876543210,amd.Radeon-Pro-W6600.ABC123
+# Audit: "operator root added amd.Radeon-Pro-W6600.ABC123 to pool ml-cluster"
+```
+
+**Pool resolution order (when `gpu.adapter_group=foo`):**
+
+1. Look up `security.gpu.pool.<foo>.adapters`
+2. Filter by `hw.gpu.<idx>.present=1` (hot-plug aware)
+3. Filter by `security.policy.gpu.deny_default=0` (or per-pool override)
+4. Filter by adapter's `share.percent_max > 0`
+5. Sort by `security.gpu.pool.<foo>.priority` (high > medium > low)
+6. Sort by adapter's `hw.gpu.<idx>.share.percent_max` (descending)
+7. Take the first N adapters where N = `gpu.ports / per-adapter-port-density`
+8. Distribute `gpu.ports` across the selected adapters
+9. If total pool capacity < `gpu.ports`: error (with override `gpu.allow_underprovision=1`)
+
+**Multi-GPU wall resolution (when `gpu.ports=8` spans 2 adapters):**
+
+The wall's bounding box is computed from the *max* resolution and *max* refresh across all assigned ports:
+
+```
+wall {
+    adapter_0: nvidia0 — 4 ports, each 1920x1080@60
+    adapter_1: nvidia1 — 4 ports, each 1920x1080@60
+
+    wall_width   = 4 * 1920 = 7680  (4 columns on adapter_0)
+    wall_height  = 2 * 1080 = 2160  (2 rows: 4 on top, 4 on bottom, 2x2 arrangement)
+    wall_fps     = 60
+    wall_layout  = "2x4" or "4x2"  # T53
+}
+```
+
+The wall's display is presented to the VM as a single 7680x2160 surface (or 15360x1080 for 4x2). The mediator handles the slicing across adapters internally. The VM's OS sees one big display.
+
+**4. Hot-plug (adapters come and go at runtime):**
+
+PCIe hot-plug, USB hot-plug, Thunderbolt hot-plug — all are first-class events. The mediator must handle them without breaking running jails.
+
+| Hot-plug event | Detection | Mediator response | Jail response | Audit |
+|---|---|---|---|---|
+| **Adapter added** (e.g. USB BT dongle plugged in) | `device_attach()` callback in mediator | Enumerate, add to `hw.<class>.adapters`, validate against pools, add to `security.<class>.pool.*` sysctls | New jail starts can use it. Running jails unaffected. | `device-added canonical=usb.bt-... alias=ubt2 bdf=usb0:4:0:0` |
+| **Adapter removed** (e.g. USB BT dongle unplugged) | `device_detach()` callback in mediator | Mark `present=0`, find owning jails, run `prison_cleanup` (item 7) for each, re-attempt pool selection | All jails owning the adapter get `ENXIO` on next I/O. Jail continues running with reduced capacity (or fails if critical). | `device-removed canonical=... alias=... reason=physical-disconnect jids=42,43` |
+| **Adapter failure** (e.g. GPU hangs) | Mediator's watchdog timer or AER | Mark `present=0`, run `prison_cleanup` + `device-reset` + `device-reinit` (Mediated passthrough section) | Same as remove. | `device-failed canonical=... alias=... reason=aer-correctable jids=42` |
+| **Adapter recovered** | Mediator's watchdog re-probes | Mark `present=1`, validate against pools | New jail starts can use it again. | `device-recovered canonical=... alias=...` |
+| **Pool membership changed** | Operator edits `security.gpu.pool.X.adapters` | Re-evaluate running jails against the new pool | Affected jails may be re-balanced (with operator action) | `pool-membership-changed pool=ml-cluster added=amd.Radeon... removed=nvidia.RTX...` |
+| **Hot-plug disabled by sysctl** | `security.<class>.hotplug.allow=0` (planned) | Mediator refuses to attach new devices | New device ignored; running jails continue with old set | `device-add-rejected canonical=... reason=hotplug-disabled` |
+
+**5. Mixed-vendor consistency (the "mixed GPU hardware configuration" the user asked about):**
+
+Different GPU vendors expose different capabilities. The `gpu_resource.ko` abstracts this:
+
+| Capability | NVIDIA | AMD | Intel iGPU | Mediator's view |
+|---|---|---|---|---|
+| Memory | dedicated GDDR | dedicated GDDR | shared system RAM | `gpu.memory_mb` (mediator computes) |
+| Compute (CUDA / OpenCL) | CUDA cores | Stream processors | Execution units | `gpu.compute_units` (mediator normalizes to "compute unit count") |
+| Display outputs | HDMI/DP/DVI | HDMI/DP/DVI | HDMI/DP/eDP | `gpu.ports_max` (count of physical connectors) |
+| Hardware decode/encode | NVDEC/NVENC | VCN/VCN2 | Quick Sync | `gpu.codec.h264=1, hevc=1, av1=0/1` |
+| Virtualization | vGPU, MIG | SR-IOV | GVT-g | `gpu.virt.type=none\|mediated\|sr-iov\|mig` |
+| Reset | PCI FLR | PCI FLR | PCI FLR | `gpu.reset=FLR` (all modern GPUs support FLR) |
+| Driver | `nvidia.ko` | `amdgpu.ko` | `i915.ko` | mediator handles vendor-specific quirks |
+
+**The jail sees a uniform GPU surface:**
+
+```ini
+gpu {
+    adapter = "any";            # host picks the best available
+    ports = 2;                  # 2 physical connectors
+    share_percent = 25;         # 25% of GPU time
+    codec = "h264,hevc";        # what codecs the GPU can do (mediator enforces)
+    memory_mb = 4096;           # 4GB framebuffer (mediator enforces)
+    virt_type = "any";          # host picks none / mediated / sr-iov / mig
+}
+```
+
+The jail doesn't care if the host picked NVIDIA, AMD, or Intel. The mediator translates.
+
+**6. MIG (Multi-Instance GPU) on NVIDIA A100/H100:**
+
+A single physical A100 can be split into up to 7 MIG instances. Each MIG looks like a separate GPU to the VM:
+
+```
+nvidia.A100.ABC123          (the physical GPU, 80GB)
+├── nvidia.A100.ABC123.mig0  (1g.5gb: 1/7 compute, 5GB memory)
+├── nvidia.A100.ABC123.mig1  (1g.5gb)
+├── nvidia.A100.ABC123.mig2  (1g.5gb)
+└── ...
+```
+
+The mediator enumerates MIG instances as first-class adapters:
+
+```bash
+sysctl hw.gpu.adapters
+# nvidia.A100.ABC123 nvidia0 pci0:1:0:0 vendor=10de device=20b2 ports_max=0 flr=1 mig_profile=disabled
+# nvidia.A100.ABC123.mig0 nvidia0.mig0 pci0:1:0.0 vendor=10de device=20b2.0 ports_max=0 flr=1 mig_profile=1g.5gb compute=1/7 memory=5GB
+# nvidia.A100.ABC123.mig1 nvidia0.mig1 pci0:1:0.1 vendor=10de device=20b2.1 ports_max=0 flr=1 mig_profile=1g.5gb compute=1/7 memory=5GB
+```
+
+A jail can request:
+```ini
+gpu.adapter = "nvidia.A100.ABC123.mig0";  # a specific MIG slice
+# OR
+gpu.adapter_group = "mig-pool";            # a pool of MIG slices
+gpu.ports = 0;                              # MIG has no display outputs
+gpu.compute_units = "1/7";                 # 1 of 7 compute slices
+gpu.memory_mb = 5120;                       # 5GB
+```
+
+**7. SR-IOV PFs and VFs:**
+
+Network and storage devices often have SR-IOV. The PF (Physical Function) is the host-managed adapter; VFs (Virtual Functions) are the slices given to VMs.
+
+```
+ix0 (PF, host-owned)
+├── ix0vf0 (VF 0, given to VM1)
+├── ix0vf1 (VF 1, given to VM2)
+└── ...
+```
+
+The mediator enumerates VFs as first-class adapters. The `pf_resource.ko` and `vf_resource.ko` (future) follow the same pattern.
+
+**8. Sysctl / config patterns for multi-device (consolidated):**
+
+```bash
+# Per-class enumeration
+sysctl hw.gpu.adapters                    # all GPUs
+sysctl hw.bt.adapters                     # all BT adapters
+sysctl hw.audio.adapters                  # all audio adapters
+sysctl hw.fbuf.adapters                   # all framebuffers (kernel-backed)
+
+# Per-adapter sysctls (existing pattern, unchanged)
+sysctl hw.gpu.0.*                         # nvidia0
+sysctl hw.gpu.1.*                         # nvidia1 (was implicit, now explicit)
+sysctl hw.bt.0.*                          # ubt0
+sysctl hw.bt.1.*                          # ubt1 (new)
+
+# Per-pool sysctls (new)
+sysctl security.gpu.pool.<name>.adapters  # comma-separated canonical names
+sysctl security.gpu.pool.<name>.priority  # high|medium|low
+sysctl security.gpu.pool.<name>.share_percent_per_jail_max
+
+# Hot-plug control
+sysctl security.gpu.hotplug.allow=1       # allow new GPUs to be added at runtime
+sysctl security.bt.hotplug.allow=1        # allow new BT adapters
+sysctl security.gpu.hotplug.auto_reattach=1  # auto-recover on device failure
+```
+
+**9. Preflight checks (T22 framework extension):**
+
+| Check ID | Name | Default | Severity |
+|---|---|---|---|
+| `ADAPTER_PRESENT` | `gpu.adapter` (or pool members) exist in `hw.gpu.adapters` | enforced | error |
+| `ADAPTER_COMPATIBLE` | All selected adapters support the requested features (FLR, codec, virt_type) | enforced | error |
+| `POOL_RESOLVABLE` | `gpu.adapter_group` resolves to ≥1 present adapter | enforced | error (unless `gpu.allow_underprovision=1`) |
+| `POOL_HAS_CAPACITY` | Sum of pool adapter capacities ≥ `gpu.ports` / `gpu.share_percent` | enforced | error |
+| `MIG_PROFILE_OK` | If MIG requested, `hw.gpu.<idx>.mig_profile` is set and matches the request | enforced | error |
+| `HOTPLUG_POLICY` | `security.<class>.hotplug.allow` matches the operator's intent (warn if disabled but devices present) | enforced | warn |
+
+**10. DTrace probes (T50 extension):**
+
+```
+*-resource:adapter-enumerated
+  args: char *canonical, char *alias, char *bdf
+*-resource:adapter-removed
+  args: char *canonical, char *alias, int reason    /* 0=hot-unplug, 1=fail, 2=operator */
+*-resource:adapter-failed
+  args: char *canonical, char *alias, int reason
+*-resource:adapter-recovered
+  args: char *canonical, char *alias
+*-resource:pool-resolved
+  args: char *pool_name, char *jail_devnode, int adapter_count
+*-resource:pool-membership-changed
+  args: char *pool_name, char *operator, char *added, char *removed
+*-resource:hotplug-rejected
+  args: char *canonical, int reason
+```
+
+**11. Audit log (T43 extension):**
+
+```
+YYYY-MM-DDTHH:MM:SSZ device-added canonical=nvidia.RTX-A5000.9876543210 alias=nvidia1 bdf=pci0:2:0:0
+YYYY-MM-DDTHH:MM:SSZ device-removed canonical=usb.bt-A1B2C3D4E5F6 alias=ubt0 reason=physical-disconnect jids=42,43
+YYYY-MM-DDTHH:MM:SSZ device-failed canonical=amd.Radeon-Pro-W6600.ABC123 reason=aer-correctable jids=44
+YYYY-MM-DDTHH:MM:SSZ device-recovered canonical=amd.Radeon-Pro-W6600.ABC123
+YYYY-MM-DDTHH:MM:SSZ pool-membership-changed pool=ml-cluster operator=root added=amd.Radeon... removed=nvidia.RTX...
+YYYY-MM-DDTHH:MM:SSZ hotplug-rejected canonical=usb.bt-... reason=hotplug-disabled
+YYYY-MM-DDTHH:MM:SSZ pool-resolved pool=ml-cluster jail=ml-trainer adapters=2 ports=4
+```
+
+**12. Stats (T49 extension):**
+
+```c
+struct adapter_stats {
+        char    canonical[128];
+        char    alias[32];
+        char    bdf[16];
+        int     present;                /* 1=attached, 0=removed */
+        time_t  attached_at;            /* epoch seconds */
+        time_t  detached_at;            /* epoch seconds, 0 = still attached */
+        uint64_t present_count;         /* lifetime attach events */
+        uint64_t absent_count;          /* lifetime detach events */
+        uint64_t failure_count;         /* lifetime failure events */
+        uint64_t reset_count;           /* lifetime resets (from Mediated passthrough) */
+        uint64_t jail_owner_count;      /* currently bound to N jails */
+        uint64_t lifetime_jail_seconds; /* cumulative time bound to any jail */
+};
+```
+
+**13. Backward compatibility:**
+
+The existing single-adapter assumptions (e.g. `hw.gpu.0.*` only) continue to work. The new sysctls (`hw.gpu.adapters`, `security.gpu.pool.*`) are additive. The jail.conf schema is extended with new keys (`gpu.adapter_group`); existing keys (`gpu.adapter`) continue to work.
+
+**The jail sees a uniform surface regardless of underlying hardware:**
+
+The same jail.conf:
+```ini
+gpu.adapter = "any";
+gpu.ports = 2;
+gpu.share_percent = 25;
+```
+…works on:
+- A single-GPU host (NVIDIA RTX A5000) → picks `nvidia0`
+- A multi-GPU host (2x A5000 + 1x W6600 + 1x UHD 770) → picks the first available per the priority pool
+- An NVIDIA A100 with MIG → picks a MIG slice
+- A multi-adapter BT host (2x USB BT dongles) → picks per the BT pool
+- A mixed-vendor host (NVIDIA + AMD + Intel) → picks the highest-priority available, falling back through pools
+
+**Why this design is the right shape:**
+
+- **Realistic for real hardware** — every multi-GPU server on the market can be represented
+- **Stable across hardware swaps** — canonical name (`vendor.model.serial`) survives GPU replacement
+- **Operator-friendly** — pools in `/etc/display/pools.conf` are human-readable
+- **Backward compatible** — kernel aliases (`nvidia0`) continue to work
+- **Hot-plug aware** — runtime adapter changes don't break running jails
+- **Mixed-vendor safe** — the jail sees a uniform GPU surface, regardless of vendor
+- **MIG / SR-IOV ready** — instances/VFs are first-class adapters
+- **Auditable** — every adapter event is logged with canonical name + alias + BDF
+- **Testable** — preflight checks can be run against the actual hardware configuration
+- **Extensible** — a new device class (e.g. `storage_resource.ko`) follows the same pattern
+
+**F1-F4 updates:**
+
+- F1 verifies that every `*_resource.ko` task body (T12, T21, T58, T65, future) implements the canonical-name + kernel-alias + BDF enumeration
+- F1 verifies that the `pools.conf` schema is documented in `display-resource(9)` (future man page)
+- F1 verifies that the `hotplug.allow` sysctls are reserved in T35's OID table
+- F2 (Code Quality) does NOT find any implementation in v1 (this is design only)
+- F4 (Scope Fidelity) flags any v1 PR that hard-codes a single adapter assumption (e.g. `if (gpu == nvidia0)`) as a guardrail violation
+
+**The "no hard-coded single-adapter" Must Have (adds to Work Objectives):**
+
+> - **No hard-coded single-adapter assumptions.** Every `*_resource.ko` module must support multiple adapters, multiple vendors, hot-plug, and named pools. The jail sees a uniform surface regardless of underlying hardware. Hard-coding `if (gpu == nvidia0)` or assuming `hw.gpu.0.*` is the only GPU is a guardrail violation. The canonical-name + kernel-alias + BDF + pool model is the source of truth.
+
+**Updated Must NOT Have (adds):**
+
+> - No hard-coded single-adapter assumptions in any `*_resource.ko` module
+> - No hard-coded vendor detection (the mediator abstracts vendor differences)
+> - No hard-coded port counts (mediator queries the device's actual port count)
+> - No hard-coded device class (mediator uses vtable + name dispatch)
+
+---
+
+### Workload-driven GPU selection + dynamic capability discovery (architectural principle, added per user request)
+
+The user clarified three things in close succession:
+
+1. *"say we give a jail the rights to gpu access, but we don't need to say which gpu, just find a spot on an available gpu, and how do we set limits in an agnostic manner to work on any gpu (hence the percentages so far)"*
+2. *"now we may want to say which type of gpu, like things are just better on nvidia, and others on AMD, and eventually something will be good on the others"*
+3. *"but how do we build that list dynamically so that if there is a new gpu, we don't need to change chode in this project =P"*
+
+These three are tightly coupled. The right design combines: (a) "any GPU" auto-selection, (b) workload-or-vendor-driven preference, and (c) **runtime capability discovery with a pluggable registry, generic fallback, and JSON overlay escape hatch** — so that a new GPU vendor or model arriving tomorrow needs **zero code changes in `gpu_resource.ko`**.
+
+**The principle: the mediator is data-driven, not code-driven. Vendor support is a registration, not a fork.**
+
+**1. The three orthogonal selectors (the jail-side API):**
+
+A jail declares three independent things about its GPU requirement:
+
+```ini
+# Selector 1: WHICH physical adapter (most specific)
+gpu.adapter = "nvidia0" | "nvidia.RTX-A5000.1234567890" | "pci0:1:0:0" | "any" | "nvidia0,nvidia1";
+# Selector 2: WHICH vendor class (for workload affinity)
+gpu.vendor = "any" | "nvidia" | "amd" | "intel" | "<vendor-name>";
+# Selector 3: WHICH workload API the jail needs (for compatibility)
+gpu.workload = "any" | "cuda" | "rocm" | "opencl" | "vulkan" | "opengl" | "quicksync" | "oneapi" | "metal" | "<custom>";
+```
+
+The three are independent and combined with AND logic. Examples:
+
+| Jail says | Host picks |
+|---|---|
+| `gpu.adapter="nvidia0"`, `gpu.vendor="any"`, `gpu.workload="any"` | exactly nvidia0 (most specific) |
+| `gpu.adapter="any"`, `gpu.vendor="any"`, `gpu.workload="any"` | best available from any pool |
+| `gpu.adapter="any"`, `gpu.vendor="nvidia"`, `gpu.workload="any"` | first available NVIDIA |
+| `gpu.adapter="any"`, `gpu.vendor="any"`, `gpu.workload="cuda"` | any adapter that supports CUDA |
+| `gpu.adapter="any"`, `gpu.vendor="nvidia"`, `gpu.workload="cuda"` | an NVIDIA (CUDA implies it) |
+| `gpu.adapter="any"`, `gpu.vendor="amd"`, `gpu.workload="cuda"` | **REJECTED** (CUDA + AMD is contradictory) |
+| `gpu.adapter="any"`, `gpu.vendor="any"`, `gpu.workload="rocm"` | an AMD that supports ROCm |
+| `gpu.adapter="any"`, `gpu.vendor="any"`, `gpu.workload="opencl"` | anything with OpenCL (NVIDIA + AMD + Intel) |
+| `gpu.adapter="any"`, `gpu.vendor="any"`, `gpu.workload="any"`, `gpu.compute_units=2048` | any adapter with ≥ 2048 compute units (vendor-agnostic) |
+
+**The host runs the matching algorithm (planned, in `gpu_resource.ko`):**
+
+```
+1. Candidate set = all adapters in `hw.gpu.adapters` where `present=1`
+2. Filter by `gpu.adapter` if specified and not "any" (must match alias/BDF/canonical)
+3. Filter by `gpu.vendor` if specified and not "any" (must match `vendor_class` from caps)
+4. Filter by `gpu.workload` if specified and not "any" (must match a `compute_api`)
+5. Filter by `gpu.compute_units_min` (if specified, must have ≥ N compute units)
+6. Filter by `gpu.memory_mb_min` (if specified, must have ≥ N MB VRAM)
+7. Filter by `gpu.codec` (if specified, must support all listed codecs)
+8. Filter by pool priority / share_percent / etc. (per multi-device section)
+9. If empty: error EAGAIN (with override gpu.allow_no_gpu=1)
+10. If non-empty: pick best per pool priority, then per share_percent
+```
+
+**2. The agnostic limit schema (what "limits in an agnostic manner" means):**
+
+The user said *"how do we set limits in an agnostic manner to work on any gpu (hence the percentages so far)"*. The right answer is: **the limit tokens are vendor-agnostic; the mediator translates to vendor-specific values at runtime**.
+
+**The limit schema (planned, in `gpu_resource.ko`):**
+
+| Limit token | Type | Vendor-agnostic meaning | Mediator translation |
+|---|---|---|---|
+| `gpu.share_percent` | int 0-100 | % of adapter's compute | `compute_units * share_percent / 100` |
+| `gpu.memory_percent` | int 0-100 | % of adapter's VRAM | `memory_mb * memory_percent / 100` |
+| `gpu.power_percent` | int 0-100 | % of TDP | `tdp_w * power_percent / 100` |
+| `gpu.encoder_sessions` | int | # of concurrent encode sessions | vendor-specific (NVIDIA = NVDEC/NVENC count, AMD = VCN count) |
+| `gpu.decoder_sessions` | int | # of concurrent decode sessions | same |
+| `gpu.frame_rate_max` | int | max fps for display output | enforced via frame timing (vendor-agnostic) |
+| `gpu.pixel_throughput_max` | string | e.g. "4K@60" or "8K@30" | `width * height * fps` comparison (vendor-agnostic) |
+| `gpu.bandwidth_bps` | int | max DMA bandwidth | vendor-agnostic bytes/sec |
+| `gpu.latency_ms` | int | max command latency | vendor-agnostic ms |
+| `gpu.ports` | int | # of display output connectors | physical connector count (HDMI/DP/DVI/USBC) |
+| `gpu.compute_units` | int | min # of compute units | vendor-agnostic (CUDA cores ≡ SPs ≡ EUs) |
+| `gpu.memory_mb` | int | min VRAM in MB | vendor-agnostic (a megabyte is a megabyte) |
+| `gpu.codec` | string list | required codecs | vendor-agnostic: "h264,hevc,av1,vp9" |
+
+**What's portable (vendor-agnostic):**
+
+- Percentages (compute, memory, power)
+- Counts (encoder sessions, decoder sessions, ports)
+- Units (bytes, ms, fps, MHz, watts)
+- Codec names (H.264, HEVC, AV1, VP9 — the *specs*, not the vendor's implementation)
+- Compute API names (CUDA, OpenCL, Vulkan, OpenGL, ROCm, OneAPI, Metal)
+- Resolution + refresh (a pixel is a pixel)
+
+**What's vendor-specific (jail-side, NOT in the mediator):**
+
+- "CUDA cores" (NVIDIA only)
+- "Stream processors" (AMD only)
+- "Execution units" (Intel only)
+- "Tensor cores" / "matrix units" (vendor naming varies)
+- Vendor compute APIs that are vendor-only (CUDA, ROCm in their native form)
+- Hardware-specific quirks (NVIDIA's MIG, AMD's partition scheduling)
+
+The jail's userspace code is the right place for vendor-specific code. The jail's developer picks the API (CUDA, OpenCL, ROCm) when they write their code, and that determines the `gpu.workload` token. The mediator doesn't care about the API; it cares about whether the *adapter* supports the *capability* (which was discovered at runtime).
+
+**3. The dynamic capability discovery mechanism (the user's "if there is a new gpu, we don't need to change code" question):**
+
+The mediator's job is to:
+1. **Enumerate** the adapter (PCI config space, VBIOS, EDID)
+2. **Discover** its capabilities (using a pluggable registry)
+3. **Cache** the discovered capabilities in sysctl
+4. **Match** jail requests against the discovered capabilities
+
+**The pluggable capability registry:**
+
+```c
+/* lib/libdisplay/gpu_caps/gpu_caps.h (planned) */
+typedef int (*gpu_caps_discover_fn)(device_t dev, struct gpu_caps *caps);
+
+struct gpu_caps_module {
+        uint16_t            cm_vendor_id;     /* 0 = default (fallback) */
+        uint16_t            cm_device_id;     /* 0 = wildcard (any device of this vendor) */
+        const char          *cm_name;         /* "nvidia", "amd", "intel", "generic" */
+        gpu_caps_discover_fn cm_discover;     /* the discovery function */
+        SLIST_ENTRY(gpu_caps_module) cm_link;
+};
+
+#define GPU_CAPS_REGISTER(vendor_id, fn)                              \
+        static struct gpu_caps_module gpu_caps_module_##fn = {        \
+                .cm_vendor_id = (vendor_id),                          \
+                .cm_device_id = 0,                                    \
+                .cm_name = #fn,                                       \
+                .cm_discover = (fn),                                  \
+        };                                                            \
+        DATA_SET(gpu_caps_set, gpu_caps_module_##fn);
+
+#define GPU_CAPS_REGISTER_DEFAULT(fn)                                 \
+        static struct gpu_caps_module gpu_caps_module_default_##fn = { \
+                .cm_vendor_id = 0,                                    \
+                .cm_device_id = 0,                                    \
+                .cm_name = "default",                                 \
+                .cm_discover = (fn),                                  \
+        };                                                            \
+        DATA_SET(gpu_caps_set, gpu_caps_module_default_##fn);
+```
+
+**Capability modules register themselves at link time. New modules = new files, no core change.**
+
+```c
+/* lib/libdisplay/gpu_caps/gpu_caps_nvidia.c (planned) */
+#include "gpu_caps.h"
+
+static int
+nvidia_caps_discover(device_t dev, struct gpu_caps *caps)
+{
+        caps->vendor_class = BDP_VENDOR_NVIDIA;
+        caps->vendor_name = "NVIDIA";
+        
+        /* Read NVIDIA-specific registers (NV_PMC_BOOT_0, NV_PRAMIN, etc.) */
+        caps->compute_units = nv_read_cuda_cores(dev);
+        caps->memory_mb = nv_read_vram_size(dev);
+        caps->flr_capable = pci_has_flr(dev);
+        
+        /* Read VBIOS to get display + codec capabilities */
+        nv_read_vbios(dev, caps);
+        
+        /* Register supported compute APIs */
+        caps_add_compute_api(caps, BDP_COMPUTE_CUDA);
+        caps_add_compute_api(caps, BDP_COMPUTE_OPENCL);
+        caps_add_compute_api(caps, BDP_COMPUTE_VULKAN);
+        caps_add_compute_api(caps, BDP_COMPUTE_OPENGL);
+        
+        return (0);
+}
+
+GPU_CAPS_REGISTER(0x10de, nvidia_caps_discover);  /* vendor ID 0x10de */
+```
+
+```c
+/* lib/libdisplay/gpu_caps/gpu_caps_amd.c (planned) */
+static int
+amd_caps_discover(device_t dev, struct gpu_caps *caps)
+{
+        caps->vendor_class = BDP_VENDOR_AMD;
+        caps->vendor_name = "AMD";
+        
+        caps->compute_units = amd_read_stream_processors(dev);
+        caps->memory_mb = amd_read_vram_size(dev);
+        caps->flr_capable = pci_has_flr(dev);
+        
+        amd_read_vbios(dev, caps);
+        
+        caps_add_compute_api(caps, BDP_COMPUTE_ROCM);
+        caps_add_compute_api(caps, BDP_COMPUTE_OPENCL);
+        caps_add_compute_api(caps, BDP_COMPUTE_VULKAN);
+        caps_add_compute_api(caps, BDP_COMPUTE_OPENGL);
+        
+        return (0);
+}
+
+GPU_CAPS_REGISTER(0x1002, amd_caps_discover);  /* vendor ID 0x1002 */
+```
+
+```c
+/* lib/libdisplay/gpu_caps/gpu_caps_intel.c (planned) */
+static int
+intel_caps_discover(device_t dev, struct gpu_caps *caps)
+{
+        caps->vendor_class = BDP_VENDOR_INTEL;
+        caps->vendor_name = "Intel";
+        
+        caps->compute_units = intel_read_eus(dev);
+        /* Intel iGPU shares system RAM; estimate via BAR size or stolen memory config */
+        caps->memory_mb = intel_read_shared_memory(dev);
+        caps->flr_capable = pci_has_flr(dev);
+        
+        caps_add_compute_api(caps, BDP_COMPUTE_ONEAPI);
+        caps_add_compute_api(caps, BDP_COMPUTE_OPENCL);
+        caps_add_compute_api(caps, BDP_COMPUTE_VULKAN);
+        caps_add_compute_api(caps, BDP_COMPUTE_OPENGL);
+        
+        return (0);
+}
+
+GPU_CAPS_REGISTER(0x8086, intel_caps_discover);  /* vendor ID 0x8086 */
+```
+
+```c
+/* lib/libdisplay/gpu_caps/gpu_caps_generic.c (planned, ALWAYS LINKED) */
+static int
+generic_caps_discover(device_t dev, struct gpu_caps *caps)
+{
+        /* Unknown vendor — read only PCI config space */
+        caps->vendor_class = BDP_VENDOR_UNKNOWN;
+        caps->vendor_name = pci_get_vendor_name(dev);
+        caps->compute_units = 0;  /* unknown */
+        caps->memory_mb = 0;     /* unknown */
+        caps->flr_capable = pci_has_flr(dev);
+        caps->overlay = "missing";
+        
+        /* Log a warning so the operator knows */
+        log_warn("GPU %s (vendor 0x%04x device 0x%04x) has no registered capability module. "
+                 "Add an overlay at /etc/display/gpu-overlays/%04x-%04x.json to enable full "
+                 "capability detection, or accept conservative defaults.",
+                 device_get_nameunit(dev), pci_get_vendor(dev), pci_get_device(dev),
+                 pci_get_vendor(dev), pci_get_device(dev));
+        
+        return (0);
+}
+
+GPU_CAPS_REGISTER_DEFAULT(generic_caps_discover);  /* fallback */
+```
+
+**The mediator's core (vendor-agnostic, never changes):**
+
+```c
+/* gpu_resource.ko — generic discovery loop */
+static int
+gpu_caps_discover(device_t dev, struct gpu_caps *caps)
+{
+        /* Step 1: build canonical name */
+        caps->canonical = build_canonical_name(dev);
+        snprintf(caps->alias, sizeof(caps->alias), "%s", device_get_nameunit(dev));
+        snprintf(caps->bdf, sizeof(caps->bdf), "pci%d:%d:%d:%d",
+                 pci_get_bus(dev), pci_get_device(dev), pci_get_function(dev), pci_get_domain(dev));
+        
+        /* Step 2: look up vendor ID in registry */
+        uint16_t vendor = pci_get_vendor(dev);
+        uint16_t device = pci_get_device(dev);
+        
+        struct gpu_caps_module *mod = gpu_caps_lookup(vendor, device);
+        if (mod == NULL) {
+                /* Try JSON overlay (escape hatch #1) */
+                if (try_load_overlay(dev, caps) == 0) {
+                        caps->overlay = "loaded";
+                        return (0);
+                }
+                /* Fall back to generic (escape hatch #2) */
+                mod = gpu_caps_lookup_default();
+        }
+        
+        caps->vendor_class = BDP_VENDOR_UNKNOWN;
+        caps->compute_units = 0;
+        caps->memory_mb = 0;
+        caps->flr_capable = pci_has_flr(dev);
+        caps->overlay = "builtin";
+        
+        if (mod && mod->cm_discover) {
+                int error = mod->cm_discover(dev, caps);
+                if (error) {
+                        log_warn("Capability module %s failed for %s: %d",
+                                 mod->cm_name, device_get_nameunit(dev), error);
+                        /* Continue with conservative defaults */
+                }
+        }
+        
+        /* Step 3: always check PCI-level capabilities (vendor-agnostic) */
+        caps->pci_caps.msi = pci_has_msi(dev);
+        caps->pci_caps.msix = pci_has_msix(dev);
+        caps->pci_caps.flr = pci_has_flr(dev);
+        caps->pci_caps.sriov = pci_has_sriov(dev);
+        caps->pci_caps.aer = pci_has_aer(dev);
+        
+        /* Step 4: read connected display EDID (vendor-agnostic) */
+        caps->display_caps = read_connected_display_edid(dev);
+        /* e.g. max_resolution = 3840x2160, max_refresh = 60, hdr = HDR10 */
+        
+        return (0);
+}
+```
+
+**4. The JSON overlay escape hatch (no code change, no recompile):**
+
+For vendors that need capability data but don't need custom register reads (e.g. a new vendor whose capability list is known but whose PCI registers are not), the operator drops a JSON file in `/etc/display/gpu-overlays/`:
+
+```bash
+ls /etc/display/gpu-overlays/
+# 10de-2236.json    NVIDIA A5000
+# 1002-73bf.json    AMD W6600
+# 8086-4680.json    Intel UHD 770
+# 1234-ABCD.json    Acme GPU 8000 (new vendor — no source code change needed)
+```
+
+```json
+/* /etc/display/gpu-overlays/1234-ABCD.json */
+{
+    "vendor_id": "0x1234",
+    "device_id": "0xABCD",
+    "vendor_class": "Acme",
+    "vendor_name": "Acme GPU Corp",
+    "compute_units": 4096,
+    "memory_mb": 8192,
+    "flr_capable": true,
+    "sriov_capable": false,
+    "compute_apis": ["opencl", "vulkan"],
+    "codecs": ["h264", "hevc"],
+    "ports_max": 4,
+    "ports": ["hdmi", "dp", "dp", "usbc"],
+    "power_tdp_w": 200,
+    "notes": "Acme GPU 8000. OpenCL/Vulkan only. No CUDA/ROCm. Registered via overlay."
+}
+```
+
+The mediator reads this at runtime. The capability list is restored. No recompile, no kernel module reload.
+
+**5. The discovery order (what runs when):**
+
+```
+device_attach(dev)
+  └─► gpu_resource_attach(dev)
+        └─► gpu_caps_discover(dev, &caps)
+              ├─► build_canonical_name(dev)            /* PCI config space, always */
+              ├─► gpu_caps_lookup(vendor, device)      /* link-time registered modules */
+              │     ├─► nvidia_caps_discover()         /* if vendor 0x10de */
+              │     ├─► amd_caps_discover()            /* if vendor 0x1002 */
+              │     ├─► intel_caps_discover()          /* if vendor 0x8086 */
+              │     ├─► <vendor>_caps_discover()       /* if vendor <other> */
+              │     └─► NULL                           /* if no module registered */
+              ├─► try_load_overlay(dev, &caps)          /* /etc/display/gpu-overlays/<vid>-<did>.json */
+              │     └─► parse + apply JSON, set caps->overlay = "loaded"
+              ├─► generic_caps_discover()              /* fallback if no module AND no overlay */
+              │     └─► conservative defaults, caps->overlay = "missing"
+              ├─► read_pci_caps(dev)                    /* FLR, MSI, SR-IOV, AER */
+              └─► read_connected_display_edid(dev)      /* max resolution, refresh, HDR */
+        ├─► gpu_adapters_register(&caps)               /* add to hw.gpu.adapters */
+        └─► audit_log_gpu_added(&caps)                  /* forensic record */
+```
+
+**6. The matching algorithm revisited (workload → vendor → adapter):**
+
+```c
+/* gpu_resource.ko — workload matching */
+static int
+gpu_match_jail_to_adapter(struct jail_gpu_req *req, struct gpu_caps *caps)
+{
+        /* Selector 1: gpu.adapter (most specific) */
+        if (req->adapter_spec != NULL && strcmp(req->adapter_spec, "any") != 0) {
+                if (!match_adapter_spec(req->adapter_spec, caps)) return (-ENOTSUP);
+        }
+        
+        /* Selector 2: gpu.vendor (vendor class) */
+        if (req->vendor != NULL && strcmp(req->vendor, "any") != 0) {
+                if (strcmp(caps->vendor_name, req->vendor) != 0 &&
+                    strcmp(caps->vendor_class_str(), req->vendor) != 0) {
+                        return (-ENOTSUP);
+                }
+        }
+        
+        /* Selector 3: gpu.workload (compute API) */
+        if (req->workload != NULL && strcmp(req->workload, "any") != 0) {
+                if (!caps_has_compute_api(caps, workload_to_compute_api(req->workload))) {
+                        return (-ENOTSUP);
+                }
+        }
+        
+        /* Numeric limits (agnostic) */
+        if (req->compute_units_min > 0 && caps->compute_units < req->compute_units_min) {
+                return (-ENOTSUP);
+        }
+        if (req->memory_mb_min > 0 && caps->memory_mb < req->memory_mb_min) {
+                return (-ENOTSUP);
+        }
+        
+        /* Codec requirements */
+        for (int i = 0; i < req->n_codecs; i++) {
+                if (!caps_has_codec(caps, req->codecs[i])) return (-ENOTSUP);
+        }
+        
+        return (0);  /* match */
+}
+```
+
+**The jail's userspace can discover what it has:**
+
+```bash
+# Inside the jail, after attach:
+$ displayd-ctl caps
+GPU adapter: nvidia0
+  Canonical: nvidia.RTX-A5000.1234567890
+  Vendor class: NVIDIA
+  Compute APIs: CUDA, OpenCL, Vulkan, OpenGL
+  Codecs: H.264, HEVC, AV1
+  Compute units: 8192 (your share: 25% = 2048)
+  Memory: 24576 MB total (your share: 25% = 6144 MB)
+  Power: 230W TDP (your share: 25% = 57W)
+  Display ports: 4 (your share: 4)
+  Overlay: builtin
+  Vendor module: gpu_caps_nvidia (registered)
+
+$ displayd-ctl caps --adapter unknown0
+GPU adapter: unknown0
+  Canonical: 1234.ABCD.0
+  Vendor class: UNKNOWN
+  Compute APIs: (none detected)
+  Codecs: (none detected)
+  Compute units: 0
+  Memory: 0
+  Power: 0
+  Display ports: 0
+  Overlay: missing
+  Warning: No capability module or overlay registered. Add /etc/display/gpu-overlays/1234-ABCD.json to enable full capability detection.
+```
+
+**7. Sysctl representation of capabilities:**
+
+```bash
+# Per-adapter capabilities
+sysctl hw.gpu.adapter.<canonical>.caps
+# vendor_class=NVIDIA vendor_name="NVIDIA Corporation" compute_units=8192 memory_mb=24576
+# flr=1 msi=1 msix=1 sriov=0 aer=1
+# compute_apis=CUDA,OpenCL,Vulkan,OpenGL
+# codecs=H264,HEVC,AV1
+# ports_max=4 ports=HDMI,DP,DP,USBC
+# power_tdp_w=230
+# edid=3840x2160@60 hdr=HDR10
+# overlay=builtin
+# module=gpu_caps_nvidia
+
+# List all adapters with their caps
+sysctl hw.gpu.adapters.caps
+# nvidia.RTX-A5000.1234567890 NVIDIA CUDA/OpenCL/Vulkan/OpenGL H264/HEVC/AV1 8192cu 24576MB 4ports
+# nvidia.RTX-A5000.9876543210 NVIDIA CUDA/OpenCL/Vulkan/OpenGL H264/HEVC/AV1 8192cu 24576MB 4ports
+# amd.Radeon-Pro-W6600.ABC123 AMD ROCm/OpenCL/Vulkan/OpenGL H264/HEVC 1792sp 8192MB 4ports
+# intel.UHD-770.0 Intel OneAPI/OpenCL/Vulkan/OpenGL H264/HEVC 256eu shared 3ports
+# 1234.ABCD.0 UNKNOWN (overlay missing) 0 0 0
+
+# Search adapters by capability
+sysctl hw.gpu.adapters.search.compute_api=CUDA
+# nvidia.RTX-A5000.1234567890 nvidia0
+# nvidia.RTX-A5000.9876543210 nvidia1
+
+sysctl hw.gpu.adapters.search.codec=AV1
+# nvidia.RTX-A5000.1234567890 nvidia0
+# nvidia.RTX-A5000.9876543210 nvidia1
+# (Intel UHD 770 doesn't have AV1; AMD W6600 doesn't have AV1 in this example)
+
+sysctl hw.gpu.adapters.search.min_compute_units=4096
+# nvidia.RTX-A5000.1234567890 nvidia0 (8192 cu, matches)
+# nvidia.RTX-A5000.9876543210 nvidia1 (8192 cu, matches)
+# amd.Radeon-Pro-W6600.ABC123 amdgpu0 (1792 sp, doesn't match)
+```
+
+**8. Adding a new vendor — three options, in order of effort:**
+
+**Option A: Plug-and-pray (no code change, no overlay)**
+
+A new GPU with unknown vendor ID `0x1234` is plugged in:
+1. `device_attach` fires
+2. `gpu_caps_discover` runs
+3. `gpu_caps_lookup(0x1234, ...)` returns NULL (no module registered)
+4. `try_load_overlay` finds no JSON file
+5. `generic_caps_discover` runs — conservative defaults, warning logged
+6. The GPU is usable but with `compute_apis=(none)`, `compute_units=0`, `memory_mb=0`
+7. Jail attach with `gpu.workload=cuda` is REJECTED (no CUDA support detected)
+8. Jail attach with `gpu.workload=any` is ALLOWED (the GPU is present, just capabilities unknown)
+9. The audit log shows: `device-added canonical=... warning="no-capability-module"`
+10. The operator sees the warning and decides what to do
+
+**Option B: Add a JSON overlay (no code change, no recompile)**
+
+1. Operator creates `/etc/display/gpu-overlays/1234-ABCD.json` (see example above)
+2. The mediator reads it on next device_attach (or hot-reload via sysctl)
+3. Capability detection is restored
+4. Jail can now request `gpu.workload=cuda` (or whatever the overlay says is supported)
+
+**Option C: Add a C capability module (small code change, full register access)**
+
+For vendors that need custom register reads (e.g. proprietary capability registers not exposed via PCI config space):
+1. Add `lib/libdisplay/gpu_caps/gpu_caps_<vendor>.c`
+2. Use `GPU_CAPS_REGISTER(0x1234, vendor_caps_discover);`
+3. Add `gpu_caps_<vendor>.c` to `lib/libdisplay/gpu_caps/Makefile`
+4. Recompile. The mediator's core is unchanged. The new module is auto-discovered via the `DATA_SET` linker set.
+
+**The user's friend with a new GPU tomorrow needs zero changes to `gpu_resource.ko`. They can plug it in (Option A), drop a JSON file (Option B), or — if needed — add a tiny C module that registers itself (Option C).**
+
+**9. What happens at hot-plug time when a new GPU is detected:**
+
+```
+USB or PCIe hot-plug event → device_attach
+  └─► gpu_caps_discover runs the 6-step pipeline above
+        └─► if overlay present: log "GPU ... capabilities loaded from /etc/display/gpu-overlays/..."
+        └─► if no overlay, no module: log "GPU ... has no capability module or overlay (using generic defaults)"
+        └─► gpu_adapters_register(&caps)  /* available for new jail starts */
+        └─► audit_log_gpu_added(&caps)     /* forensic record */
+        └─► DTrace: gpu-resource:adapter-enumerated fires
+        └─► notify existing jails that don't currently own this adapter: "new GPU available, rebalance?"
+```
+
+**The "rebalance" question (optional, operator-driven):**
+
+When a new GPU becomes available, the operator may want to:
+- Leave existing jails alone (default, safe)
+- Rebalance running jails to spread load (operator action via `displayd-ctl rebalance`)
+- Add the new GPU to a pool (sysctl: `security.gpu.pool.ml-cluster.adapters+=new_gpu`)
+
+The default is "leave existing jails alone." Rebalancing is opt-in.
+
+**10. Preflight check (T22 framework extension):**
+
+| Check ID | Name | Default | Severity |
+|---|---|---|---|
+| `GPU_CAPS_DISCOVERED` | `hw.gpu.adapter.<canonical>.caps.compute_units > 0` (or `overlay=loaded`) | enforced | warn (don't fail — operator may intentionally use generic) |
+| `GPU_WORKLOAD_SUPPORTED` | Jail's `gpu.workload` is in the adapter's `compute_apis` | enforced | error (unless `gpu.allow_workload_fallback=1`) |
+| `GPU_VENDOR_MATCHES` | Jail's `gpu.vendor` matches the adapter's `vendor_class` | enforced | error |
+| `GPU_OVERLAY_PRESENT_FOR_NEW` | Adapters added in last 30 days have an overlay or module | enforced | warn (recommends adding an overlay) |
+| `GPU_FLR_PRESENT` | All selected adapters have `flr=1` (reset capable) | enforced | error (Mediated passthrough) |
+
+**11. DTrace probes (T50 extension):**
+
+```
+gpu-resource:caps-discover-start
+  args: char *alias, char *bdf
+gpu-resource:caps-discover-complete
+  args: char *alias, char *bdf, char *source    /* source: module / overlay / generic */
+gpu-resource:caps-overlay-loaded
+  args: char *canonical, char *overlay_path
+gpu-resource:caps-overlay-missing
+  args: char *canonical, uint16_t vendor_id, uint16_t device_id
+gpu-resource:caps-module-registered
+  args: char *module_name, uint16_t vendor_id
+gpu-resource:workload-match
+  args: char *workload, char *canonical, int result
+```
+
+**12. Audit log (T43 extension):**
+
+```
+YYYY-MM-DDTHH:MM:SSZ gpu-caps-discover canonical=1234.ABCD.0 source=generic warning=overlay-missing
+YYYY-MM-DDTHH:MM:SSZ gpu-caps-overlay-loaded canonical=1234.ABCD.0 path=/etc/display/gpu-overlays/1234-ABCD.json
+YYYY-MM-DDTHH:MM:SSZ gpu-caps-module-registered module=gpu_caps_acme vendor_id=0x1234
+YYYY-MM-DDTHH:MM:SSZ gpu-workload-match workload=cuda canonical=nvidia.RTX-A5000.1234567890 result=ok
+YYYY-MM-DDTHH:MM:SSZ gpu-workload-match workload=rocm canonical=nvidia.RTX-A5000.1234567890 result=reject reason=cuda-not-rocm
+```
+
+**13. The "no hard-coded vendor list" Must Have (adds to Work Objectives):**
+
+> - **No hard-coded vendor list in any `*_resource.ko` module.** Vendor support is **runtime discovery + pluggable registration**, not a `switch (vendor_id)` in the mediator. Adding a new GPU vendor or model requires **no code change in `gpu_resource.ko`** — the new adapter is discovered at runtime, the capability module is auto-registered via `GPU_CAPS_REGISTER()`, and the JSON overlay at `/etc/display/gpu-overlays/<vid>-<did>.json` is the operator-facing escape hatch. The generic `generic_caps_discover` is always linked as a fallback. Hard-coding `if (vendor_id == 0x10de)` or maintaining a `static const char *known_vendors[]` is a guardrail violation.
+
+**14. Why this design is the right shape:**
+
+- **Forward-compatible** — a new GPU tomorrow works without recompile
+- **Operator-friendly** — JSON overlay is human-editable, auditable, version-controllable
+- **Pluggable** — capability modules are DLLs (in the linker-set sense), not compile-time switches
+- **Auditable** — every discovery event is logged with source (module / overlay / generic)
+- **Testable** — preflight checks can verify all adapters have a known source
+- **Conservative by default** — generic fallback is safe; the GPU works with reduced capability detection
+- **Vendor-neutral** — no vendor gets special treatment in the mediator's code
+- **Workload-aware** — the jail's `gpu.workload` is matched against the adapter's discovered `compute_apis`, not a hard-coded switch
+- **Future-proof** — new compute APIs (Metal, OneAPI, ROCm, future) are added by adding a string token to the workload list and registering a new compute API bit. No `switch` statement grows.
+
+**15. The "add a new compute API" pattern (the user's "eventually something will be good on the others"):**
+
+When a new compute API lands (e.g. "WebGPU", "SYCL", "Metal on Apple Silicon", "OpenCL-Next"):
+
+```c
+/* Add a new bit to the enum (in bdp.h) */
+enum bdp_compute_api {
+    BDP_COMPUTE_CUDA      = (1 << 0),
+    BDP_COMPUTE_ROCM      = (1 << 1),
+    BDP_COMPUTE_OPENCL    = (1 << 2),
+    BDP_COMPUTE_VULKAN    = (1 << 3),
+    BDP_COMPUTE_OPENGL    = (1 << 4),
+    BDP_COMPUTE_QUICKSYNC = (1 << 5),
+    BDP_COMPUTE_ONEAPI    = (1 << 6),
+    BDP_COMPUTE_METAL     = (1 << 7),    /* new */
+    BDP_COMPUTE_WEBGPU    = (1 << 8),    /* new */
+    BDP_COMPUTE_SYCL      = (1 << 9),    /* new */
+};
+
+/* Capability modules add the new bit when they detect the API */
+caps_add_compute_api(caps, BDP_COMPUTE_METAL);
+
+/* The workload matching grows a new entry (data, not code) */
+{ "metal", BDP_COMPUTE_METAL },
+{ "webgpu", BDP_COMPUTE_WEBGPU },
+{ "sycl",   BDP_COMPUTE_SYCL },
+```
+
+The mediator's matching algorithm doesn't grow. The data does.
+
+**16. The "vendor list" is data, not code:**
+
+The user's *"build that list dynamically"* requirement is met by:
+- The capability registry (linker-set, auto-discovered at boot)
+- The JSON overlay (operator-editable, hot-reloadable)
+- The generic fallback (always linked, conservative defaults)
+- The workload → compute API mapping (data table, not switch)
+- The vendor class enum (data, not hard-coded paths)
+
+**A new vendor / model = three options, ordered by effort:**
+
+1. **Plug it in (no code, no overlay)** — works with conservative defaults + warning
+2. **Drop a JSON file (no code, no recompile)** — full capability detection
+3. **Add a tiny C module (no core change)** — custom register reads, vendor-specific tuning
+
+**The mediator's core is unchanged in all three cases.**
+
+**F1-F4 updates:**
+
+- F1 verifies that `lib/libdisplay/gpu_caps/` has at least one registered capability module (NVIDIA + AMD + Intel + generic)
+- F1 verifies that the JSON overlay directory `/etc/display/gpu-overlays/` is documented in `display-resource(9)` (future man page)
+- F1 verifies that `display-enduser(7)` documents the "how to add a new GPU" workflow
+- F2 (Code Quality) does NOT find any `switch (vendor_id)` or `if (vendor_id == 0x10de)` patterns in `gpu_resource.ko`
+- F2 verifies the `GPU_CAPS_REGISTER` and `GPU_CAPS_REGISTER_DEFAULT` linker-set mechanism is in place
+- F4 (Scope Fidelity) flags any v1 PR that adds a new vendor's code as a `switch` case (must use the registration mechanism)
+
+---
+
 ## Work Objectives
 
 ### Core Objective
@@ -1298,6 +4866,7 @@ pid_file=/var/run/display-broker.pid
 - Multi-instance `console` module (concurrent bhyve + jails)
 - The `allow.fbuf` jail option must imply kbd + mouse on by default
 - The `display_transport` vtable must be small (≤ 6 ops) and self-contained
+- **No raw PCI passthrough.** All device access is mediated by `*_resource.ko` modules (T12, T21, T58, T65, future). The host retains the control plane (PCI config space, power state, reset, reinit). The VM/jail gets a mediated data plane (mdev / VF / cdev). On VM/jail exit, the host can reset and re-attach the device in software (PCI FLR / HCI Reset / HDA RESET / vendor-specific reset + driver `attach()` re-run), without a host reboot, without a device power cycle, without physical intervention. The "user's friend's RAID controller" scenario is **architecturally prevented** for every device we mediate. Documented in the "Mediated passthrough" design section.
 
 ### Must NOT Have (Guardrails)
 - No new ioctls in `sys/amd64/vmm/` — the kernel has no framebuffer concept and we must not introduce one
@@ -1307,6 +4876,7 @@ pid_file=/var/run/display-broker.pid
 - No removal of `rfb_init` — wrapped, not deleted (other callers may exist)
 - No file at `docs/` or `plan/` or `plans/` — all outputs under `.sisyphus/` and the source tree only
 - No AI slop: no over-abstraction (vtable with one impl is OK as a seam, not a vtable with one impl pretending to be polymorphic), no commented-out code, no "TODO" without a real follow-up task
+- **No `vfio-pci`-style raw BAR passthrough.** We do not give a device's MMIO space directly to a VM. We do not bypass the `*_resource.ko` mediator. We do not allow `bhyve -s <slot>,passthrough` direct passthrough. Every device-class has a `*_resource.ko` mediator in the middle, with `attach()` / `detach()` / `reset()` / `reinit()` hooks. (Raw passthrough may be added as a documented escape hatch in a future boulder with a "host reboot required" warning, but is NOT in v1.)
 
 ---
 
@@ -1476,18 +5046,22 @@ Wave F (After ALL tasks — 4 parallel reviews):
 | T35 | T22, T24, T9, T28, T33 | T18, T28, T33 |
 | T36 | T17, T25, T26, T29 | – |
 | T37 | T17, T25, T26, T29, T34 | F1-F4 |
-| T38 | T7, T25, T30, T35 | T18, T46, T47, F1-F4 |
-| T39 | T25, T30 | T38, T42, T43, T44, T48 |
-| T40 | T9, T13 | T38 |
-| T41 | T9, T12, T40 | T18 |
-| T42 | T7, T11, T12, T38 | T18, T48 |
-| T43 | T25, T26, T35, T40, T41, T42 | T18, T47 |
-| T44 | T39 | T45, T46, T18 |
+| T38 | T7, T25, T30, T35 | T18, T46, T47, T49, T50, T51, T52, F1-F4 |
+| T39 | T25, T30 | T38, T42, T43, T44, T48, T51 |
+| T40 | T9, T13 | T38, T49, T51 |
+| T41 | T9, T12, T40 | T18, T49 |
+| T42 | T7, T11, T12, T38 | T18, T48, T49 |
+| T43 | T25, T26, T35, T40, T41, T42 | T18, T47, T49, T50 |
+| T44 | T39 | T45, T46, T18, T51 |
 | T45 | T44 | T18, T46 |
-| T46 | T38, T39, T40, T41, T42, T43, T44, T45, T48 | F1-F4 |
+| T46 | T38, T39, T40, T41, T42, T43, T44, T45, T48, T49, T50, T51, T52 | F1-F4 |
 | T47 | T34, T36, T37, T38, T40, T44 | F1-F4 |
 | T48 | T39, T42 | T46, F1-F4 |
-| F1-F4 | T18, T37, T46, T48 | – |
+| T49 | T21, T38, T40, T41, T42, T43 | T46, T50, T51, T52, F1-F4 |
+| T50 | T38, T40, T41, T42, T43, T49 | T46, T51, T52, F1-F4 |
+| T51 | T39, T40, T49, T50 | T46, F1-F4 |
+| T52 | T38, T49, T50 | T46, F1-F4 |
+| F1-F4 | T18, T37, T46, T47, T48, T49, T50, T51, T52 | – |
 
 ### Agent Dispatch Summary
 
@@ -2715,7 +6289,7 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
 ---
 
-- [ ] 37. End user guide (`bhyve-display-enduser.7`)
+- [ ] 37. End user guide (`display-enduser.7`, with `bhyve-display-enduser.7` deprecated stub)
 
   **What to do**:
   1. Write `share/man/man7/bhyve-display-enduser.7` — the **end user perspective** doc. The user asked: "think about what an end user would need to know, especially how to access, and how to secure." Sections:
@@ -2775,20 +6349,22 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
 ---
 
-- [ ] 38. Console broker daemon (`bhyve-display-broker` / `displayd`)
+- [ ] 38. Generic display broker daemon (`displayd` / `display-broker`, with `bhyve-display-broker` deprecated alias)
 
   **What to do**:
-  1. Create `usr.sbin/bhyve-display-broker/` with `Makefile`, `main.c`, `broker.c`, `broker_session.c`, `broker_auth.c`, `broker_acl.c`, `broker_audit.c`, `broker_registry.c`, `broker_bridge.c`, `broker_config.c`.
-  2. Reads `/etc/bhyve/display-broker.conf` at startup, then sysctls override config, then loader tunables override sysctls. **Tunable precedence: loader > sysctl > config > module default.** (See Tunables Reference §13.)
-  3. Listens on configurable socket (TCP and/or Unix), authenticates, manages sessions, fans out pixel/input to the right `display_transport` instance.
-  4. **Privilege model**: starts as root, drops to `_display-broker` user after binding port. Uses Capsicum after bind. The `_display-broker` user is created by the install scripts (no shell, no home, `_pware` style).
-  5. Signals: `SIGHUP` (reload config), `SIGTERM` (graceful shutdown, drain clients), `SIGUSR1` (rotate audit log), `SIGUSR2` (dump diagnostic state to `/var/run/display-broker.dump`).
-  6. PID file: `/var/run/display-broker.pid`.
-  7. **Frame rate enforcement**: every pixel stream is rate-limited via `security.display.broker.max_fps_per_client` and `max_fps_total`. The transport bridge reads the frame, checks the elapsed time since the last frame, drops if too soon. Logs dropped frame counts.
-  8. **Bandwidth enforcement**: per-client and per-broker bandwidth tracked atomically. If a client would exceed `max_bandwidth_per_client`, frames are dropped. If the broker would exceed `max_total_bandwidth`, lowest-priority sessions are throttled first.
-  9. **TDD first** — write ATF tests for each module before implementation. Use mock PAM, mock registry, mock transport. Tests cover: config parsing, tunable precedence, privilege drop, frame rate limiting, bandwidth limiting, signal handling, audit log writing.
-  10. Files: 9 C files + Makefile + man page (T47).
-  11. Tests: `tests/sys/display/broker_auth.test`, `tests/sys/display/broker_acl.test`, `tests/sys/display/broker_attach.test`, `tests/sys/display/broker_multiplex.test`, `tests/sys/display/broker_fps_limit.test`, `tests/sys/display/broker_bandwidth_limit.test`, `tests/sys/display/broker_signal.test`.
+  1. Create `usr.sbin/displayd/` (new generic home) with `Makefile`, `main.c`, `broker.c`, `broker_session.c`, `broker_auth.c`, `broker_acl.c`, `broker_audit.c`, `broker_registry.c`, `broker_bridge.c`, `broker_config.c`.
+  2. The canonical binary is `displayd`. The old name `bhyve-display-broker` is **kept as a symlink/hardlink alias** that prints a deprecation warning to syslog on first start (T47 man page deprecation stub also written).
+  3. Reads `/etc/display/display-broker.conf` at startup, then sysctls override config, then loader tunables override sysctls. **Tunable precedence: loader > sysctl > config > module default.** (See Tunables Reference §13.) Falls back to `/etc/bhyve/display-broker.conf` if the new path doesn't exist (deprecated, log warning).
+  4. **Default listen is localhost over IPv6 dual-stack (security principles — see "Localhost by default" + "IPv6" design sections).** Default `listen=tcp://[::1]:8443,unix:///var/run/displayd.sock`. Public exposure requires `security.display.broker.listen_public=1` + TLS configured + ACL configured (preflight refuses otherwise).
+  5. Listens on configurable socket (TCP and/or Unix), authenticates, manages sessions, fans out pixel/input to the right `display_transport` instance.
+  6. **Privilege model**: starts as root, drops to `_displayd` user (new canonical) after binding port. The `_display-broker` user is kept as a backward-compat alias. Uses Capsicum after bind.
+  7. Signals: `SIGHUP` (reload config), `SIGTERM` (graceful shutdown, drain clients), `SIGUSR1` (rotate audit log), `SIGUSR2` (dump diagnostic state to `/var/run/displayd.dump`).
+  8. PID file: `/var/run/displayd.pid` (falls back to `/var/run/display-broker.pid`).
+  9. **Frame rate enforcement**: every pixel stream is rate-limited via `security.display.broker.max_fps_per_client` and `max_fps_total`. The transport bridge reads the frame, checks the elapsed time since the last frame, drops if too soon. Logs dropped frame counts.
+  10. **Bandwidth enforcement**: per-client and per-broker bandwidth tracked atomically. If a client would exceed `max_bandwidth_per_client`, frames are dropped. If the broker would exceed `max_total_bandwidth`, lowest-priority sessions are throttled first.
+  11. **TDD first** — write ATF tests for each module before implementation. Tests cover: config parsing, tunable precedence, privilege drop, frame rate limiting, bandwidth limiting, signal handling, audit log writing, **default localhost bind, public-exposure opt-in, preflight refusal of public-exposure without TLS/ACL, IPv4-only/IPv6-only/dual-stack binds, backward compat with `bhyve-display-broker` symlink**.
+  12. Files: 9 C files + Makefile + man page (T47).
+  13. Tests: `tests/sys/display/broker_auth.test`, `tests/sys/display/broker_acl.test`, `tests/sys/display/broker_attach.test`, `tests/sys/display/broker_multiplex.test`, `tests/sys/display/broker_fps_limit.test`, `tests/sys/display/broker_bandwidth_limit.test`, `tests/sys/display/broker_signal.test`, `tests/sys/display/broker_listen_default_localhost.test`, `tests/sys/display/broker_listen_public_requires_tls.test`, `tests/sys/display/broker_listen_public_requires_acl.test`, **`tests/sys/display/broker_listen_ipv6_only.test`**, **`tests/sys/display/broker_listen_ipv4_only.test`**, **`tests/sys/display/broker_listen_dual_stack.test`**, **`tests/sys/display/broker_alias_bhyve.test`** (symlink test).
 
   **Must NOT do**:
   - Don't run as root after init. Drop privileges to `_display-broker` user.
@@ -3165,7 +6741,7 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
 ---
 
-- [ ] 44. Client library (libbdp.so)
+- [ ] 44. Client library (`libdisplay.so`, with `libbdp.so` deprecated alias)
 
   **What to do**:
   1. Create `lib/libbdp/` with `Makefile`, `bdp_client.h`, `bdp_client.c`, `bdp_resource.c`, `bdp_session.c`.
@@ -3213,7 +6789,7 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
 ---
 
-- [ ] 45. Sample client (`bhyve-display-client`)
+- [ ] 45. Sample client (`displayc` / `display-client`, with `bhyve-display-client` deprecated alias)
 
   **What to do**:
   1. Create `usr.sbin/bhyve-display-client/` with `Makefile`, `main.c`, `client.c`, `tui.c`, `pixel_dump.c`, `multicast.c`.
@@ -3305,16 +6881,18 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
 ---
 
-- [ ] 47. Broker documentation (man pages + examples)
+- [ ] 47. Broker documentation (man pages + examples, generic naming)
 
   **What to do**:
-  1. Write `share/man/man8/bhyve-display-broker.8` — daemon reference (config, sysctls, signals, examples, security, files).
-  2. Write `share/man/man7/bdp.7` — wire protocol spec.
-  3. Write `share/man/man5/display-acl.5` — ACL syntax and semantics.
-  4. Write `share/man/man5/display-broker-config.5` — broker config file format.
-  5. Write `share/man/man1/bhyve-display-client.1` — sample client reference.
-  6. Add to `share/examples/security/policy-quickstart/`:
-     - `broker.conf.snippet` — broker config example
+  1. Write `share/man/man8/displayd.8` — daemon reference (config, sysctls, signals, examples, security, files, IPv6, localhost-by-default). Canonical name.
+  2. Write `share/man/man8/bhyve-display-broker.8` — **deprecation stub** that redirects to `displayd(8)`. Same for `bhyve-display-client(1)`, `bhyve-display-enduser(7)`, `display_transport_security(7)` → `display-transport-security(7)`, `policy-quickstart(7)` → `displayd-policy-quickstart(7)`.
+  3. Write `share/man/man7/bdp.7` — wire protocol spec (generic, not bhyve-specific).
+  4. Write `share/man/man5/display-acl.5` — ACL syntax and semantics (generic).
+  5. Write `share/man/man5/display-broker-config.5` — broker config file format (generic).
+  6. Write `share/man/man1/displayc.1` — sample client reference (canonical name).
+  7. Write `share/man/man7/display-enduser.7` — end user perspective (canonical name).
+  8. Add to `share/examples/display/policy-quickstart/` (new generic location, not `share/examples/security/`):
+      - `broker.conf.snippet` — broker config example
      - `display.acl.example` — ACL file example
      - `letsencrypt-broker.sh` — cert recipe
   7. Cross-reference from existing man pages (`bhyve(8)`, `jail.conf(5)`, `policy-quickstart(7)`, `display_transport_security(7)`, `display-abstraction-migration(7)`, `bhyve-display-enduser(7)`).
@@ -3356,24 +6934,25 @@ Wave F (After ALL tasks — 4 parallel reviews):
   2. Implement `usr.sbin/bhyve-display-broker/broker_multicast.c`:
      - `mcast_create(channel_name, acl, max_subs) → group, key_id` — allocate a multicast group from `multicast.group_base4` / `group_base6`, generate a per-channel AES-256-GCM key, register.
      - `mcast_destroy(channel_name)` — release group and key.
-     - `mcast_pub(channel, frame)` — encrypt frame with channel key, send to multicast group via UDP socket (separate from the broker's TCP listener).
-     - `mcast_sub(channel)` — for the subscriber's BDP session, open a UDP socket and join the multicast group, send the key over the TLS-protected control channel.
+     - `mcast_pub(channel, frame)` — encrypt frame with channel key, send to multicast group via UDP socket (separate from the broker's TCP listener). **By default, publisher UDP socket is bound to `127.0.0.1` only** (loopback). Public publishing requires `security.display.broker.multicast.publish_public=1`.
+     - `mcast_sub(channel)` — for the subscriber's BDP session, open a UDP socket and join the multicast group, send the key over the TLS-protected control channel. **By default, subscribers only receive from loopback** (`multicast.listen_localhost_only=1`).
      - `mcast_unsub(channel)` — leave the multicast group, close the UDP socket.
   3. Per-channel frame rate enforced via `security.display.broker.multicast.refresh_fps` (default 30) and `security.display.broker.max_fps_per_channel` (default 60, broker-wide cap).
   4. Per-channel bandwidth enforced via `security.display.broker.multicast.max_bandwidth_per_channel` (default 1 Gbps).
-  5. Optional forward error correction (XOR parity packets) via `multicast.fec=1` sysctl. The parity packet rate is derived from packet loss; can be tuned via `multicast.fec_rate` (not in initial scope, documented as a follow-on).
+  5. Optional forward error correction (XOR parity packets) via `multicast.fec=1` sysctl.
   6. **TTL safety**: TTL=1 by default. Pre-flight `preflight.multicast.ttl_safe` WARNING if TTL > 1 (may leak outside LAN).
   7. **IGMP support** required for multicast routing on IPv4. Pre-flight `preflight.multicast.igmp_supported` BLOCKING (unless `multicast.igmp_required=0`). On FreeBSD, requires `options MROUTING` in kernel config.
-  8. ACL: per-channel `multicast.acl=@signage` for publish and subscribe. T40 ACL resolver extended for multicast channels.
-  9. **Encryption**: AES-256-GCM per-channel key, derived from a broker-side master key + channel ID via HKDF. Key delivered to authorized clients over the TLS-protected BDP control channel.
-  10. **Audit**: every multicast create/destroy/pub/sub is audited. Per-channel stats (subscribers, fps, bandwidth) are queryable via a new `BDP_MULTICAST_STATS` message (out of scope for v1, document as follow-on).
-  11. **Sample multicast channel lifecycle**:
+  8. **Localhost-only by default (security principle)**: `multicast.listen_localhost_only=1` (default) restricts publisher/subscriber to loopback. Pre-flight `preflight.multicast.listen_localhost_only_off` WARNING if disabled. Public multicast requires `multicast.publish_public=1` AND `multicast.listen_localhost_only=0`.
+  9. ACL: per-channel `multicast.acl=@signage` for publish and subscribe. T40 ACL resolver extended for multicast channels.
+  10. **Encryption**: AES-256-GCM per-channel key, derived from a broker-side master key + channel ID via HKDF. Key delivered to authorized clients over the TLS-protected BDP control channel.
+  11. **Audit**: every multicast create/destroy/pub/sub is audited. Per-channel stats queryable via STATS_REQ filter (T51).
+  12. **Sample multicast channel lifecycle**:
       - `bhyve-display-client --multicast-create menu-board-lobby --multicast-acl @signage` (admin)
       - Publisher: `bhyve-display-client --multicast-pub menu-board-lobby --source web1` (must be in @signage)
       - Subscriber: `bhyve-display-client --multicast-sub menu-board-lobby` (must be in @signage or in channel ACL)
-  12. TDD: tests for each multicast message type, encryption, ACL, frame rate, bandwidth, TTL, IGMP detection.
-  13. Update `bdp(7)` man page (T39) with the multicast extension section.
-  14. Update `bhyve-display-client(1)` (T47) with the multicast subcommands.
+  13. TDD: tests for each multicast message type, encryption, ACL, frame rate, bandwidth, TTL, IGMP detection, **localhost-only default, public multicast opt-in**.
+  14. Update `bdp(7)` man page (T39) with the multicast extension section.
+  15. Update `bhyve-display-client(1)` (T47) with the multicast subcommands.
 
   **Must NOT do**:
   - Don't allow multicast publish from a non-uid-0 user without an explicit `multicast.acl` allowing them.
@@ -3432,6 +7011,751 @@ Wave F (After ALL tasks — 4 parallel reviews):
   ```
 
   **Commit**: YES — `display-broker: add BDP multicast UDP support (TV / advertising / video wall) with AES-256-GCM encryption and per-channel ACL`
+
+---
+
+- [ ] 49. Statistics collection (broker, transports, GPU, preflight, ACL, cert)
+
+  **What to do**:
+  1. Create `usr.sbin/displayd/broker_stats.c` with:
+     - `stats_init()` — allocate counter/gauge/histogram maps
+     - `stats_inc(name, value)` — atomic add
+     - `stats_set(name, value)` — atomic set (for gauges)
+     - `stats_observe(name, value)` — atomic histogram record
+     - `stats_dump(format, buf, len)` — serialize to JSON/Prometheus/kv
+     - `stats_dump_periodic()` — called every `stats.interval` seconds
+     - `stats_atomic_snapshot()` — lock-free snapshot for BDP STATS_REPLY (T51)
+  2. Instrument every code path with `stats_inc/observe`:
+     - `broker_session.c` — sessions_total, sessions_active, session_duration_s, auth_*, list_*, attach_*
+     - `broker_bridge.c` — bytes_in/out, frames_sent, frames_dropped, frame_size_bytes, frame_encode_ms, bandwidth_*
+     - `broker_multicast.c` — multicast_*, fec_recovered, multicast_latency
+     - `broker_audit.c` — augment existing audit events with stats counters
+     - `broker_acl.c` — acl_check_total, acl_deny_total, acl_resolve_us
+  3. Kernel module stats:
+     - `sys/modules/fbuf_jail/fbuf_jail_stats.c` — `kern.fbuf_jail.stats.{active,total_attaches,total_detaches,bytes_written}`
+     - `sys/modules/gpu_resource/gpu_resource_stats.c` — `kern.gpu_resource.stats.{consumer_count, vram_allocated, cores_in_use, alloc_total, free_total, enforce_fail}`
+     - `sys/modules/preflight/preflight_stats.c` — `kern.preflight.stats.{runs_total, check_pass, check_fail, last_run_ms}`
+  4. Periodic file dump: every `stats.interval` seconds, write to `stats.path`. Rotate previous file to `stats.path.1`, `stats.path.2`, etc. Keep `stats.rotate_keep` files.
+  5. Tunable effective-value mirror: when reading a sysctl, also store the value in the stats map. This way `displayd --list-tunables` shows what's actually in effect (loader > sysctl > config > default).
+  6. TDD: tests for each counter (inc, set, observe), each dump format, periodic rotation, snapshot atomicity, effective-value mirror.
+  7. Update `display-broker-config(5)` and `displayd(8)` (T47) with stats config knobs.
+
+  **Must NOT do**:
+  - Don't put secrets (passwords, cert PEMs) in stats.
+  - Don't dump stats to a world-writable file.
+  - Don't block the broker on stats operations.
+  - Don't hardcode counter names — use string constants defined in a header.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, T52, F1-F4. Blocked by T38, T40, T41, T42, T43, T21 (kernel module stats).
+
+  **References**: HDR Histogram (`lib/libhdr/`), Prometheus exposition format spec, FreeBSD `atomic_*` API.
+
+  **Acceptance**:
+  - [ ] All counters increment as expected
+  - [ ] Stats file is written every `stats.interval` seconds
+  - [ ] Stats file is in valid Prometheus / JSON / kv format
+  - [ ] Rotation works (5 files kept)
+  - [ ] Effective tunable values match sysctl reads
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: stats counters increment correctly
+    Tool: Bash (atf)
+    Preconditions: Broker running, 1 test client connected
+    Steps:
+      1. Read display_broker_sessions_total before
+      2. Connect a client
+      3. Read display_broker_sessions_total after
+    Expected Result: counter incremented by 1
+    Evidence: .sisyphus/evidence/task-49-stats-counter.txt
+
+  Scenario: Prometheus output is valid
+    Tool: Bash (promtool)
+    Preconditions: Broker running
+    Steps:
+      1. curl http://[::1]:9090/stats
+      2. promtool check metrics
+    Expected Result: metrics are valid
+    Evidence: .sisyphus/evidence/task-49-prometheus.txt
+
+  Scenario: histogram p99 is accurate
+    Tool: Bash (atf)
+    Steps:
+      1. Send 1000 frames with varying sizes
+      2. Read display_broker_frame_size_bytes histogram
+      3. Compute p99 manually
+      4. Compare to histogram's p99
+    Expected Result: within 5% accuracy
+    Evidence: .sisyphus/evidence/task-49-histogram.txt
+  ```
+
+  **Commit**: YES — `displayd: add stats collection (counters, gauges, histograms) with periodic dump and tunable mirror`
+
+---
+
+- [ ] 50. Diagnostic tools + tracing + DTrace probes (USDT)
+
+  **What to do**:
+  1. Implement `displayd --check-config`, `--dry-run`, `--validate-cert`, `--test-acl`, `--list-tunables`, `--list-resources`, `--list-sessions`, `--kick`, `--rotate-audit`, `--dump`, `--stats --format`, `--version`, `--help` (see design table in "Instrumentation, statistics, diagnostics" section).
+  2. Implement per-session trace buffer in `broker_trace.c`:
+     - Ring buffer of structured events (1 MB default)
+     - `trace_event(session_id, event_name, key=val, ...)`
+     - `trace_dump(session_id, fd)` — write to file descriptor
+     - `trace_enable(session_id, on/off)`
+  3. Wire `SIGUSR2` to dump all sessions' traces to `/var/run/displayd.dump`.
+  4. Implement DTrace probes in `probes.d` (FreeBSD-native USDT):
+     - `display-broker:session-start`, `display-broker:session-end`
+     - `display-broker:auth-ok`, `display-broker:auth-fail`
+     - `display-broker:list-req`
+     - `display-broker:attach-ok`, `display-broker:attach-fail`, `display-broker:detach`
+     - `display-broker:frame-send`, `display-broker:frame-drop`
+     - `display-broker:input-kbd`, `display-broker:input-ptr`
+     - `display-broker:error`
+     - `display-broker:multicast-frame-send`, `display-broker:multicast-sub-join`, `display-broker:multicast-sub-leave`
+     - `display-transport:pixel-read`, `display-transport:pixel-write`
+     - `gpu-resource:alloc`, `gpu-resource:free`, `gpu-resource:enforce-ok`, `gpu-resource:enforce-fail`
+     - `preflight:check-start`, `preflight:check-end`, `preflight:check-fail`
+  5. Integrate with USDT: `provider.h` with `DTRACE_PROBE*` macros.
+  6. CLI: `displayd --trace all|session_id=X`, `--dump-trace`, `--profile` (CPU), `--memory-profile`.
+  7. DTrace examples in `share/examples/display/dtrace/`:
+     - `top-sessions-by-bytes.d`
+     - `auth-failures.d`
+     - `frame-drop-rate.d`
+     - `multicast-subscribers.d`
+  8. TDD: tests for each CLI subcommand, trace buffer ring/overflow, signal handling, DTrace probe firing (use `dtrace -l` to verify probes are registered).
+
+  **Must NOT do**:
+  - Don't enable DTrace probes by default in production builds (compile-time flag).
+  - Don't dump trace to a world-writable file.
+  - Don't include sensitive data (passwords) in trace events.
+
+  **Profile**: `deep` (DTrace, signal handling, profiling). **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, F1-F4. Blocked by T38, T40, T41, T42, T43, T49.
+
+  **References**: FreeBSD `SDT` (Statically Defined Tracing), `usdt(3)`, `dtrace(1)`, FreeBSD `signal(3)`, `gprof(1)`.
+
+  **Acceptance**:
+  - [ ] All CLI subcommands work
+  - [ ] Trace buffer records events correctly
+  - [ ] `SIGUSR2` dumps trace
+  - [ ] DTrace probes are registered (`dtrace -l | grep display-broker`)
+  - [ ] DTrace examples work
+  - [ ] CPU profile can be generated
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: --list-tunables shows effective values
+    Tool: Bash
+    Preconditions: Broker running
+    Steps:
+      1. sysctl security.display.broker.max_fps_per_client=42
+      2. displayd --list-tunables | grep max_fps_per_client
+    Expected Result: 42
+    Evidence: .sisyphus/evidence/task-50-list-tunables.txt
+
+  Scenario: DTrace probe fires
+    Tool: Bash (dtrace)
+    Preconditions: Broker running with USDT enabled
+    Steps:
+      1. dtrace -n 'display-broker:frame-send { trace(copyinstr(arg0)); }' &
+      2. Trigger a frame send
+    Expected Result: DTrace event fires with session_id
+    Evidence: .sisyphus/evidence/task-50-dtrace.txt
+
+  Scenario: SIGUSR2 dumps trace
+    Tool: Bash
+    Preconditions: Broker with active sessions
+    Steps:
+      1. kill -USR2 $(cat /var/run/displayd.pid)
+      2. cat /var/run/displayd.dump
+    Expected Result: dump file contains all session traces
+    Evidence: .sisyphus/evidence/task-50-sigusr2.txt
+  ```
+
+  **Commit**: YES — `displayd: add diagnostic tools, per-session tracing, DTrace probes (USDT)`
+
+---
+
+- [ ] 51. BDP stats / health / debug message types (T39 expansion)
+
+  **What to do**:
+  1. Extend BDP protocol (T39) with 8 new message types: `0x19 STATS_REQ`, `0x1A STATS_REPLY`, `0x1B DEBUG_CMD`, `0x1C DEBUG_REPLY`, `0x1D TRACE_CTRL`, `0x1E HEALTH_REQ`, `0x1F HEALTH_REPLY`, `0x20 HEALTH_PUSH`.
+  2. Implement handlers in `bdp_stats.c`, `bdp_debug.c`, `bdp_health.c`:
+     - STATS_REQ filter: `transport=rfb|bdp|multicast`, `channel=name`, `user=uid`, `resource=id`, `since=timestamp`
+     - STATS_REPLY: returns subset of `broker_stats.c` snapshot matching filter
+     - DEBUG_CMD: root-only, ACL-checked, supports sub-commands (`kick <session_id>`, `enable_trace <session_id>`, `disable_trace <session_id>`, `reload_config`, `rotate_audit`, `dump`)
+     - DEBUG_REPLY: returns command result (success/failure + reason)
+     - TRACE_CTRL: enable/disable per-session trace (`session_id`, `enable=0|1`)
+     - HEALTH_REQ: returns current health status (live check)
+     - HEALTH_REPLY: `{status, uptime_s, version, build, last_check_s, last_error, modules_loaded, sysctls_valid}`
+     - HEALTH_PUSH: periodic broadcast to admin clients (every 30s)
+  3. **ACL enforcement** (security principle — localhost by default doesn't apply here, but ACL does):
+     - STATS_REQ: per-user (filtered to what user can see)
+     - STATS_REPLY: same filtering
+     - DEBUG_CMD: **root-only** + ACL check (must be in `display.admins` group)
+     - TRACE_CTRL: **root-only** + session owner
+     - HEALTH_REQ: per-user (filtered)
+     - HEALTH_PUSH: **root-only** (admin clients only)
+  4. TDD: tests for each message type, ACL enforcement, filter syntax, response format.
+  5. Update `bdp(7)` man page (T39) with the new message types.
+  6. Update `libdisplay.so` (T44) with C API helpers: `bdp_stats_request()`, `bdp_health_request()`, `bdp_debug_cmd()`.
+
+  **Must NOT do**:
+  - Don't expose DEBUG_CMD to non-root users.
+  - Don't expose HEALTH_PUSH to non-admin clients.
+  - Don't leak other users' stats via STATS_REPLY (filter per session).
+  - Don't accept arbitrary filters (use a fixed grammar, reject unknown).
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, F1-F4. Blocked by T39, T40, T49, T50.
+
+  **References**: BDP protocol spec (T39), `libdisplay.so` (T44), `display-acl(5)`.
+
+  **Acceptance**:
+  - [ ] All 8 message types round-trip
+  - [ ] STATS_REQ filter works (by transport, channel, user, resource)
+  - [ ] DEBUG_CMD is refused for non-root
+  - [ ] TRACE_CTRL works for session owner
+  - [ ] HEALTH_REQ returns valid status
+  - [ ] HEALTH_PUSH broadcasts to admin clients
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: STATS_REQ with filter returns matching subset
+    Tool: Bash (atf + bdp_probe)
+    Preconditions: Broker with 2 sessions on different transports
+    Steps:
+      1. STATS_REQ filter=transport=rfb
+      2. STATS_REPLY arrives
+    Expected Result: only RFB transport stats in reply
+    Evidence: .sisyphus/evidence/task-51-stats-filter.txt
+
+  Scenario: DEBUG_CMD refused for non-root
+    Tool: Bash (atf)
+    Preconditions: Test non-root user
+    Steps:
+      1. As non-root, send DEBUG_CMD kick <session_id>
+      2. Receive DEBUG_REPLY
+    Expected Result: NO_PERM
+    Evidence: .sisyphus/evidence/task-51-debug-deny.txt
+  ```
+
+  **Commit**: YES — `bdp: add STATS_REQ, STATS_REPLY, DEBUG_CMD, DEBUG_REPLY, TRACE_CTRL, HEALTH_REQ, HEALTH_REPLY, HEALTH_PUSH message types with ACL enforcement`
+
+---
+
+- [ ] 52. Health check HTTP endpoint (for k8s/Nomad integration) — localhost by default
+
+  **What to do**:
+  1. Implement a small HTTP/1.1 server in `broker_http.c`:
+     - **By default, NO TCP HTTP listener is bound.** Only the Unix socket is created at `/var/run/displayd.admin` (filesystem permissions 0660, owner root:display-admins).
+     - **TCP HTTP listener is opt-in via `security.display.broker.admin.http_listen`** (default empty = no TCP). If set, the value is restricted to:
+       - `[::1]:9090` (localhost IPv6, dual-stack) — always allowed
+       - `127.0.0.1:9090` (localhost IPv4 only) — always allowed
+       - Any other bind address — **REQUIRES** `security.display.broker.admin.http_listen_public=1` AND `tls.client_ca` configured AND mTLS required
+     - Preflight refuses to start if `http_listen` is set to a non-localhost address without `http_listen_public=1` + mTLS.
+  2. Endpoints (all via Unix socket OR TCP, both gated by the same ACL):
+     - `GET /healthz` → 200 `{"status": "alive", "uptime_s": N}` if process alive (no auth — standard for liveness probes)
+     - `GET /readyz` → 200 `{"status": "ready", "checks": {...}}` if all ready checks pass, else 503 (no auth — standard for readiness probes)
+     - `GET /stats` → Prometheus exposition (auth required)
+     - `GET /stats.json` → JSON (auth required)
+     - `GET /version` → `{"version": "1.0.0", "build": "..."}` (no auth)
+     - `GET /debug/dump` (root-only) → full state dump (auth + root)
+     - `GET /debug/pprof` (root-only) → pprof-style profile (auth + root)
+  3. **Ready checks** (T49 expansion):
+     - All required kernel modules loaded
+     - All required sysctls in valid state
+     - TLS cert loaded and not expired (or self-signed auto-gen ready)
+     - ACL resolver initialized
+     - Resource registry has at least one scan complete
+     - All transports registered
+     - No recent (last 60s) critical errors
+     - **No public-exposure sysctls set without their security prerequisites**
+  4. **ACL on HTTP** (security principle — localhost by default):
+     - Unix socket: filesystem permissions 0660 (root:display-admins)
+     - TCP loopback (`[::1]` / `127.0.0.1`): password or mTLS (the operator chose loopback, but auth still required for /stats, /debug)
+     - TCP public (non-loopback): **mTLS only**, with cert signed by `tls.client_ca` AND user in `display.admins` group
+     - No authentication on `/healthz` and `/readyz` (standard for liveness/readiness probes — they're informational, no data)
+  5. **TDD**: tests for each endpoint, each ready check, ACL, Unix vs TCP binding, **default-no-TCP behavior, public-exposure refusal without mTLS, localhost bind works without mTLS, IPv6 bind works**.
+  6. Update `display-broker-config(5)` (T47) and `displayd(8)` (T47) with admin endpoint config and the "localhost by default" warning.
+
+  **Must NOT do**:
+  - **NEVER bind HTTP to public interfaces by default.** The default is `admin.http_listen=""` (no TCP) + Unix socket.
+  - Don't expose /debug/* to non-root.
+  - Don't use HTTP/2 (keep it simple, HTTP/1.1 only).
+  - Don't accept requests larger than 64 KB (DoS).
+  - Don't accept bind addresses like `0.0.0.0` or `[::]` without `http_listen_public=1` + mTLS.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, F1-F4. Blocked by T38, T49, T50.
+
+  **References**: HTTP/1.1 spec, libevent (or hand-rolled `select(2)`-based), Prometheus exposition format.
+
+  **Acceptance**:
+  - [ ] Default behavior: no TCP HTTP listener, only Unix socket
+  - [ ] Setting `admin.http_listen=[::1]:9090` works without mTLS
+  - [ ] Setting `admin.http_listen=[::]:9090` is refused without `http_listen_public=1` + mTLS
+  - [ ] All endpoints work
+  - [ ] `/healthz` returns 200 when alive
+  - [ ] `/readyz` returns 503 when not ready (e.g. cert not loaded)
+  - [ ] Unix socket permissions correct
+  - [ ] TCP public requires mTLS
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: default no-TCP behavior
+    Tool: Bash (netstat + curl)
+    Preconditions: Fresh broker, no config changes
+    Steps:
+      1. netstat -an | grep 9090
+      2. curl -s -o /dev/null -w '%{http_code}' --connect-timeout 1 http://[::1]:9090/healthz
+    Expected Result: no listener on 9090; curl fails (connection refused)
+    Evidence: .sisyphus/evidence/task-52-default-no-tcp.txt
+
+  Scenario: localhost bind works without mTLS
+    Tool: Bash
+    Preconditions: admin.http_listen=[::1]:9090
+    Steps:
+      1. curl -s -o /dev/null -w '%{http_code}' http://[::1]:9090/healthz
+    Expected Result: 200
+    Evidence: .sisyphus/evidence/task-52-localhost.txt
+
+  Scenario: public bind refused without mTLS
+    Tool: Bash
+    Preconditions: admin.http_listen=[::]:9090, http_listen_public=1, but no client_ca
+    Steps:
+      1. Try to start broker
+    Expected Result: broker refuses to start with preflight error
+    Evidence: .sisyphus/evidence/task-52-public-refused.txt
+
+  Scenario: /healthz returns 200
+    Tool: Bash (curl)
+    Preconditions: Broker running with admin.http_listen=[::1]:9090
+    Steps:
+      1. curl -s -o /dev/null -w '%{http_code}' http://[::1]:9090/healthz
+    Expected Result: 200
+    Evidence: .sisyphus/evidence/task-52-healthz.txt
+
+  Scenario: /debug/dump refuses non-root
+    Tool: Bash (curl)
+    Preconditions: Broker running, non-root user, admin.http_listen=[::1]:9090
+    Steps:
+      1. curl -s -o /dev/null -w '%{http_code}' http://[::1]:9090/debug/dump
+    Expected Result: 403
+    Evidence: .sisyphus/evidence/task-52-debug-403.txt
+  ```
+
+  **Commit**: YES — `displayd: add HTTP /healthz, /readyz, /stats, /version, /debug/* endpoints with localhost-by-default (Unix socket always, TCP only via http_listen sysctl, public requires http_listen_public=1 + mTLS, IPv6 dual-stack)`
+
+---
+
+- [ ] 53. Multi-display support (per-VM/per-jail N framebuffers, array jail params, multi-slot bhyve args, mixed resolutions)
+
+  **What to do**:
+  1. Add `fbuf.count=N` (default 1, max 8) jail param registration in `sys/kern/kern_jail.c` (T9 expansion).
+  2. Add `fbuf.N.id`, `fbuf.N.width`, `fbuf.N.height`, `fbuf.N.transport`, `fbuf.N.nokbd`, `fbuf.N.nomouse`, `fbuf.N.position` jail params. Parse in `lib/libjail/jail.c`.
+  3. For bhyve: extend `pci_fbuf.c` (T13) to accept multiple `-s N,fbuf,id=...,...` slots. The emulated PCI device reflects the host GPU's port types (HDMI, DP, USB-C, etc.) — the guest sees a real multi-head GPU.
+  4. Extend `console.{c,h}` (T8) to be **N instances per VM** (not just multi-VM single-instance). Each display has its own kbd/ptr focus, but kbd/ptr is shared across displays of the same VM.
+  5. Implement the `gpu.ports` mechanism (see "GPU ports model" — drives display count when `allow.gpu` is set). The `fbuf.count` is auto-derived from `gpu.ports` when GPU is allocated; falls back to explicit `fbuf.count` otherwise.
+  6. Implement mixed-resolution handling: per-display width/height are independent. Wall's bounding box is computed from max bounds of all displays. Composite may be irregular (filled with background color or returned as list of rectangles).
+  7. TDD: tests for each combination (with/without GPU, mixed resolutions, wall layout, single-display backward compat).
+  8. Update `jail.conf(5)`, `bhyve(8)`, `bhyve_config(5)` man pages.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T54, T55, T46, F1-F4. Blocked by T8, T9, T10, T11, T12, T13, T21 (gpu_resource with port tracking), T35.
+
+  **References**: `sys/kern/kern_jail.c` (jail param pattern), `usr.sbin/bhyve/pci_fbuf.c` (multi-slot), `gpu_resource` (port allocation).
+
+  **Acceptance**:
+  - [ ] Jail with `fbuf.count=3` gets 3 framebuffers (`/dev/fb0`, `/dev/fb1`, `/dev/fb2`)
+  - [ ] Bhyve with 3 PCI fbuf slots gets 3 emulated displays
+  - [ ] Per-display kbd/ptr focus works (switch focus between displays)
+  - [ ] Mixed resolutions work (e.g., 1920x1080 + 3840x2160 + 1920x1080)
+  - [ ] Backward compat: old configs without `fbuf.count` work as before (default count=1)
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: jail with fbuf.count=3 gets 3 framebuffers
+    Tool: Bash (jls, ls)
+    Preconditions: FreeBSD host
+    Steps:
+      1. jail -c name=test allow.fbuf fbuf.count=3
+      2. jls -v fbuf -j test
+      3. jexec test ls /dev/fb*
+    Expected Result: /dev/fb0, /dev/fb1, /dev/fb2 present
+    Evidence: .sisyphus/evidence/task-53-jail-3fb.txt
+
+  Scenario: bhyve with 3 PCI fbuf slots gets 3 displays
+    Tool: Bash (lspci inside guest)
+    Preconditions: FreeBSD host, bhyve VM
+    Steps:
+      1. bhyve -s 0,fbuf,id=screen0,... -s 1,fbuf,id=screen1,... -s 2,fbuf,id=screen2,... ...
+      2. lspci inside guest
+    Expected Result: 3 PCI fbuf devices
+    Evidence: .sisyphus/evidence/task-53-bhyve-3fb.txt
+
+  Scenario: mixed-resolution wall
+    Tool: Bash (BDP client)
+    Preconditions: Broker with wall resource
+    Steps:
+      1. Wall: fbuf.0=1920x1080 pos=0,0; fbuf.1=3840x2160 pos=1920,0
+      2. Attach to wall via BDP WALL_ATTACH
+    Expected Result: composite 5760x2160 (or list of rectangles)
+    Evidence: .sisyphus/evidence/task-53-mixed-res.txt
+  ```
+
+  **Commit**: YES — `display: add multi-display support (fbuf.count, fbuf.N.*, multi-slot bhyve, mixed resolutions)`
+
+---
+
+- [ ] 54. Display walls (group of displays, composite view, stitching cache)
+
+  **What to do**:
+  1. Implement wall resource type in broker (T38 expansion): a wall is a group of displays arranged in 2D.
+  2. Wall's `bdp_resource` has `type=wall` and `displays[]` (each with position).
+  3. Server-side stitching: when a client attaches to a wall, the server stitches the active displays into a single canvas. Canvas dimensions = max bounds of all displays.
+  4. Stitching cache: only re-stitch when a display's frame changes. Cache the stitched canvas keyed by (display_versions[]).
+  5. Two composite modes (sysctl `security.display.broker.wall.composite_mode`):
+     - `stitched` (default) — server stitches into a single image
+     - `list` — server returns a list of display rectangles; client composes
+  6. Inactive areas (where no display is positioned) filled with background color (sysctl `wall.background_color`).
+  7. New BDP messages: `0x26 WALL_ATTACH` (C→S), `0x27 WALL_ATTACH_OK` (S→C), `0x28 WALL_FRAME` (S→C, stitched or list).
+  8. TDD: tests for stitching, caching, mixed sizes, irregular layouts.
+
+  **Profile**: `deep` (image processing). **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, F1-F4. Blocked by T53.
+
+  **References**: libgd or libcairo (for stitching), FreeBSD image processing primitives.
+
+  **Acceptance**:
+  - [ ] 2×2 wall with 4 displays stitches correctly
+  - [ ] Mixed-resolution wall stitches correctly (with background fill)
+  - [ ] Stitching cache works (no re-stitch on unchanged frame)
+  - [ ] `list` mode returns display rectangles
+  - [ ] BDP WALL_ATTACH works
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: 2x2 wall stitches correctly
+    Tool: Bash (BDP client)
+    Preconditions: Wall resource
+    Steps:
+      1. Wall: 4 displays at (0,0), (1920,0), (0,1080), (1920,1080)
+      2. Attach, receive first WALL_FRAME
+    Expected Result: 3840x2160 composite image
+    Evidence: .sisyphus/evidence/task-54-wall-2x2.png
+  ```
+
+  **Commit**: YES — `display-broker: add display walls (composite stitching, cache, mixed resolutions)`
+
+---
+
+- [ ] 55. BDP multi-display message types (LIST_DISPLAYS, DISPLAY_ATTACH, DISPLAY_DETACH, WALL_ATTACH)
+
+  **What to do**:
+  1. Extend BDP protocol (T39) with multi-display message types:
+     - `0x21 LIST_DISPLAYS` (C→S) — list displays in a resource (filter: resource_id)
+     - `0x22 LIST_DISPLAYS_REPLY` (S→C) — array of `bdp_display`
+     - `0x23 DISPLAY_ATTACH` (C→S) — attach to a specific display
+     - `0x24 DISPLAY_ATTACH_OK` (S→C) — display session_id, width, height, position
+     - `0x25 DISPLAY_DETACH` (C→S) — detach from a specific display
+     - `0x26 WALL_ATTACH` (C→S) — attach to a wall (composite)
+     - `0x27 WALL_ATTACH_OK` (S→C) — wall session_id, total_width, total_height
+     - `0x28 WALL_FRAME` (S→C) — composite or list of rectangles
+  2. Extend `bdp_resource` struct with `displays[]` array.
+  3. Extend `bdp_display` struct: `{id, name, type, width, height, position_x, position_y, perms}`.
+  4. Implement ACL enforcement: per-display ACL (`display.acl.N`) when set, else resource-level ACL.
+  5. TDD: tests for each message type, ACL enforcement, backward compat (old clients attach to resource, get only display).
+  6. Update `bdp(7)` man page.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, F1-F4. Blocked by T39, T40, T53, T54.
+
+  **References**: BDP protocol (T39), `display-acl(5)`.
+
+  **Acceptance**:
+  - [ ] All 8 message types round-trip
+  - [ ] LIST_DISPLAYS returns displays for a multi-display resource
+  - [ ] DISPLAY_ATTACH attaches to a specific display
+  - [ ] WALL_ATTACH attaches to a wall and gets composite
+  - [ ] Old clients (don't know about displays) attach to single-display resource and get the only display
+  - [ ] Per-display ACL works
+  - [ ] ATF tests pass
+
+  **Commit**: YES — `bdp: add LIST_DISPLAYS, DISPLAY_ATTACH, DISPLAY_DETACH, WALL_ATTACH message types with per-display ACL`
+
+---
+
+- [ ] 56. GPU port enumeration tool (`gpu-port-info`)
+
+  **What to do**:
+  1. Create `usr.sbin/gpu-port-info/` with `Makefile`, `main.c`, `gpu_query.c`.
+  2. CLI: `gpu-port-info [--gpu N] [--consumer consumer_id] [--format text|json] [--live]`.
+  3. Outputs:
+     - All detected GPUs (`hw.gpu.N.*`)
+     - For each GPU: physical port inventory (type, max res, max fps, capabilities)
+     - Current port allocation (which consumer has which port)
+     - Per-port live stats (bandwidth, FPS, resolution)
+  4. Reads from `kern.gpu_resource.stats.*` and `hw.gpu.N.*` sysctls.
+  5. ACL: world-readable for non-sensitive info; root for port allocation details.
+  6. TDD: tests for each CLI option, format output, error handling.
+
+  **Profile**: `quick`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks F1-F4. Blocked by T19, T21, T49.
+
+  **References**: `kern.gpu_resource.stats.*` sysctls, `hw.gpu.N.share.*` sysctls.
+
+  **Acceptance**:
+  - [ ] Lists all GPUs
+  - [ ] Lists ports per GPU
+  - [ ] Shows current port allocation
+  - [ ] Live mode updates stats
+  - [ ] JSON format is valid
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: list ports for stub GPU
+    Tool: Bash (gpu-port-info)
+    Preconditions: Stub GPU with 4 ports
+    Steps:
+      1. gpu-port-info --gpu 0
+    Expected Result: 4 ports listed (HDMI, DP, DP, USB-C)
+    Evidence: .sisyphus/evidence/task-56-port-list.txt
+  ```
+
+  **Commit**: YES — `gpu-port-info: add CLI tool to enumerate GPU ports and per-port stats`
+
+---
+
+- [ ] 57. Audio in BDP protocol (8 new message types)
+
+  **What to do**:
+  1. Extend BDP protocol (T39) with 8 audio message types:
+     - `0x30 AUDIO_STREAM_OPEN` (C→S) — open audio stream
+     - `0x31 AUDIO_STREAM_OPEN_OK` (S→C) — audio session_id, format, sample_rate, channels
+     - `0x32 AUDIO_STREAM_OPEN_FAIL` (S→C) — reason
+     - `0x33 AUDIO_FRAME` (S→C) — encoded audio data with PTS
+     - `0x34 AUDIO_INPUT` (C→S) — audio input from client
+     - `0x35 AUDIO_CONTROL` (C↔S) — volume, mute, format change, resync
+     - `0x36 AUDIO_STREAM_CLOSE` (C→S) — close audio stream
+     - `0x37 AUDIO_SYNC` (S↔C) — sync info (PTS offset, drift, clock quality)
+  2. Implement format negotiation: client sends list of supported formats, server picks one (default Opus).
+  3. Implement PTS-based sync: every audio frame has a PTS, every video frame has a PTS, client uses both for sync.
+  4. TDD: round-trip all 8 message types; format negotiation; sync drift correction.
+  5. Update `bdp(7)` man page with audio extension.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, F1-F4. Blocked by T39, T58.
+
+  **References**: Opus codec, RTP/RTCP (for sync reference), `libopus`.
+
+  **Acceptance**:
+  - [ ] All 8 message types round-trip
+  - [ ] Format negotiation works
+  - [ ] PTS-based sync works (drift < 50ms)
+  - [ ] Audio frames delivered with correct PTS
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: audio frames delivered with sync
+    Tool: Bash (BDP client + audio analyzer)
+    Preconditions: Broker with audio source
+    Steps:
+      1. Open audio stream
+      2. Receive 100 audio frames
+      3. Analyze PTS spacing
+    Expected Result: PTS spacing = 20ms (48kHz frame size), drift < 50ms
+    Evidence: .sisyphus/evidence/task-57-audio-sync.txt
+  ```
+
+  **Commit**: YES — `bdp: add 8 audio message types (AUDIO_STREAM_OPEN, AUDIO_FRAME, AUDIO_CONTROL, AUDIO_SYNC, etc.) with PTS-based sync`
+
+---
+
+- [ ] 58. Audio kernel module (`audio_resource.ko`) — audio capture, allocation, ACL
+
+  **What to do**:
+  1. Create `sys/modules/audio_resource/` with `Makefile`, `audio_resource.c`, `audio_backend.c`, `audio_stub.c`.
+  2. `audio_resource.ko` — kernel object, mirrors `gpu_resource.ko`:
+     - `audio_resource_alloc(consumer_id, format, sample_rate, channels) → audio_resource *`
+     - `audio_resource_free(resource)`
+     - `audio_resource_attach(resource, backend)`
+     - `audio_resource_read(resource, buf, len) → ssize_t`
+     - `audio_resource_write(resource, buf, len) → ssize_t` (input)
+     - `audio_resource_get_stats(resource) → struct audio_stats`
+  3. `audio_stub` backend — generates a test tone (440Hz sine wave) for testing without real audio source. Tunable: `hw.audio.0.stub_frequency=440`, `hw.audio.0.stub_amplitude=0.5`.
+  4. ACL: `display.audio.acl` enforced at the kernel layer (mirror of `fbuf_jail` ACL).
+  5. Stats: `kern.audio_resource.stats.{active, total_open, total_close, bytes_read, bytes_written}`.
+  6. TDD: ATF tests for each kernel API, stub tone verification (decode and check frequency), ACL.
+
+  **Profile**: `deep` (kernel + audio). **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T57, T59, T46, F1-F4. Blocked by T22 (preflight framework), T40 (ACL).
+
+  **References**: `sys/modules/gpu_resource/`, `sys/modules/fbuf_jail/`, FreeBSD sound(4) for userland API.
+
+  **Acceptance**:
+  - [ ] audio_resource.ko loads
+  - [ ] audio_stub generates 440Hz tone
+  - [ ] ACL enforced
+  - [ ] Stats counters increment
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: audio_stub generates 440Hz tone
+    Tool: Bash (audio decode + FFT)
+    Preconditions: audio_resource.ko loaded
+    Steps:
+      1. kldload audio_resource
+      2. open audio_stub stream
+      3. Read 1 second of audio
+      4. Decode to PCM, run FFT
+    Expected Result: peak frequency at 440Hz ± 5Hz
+    Evidence: .sisyphus/evidence/task-58-stub-440hz.txt
+  ```
+
+  **Commit**: YES — `audio_resource: add kernel module for audio allocation, ACL, stats (with audio_stub test backend)`
+
+---
+
+- [ ] 59. Audio routing (mixer, per-stream volume, multi-source to multi-sink)
+
+  **What to do**:
+  1. Implement `usr.sbin/displayd/broker_audio.c`:
+     - `audio_route(consumer, sink)` — route consumer's audio to a sink (BDP session, multicast channel, local speaker, recording)
+     - `audio_mixer_create(sinks[]) → mixer` — mix multiple sources into one sink
+     - `audio_set_volume(stream, volume)` — per-stream volume (0-100%)
+     - `audio_set_mute(stream, on/off)` — per-stream mute
+  2. Multi-source to multi-sink routing: each consumer's audio can go to 0-N sinks.
+  3. Mixer: per-sink mixer combines multiple sources with per-source volume.
+  4. Per-stream and per-sink volume/mute controls via BDP AUDIO_CONTROL.
+  5. Local speaker output: writes to host's `/dev/dsp` (via `audio_resource` if available, else direct `write(2)`).
+  6. Recording: writes to a file (configurable path, format: WAV / raw PCM / Opus).
+  7. TDD: tests for routing, mixing, volume, mute, local speaker, recording.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T60, T46, F1-F4. Blocked by T57, T58.
+
+  **References**: `lib/libopus`, `lib/libsndfile` (for recording), `/dev/dsp`.
+
+  **Acceptance**:
+  - [ ] Audio routes to BDP session
+  - [ ] Audio routes to multicast channel
+  - [ ] Audio routes to local speaker
+  - [ ] Audio records to file
+  - [ ] Mixer combines multiple sources
+  - [ ] Per-stream volume works
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: audio recorded to WAV file
+    Tool: Bash (audio analyze)
+    Preconditions: Audio source running
+    Steps:
+      1. Route audio to recording sink
+      2. Record 5 seconds
+      3. Decode WAV, check duration
+    Expected Result: 5 seconds of audio recorded
+    Evidence: .sisyphus/evidence/task-59-record.wav
+  ```
+
+  **Commit**: YES — `displayd: add audio routing (mixer, per-stream volume, multi-source to multi-sink, recording)`
+
+---
+
+- [ ] 60. External stream tool (`bdp-stream`) — pipe-friendly for ffmpeg/cast-sender
+
+  **What to do**:
+  1. Create `usr.sbin/bdp-stream/` with `Makefile`, `main.c`, `bdp_connect.c`, `bdp_to_format.c`, `output_matroska.c`, `output_raw.c`, `output_pipe.c`.
+  2. CLI: `bdp-stream --server host:port --user user --fb resource_id --output-format matroska|raw|pipe|rtp|hls --output file|stdout|udp://host:port`.
+  3. Connects to broker, authenticates, attaches to fb (video + audio), dumps to output.
+  4. Output formats:
+     - `matroska` (mkv) — universal, ffmpeg-friendly
+     - `pipe` — transcoded H.264 + AAC for direct cast-sender consumption
+     - `raw` — raw BDP frames (for custom tools)
+     - `hls` — HTTP Live Streaming (server mode, exposes HTTP endpoint)
+     - `rtp` — Real-time Transport Protocol (for IPTV / WebRTC)
+  5. End-to-end test: `bdp-stream | ffmpeg | cast-sender` → chromecast plays VM display + audio.
+  6. TDD: tests for each output format, end-to-end with ffmpeg.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: Wave 5. Blocks T46, F1-F4. Blocked by T44 (libdisplay), T57 (BDP audio), T59 (audio routing).
+
+  **References**: `lib/libdisplay`, ffmpeg docs, gstreamer docs, libavformat (for matroska muxing).
+
+  **Acceptance**:
+  - [ ] Connects to broker, authenticates, attaches to fb
+  - [ ] Dumps video + audio to matroska
+  - [ ] Pipes successfully to ffmpeg
+  - [ ] `bdp-stream | ffmpeg | cast-sender` works end-to-end
+  - [ ] HLS server mode works
+  - [ ] RTP output works
+  - [ ] ATF tests pass
+
+  **QA Scenarios**:
+  ```
+  Scenario: bdp-stream | ffmpeg | cast-sender end-to-end
+    Tool: Bash + ffmpeg + cast-sender
+    Preconditions: Broker running, chromecast on network
+    Steps:
+      1. bdp-stream --server localhost:8443 --user alice --fb web1 --output-format pipe | \
+         ffmpeg -i pipe:0 -c:v copy -c:a copy -f matroska - | \
+         cast-sender --device "Living Room TV"
+      2. Watch TV
+    Expected Result: VM display + audio plays on TV
+    Evidence: .sisyphus/evidence/task-60-chromecast.png
+  ```
+
+  **Commit**: YES — `bdp-stream: add CLI tool to pipe BDP video+audio to external encoders (ffmpeg, gstreamer, cast-sender)`
+
+---
+
+- [ ] 61. Chromecast transport (v2 follow-on — built-in cast sender)
+
+  **What to do**:
+  1. Add `cast` as a registered `display_transport` in `usr.sbin/displayd/cast.c`:
+     - `cast_init` — mDNS discovery of chromecast devices
+     - `cast_attach` — Cast protocol connection (TLS + protobuf)
+     - `cast_read` — get frame from broker fb, send to chromecast
+     - `cast_send` — send audio to chromecast
+  2. Implements Google Cast protocol (binary protobuf over WebSocket or HTTP).
+  3. User: `displayc --server localhost:8443 --user alice --fb web1 --cast-to "Living Room TV"`.
+  4. Out of scope for v1 — this is a follow-on workstream. T61 is documented as "v2 / follow-on" so it's tracked but not scheduled for v1 implementation.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: Google Cast protocol docs, libcast (or hand-rolled protobuf), mDNS (Avahi or hand-rolled).
+
+  **Acceptance**:
+  - [ ] `displayc --cast-to "Living Room TV"` plays VM on TV
+  - [ ] No external ffmpeg/cast-sender needed
+  - [ ] Works with v2 follow-on broker
+
+  **Commit**: YES (in v2) — `displayd: add built-in chromecast transport (mDNS discovery + Cast protocol)`
 
 ---
 
