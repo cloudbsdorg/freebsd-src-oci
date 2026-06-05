@@ -71,7 +71,8 @@ generate_pod_uid(char *uid, size_t len)
 	
 	SHA256_Init(&ctx);
 	SHA256_Update(&ctx, &ts, sizeof(ts));
-	SHA256_Update(&ctx, &pthread_self(), sizeof(pthread_t));
+	pthread_t tid = pthread_self();
+	SHA256_Update(&ctx, &tid, sizeof(pthread_t));
 	SHA256_Final(hash, &ctx);
 	
 	snprintf(uid, len, "pod-%08x%08x", 
