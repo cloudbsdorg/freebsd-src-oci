@@ -146,7 +146,7 @@ struct group_role_map {
     RB_ENTRY(group_role_map) entry;
 };
 RB_HEAD(group_role_map_tree, group_role_map);
-RB_PROTOTYPE(group_map_tree, group_role_map, entry, group_compare);
+RB_PROTOTYPE(group_role_map_tree, group_role_map, entry, group_compare);
 
 /* PAM module configuration */
 struct pam_config {
@@ -190,7 +190,7 @@ int     pam_verify_token(const char *token, char *username,
             uint32_t *permissions);
 int     pam_refresh_token(const char *refresh_token, char **new_token);
 
-struct ocifbsd_user *pam_get_user(const char *username);
+struct ocifbsd_user *ocifbsd_pam_get_user(const char *username);
 struct ocifbsd_user **pam_list_users(int *count);
 int     pam_create_user(struct ocifbsd_user *user);
 int     pam_update_user(struct ocifbsd_user *user);

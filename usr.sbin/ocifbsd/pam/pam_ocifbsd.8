@@ -1,0 +1,94 @@
+.\"-
+.\" Copyright (c) 2024 The FreeBSD Foundation
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" This software was developed by Klara, Inc. under sponsorship
+.\" from the FreeBSD Foundation.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+.\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+.\" IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+.\" INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+.\" BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+.\" LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+.\" AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+.\" OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+.\" USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+.\" DAMAGE.
+.\"
+.Dd June 5, 2026
+.Dt PAM_OCIFBSD 8
+.Os
+.Sh NAME
+.Nm pam_ocifbsd
+.Nd ocifbsd PAM authentication module
+.Sh SYNOPSIS
+.Op Ar service-name
+.Nm
+.Op Ar args ...
+.Sh DESCRIPTION
+The
+.Nm
+module authenticates users against the
+.Xr ocifbsd 8
+user registry and enforces RBAC role bindings and rate limits.
+It is intended to be referenced from a service's PAM
+configuration file in
+.Pa /etc/pam.d/ .
+.Pp
+The module implements the
+.Dv auth
+and
+.Dv account
+PAM service primitives.
+The
+.Dv auth
+primitive verifies the supplied credentials against the
+ocifbsd user registry, optionally backed by LDAP or Kerberos
+when configured.
+The
+.Dv account
+primitive rejects locked or otherwise disabled accounts.
+.Pp
+The module is typically stacked after
+.Xr pam_unix 8
+or a similar local-files provider so that ocifbsd acts as a
+secondary check that can impose cluster-wide policy on top of
+the host's existing user database.
+.Sh FILES
+.Bl -tag -width /var/run/ocifbsd -compact
+.It Pa /etc/pam.d/*
+Per-service PAM configuration.
+.It Pa /var/run/ocifbsd/users
+User registry directory.
+.It Pa /var/run/ocifbsd/audit.log
+Append-only audit log written for every authentication
+attempt.
+.El
+.Sh SEE ALSO
+.Xr ocifbsd 8 ,
+.Xr pam.conf 5 ,
+.Xr pam.d 5 ,
+.Xr pam_unix 8
+.Sh HISTORY
+The
+.Nm
+module first appeared in
+.Fx 16.0 .
+.Sh AUTHORS
+The
+.Nm
+module was developed by
+.An Klara, Inc.
+under sponsorship from
+.The FreeBSD Foundation .

@@ -44,21 +44,144 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fts.h>
+#include <grp.h>
 #include <libutil.h>
 #include <login_cap.h>
-#include <pam/pam_appl.h>
+#include <security/pam_appl.h>
+#include <security/pam_modules.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sha256.h>
-#include <hmac.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <time.h>
-#include <base64.h>
 
 #include "pam_auth.h"
 #include "../include/ocifbsd.h"
+
+/*
+ * HMAC-SHA256 wrapper. FreeBSD 16's libmd does not export
+ * hmac_sha256() in any public header; the standard location is
+ * OpenSSL's <openssl/hmac.h>. This thin wrapper matches the
+ * libmd-style call signature used throughout this file.
+ */
+static void
+hmac_sha256(const void *key, size_t key_len, const void *data,
+    size_t data_len, void *digest, size_t digest_size)
+{
+	unsigned int digest_len;
+
+	(void)digest_size;
+	(void)HMAC(EVP_sha256(), key, (int)key_len, data, data_len,
+	    digest, &digest_len);
+}
+
+static const char base64_alphabet[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static int
+base64_encode(const void *src, size_t src_len, char *dst, size_t dst_size)
+{
+	const unsigned char *in = src;
+	size_t o = 0, i, needed;
+
+	needed = 4 * ((src_len + 2) / 3) + 1;
+	if (dst_size < needed)
+		return (-1);
+
+	for (i = 0; i + 3 <= src_len; i += 3) {
+		dst[o++] = base64_alphabet[(in[i] >> 2) & 0x3f];
+		dst[o++] = base64_alphabet[((in[i] << 4) | (in[i+1] >> 4)) & 0x3f];
+		dst[o++] = base64_alphabet[((in[i+1] << 2) | (in[i+2] >> 6)) & 0x3f];
+		dst[o++] = base64_alphabet[in[i+2] & 0x3f];
+	}
+	if (i < src_len) {
+		dst[o++] = base64_alphabet[(in[i] >> 2) & 0x3f];
+		if (i + 1 < src_len) {
+			dst[o++] = base64_alphabet[((in[i] << 4) |
+			    (in[i+1] >> 4)) & 0x3f];
+			dst[o++] = base64_alphabet[(in[i+1] << 2) & 0x3f];
+			dst[o++] = '=';
+		} else {
+			dst[o++] = base64_alphabet[(in[i] << 4) & 0x3f];
+			dst[o++] = '=';
+			dst[o++] = '=';
+		}
+	}
+	dst[o] = '\0';
+	return (0);
+}
+
+static int
+base64_decode(const char *src, void *dst, size_t dst_size)
+{
+	unsigned char *out = dst;
+	size_t o = 0;
+	uint32_t buf = 0;
+	int bits = 0;
+	const char *p;
+
+	for (p = src; *p != '\0' && *p != '='; p++) {
+		const char *q = strchr(base64_alphabet, *p);
+		if (q == NULL)
+			return (-1);
+		buf = (buf << 6) | (uint32_t)(q - base64_alphabet);
+		bits += 6;
+		if (bits >= 8) {
+			bits -= 8;
+			if (o >= dst_size)
+				return (-1);
+			out[o++] = (unsigned char)((buf >> bits) & 0xff);
+		}
+	}
+	return ((int)o);
+}
+
+static int mkdirp_local(const char *path, mode_t mode);
+static bool user_in_group(const char *username, const char *groupname);
+static struct ocifbsd_user *ocifbsd_pam_get_user_locked(const char *username);
+int pam_create_user_locked(struct ocifbsd_user *user);
+int pam_auth_password(const char *username, const char *password);
+static int save_user_state(struct ocifbsd_user *user, const char *path);
+int user_compare(struct ocifbsd_user *a, struct ocifbsd_user *b);
+int group_compare(struct group_role_map *a, struct group_role_map *b);
+
+/*
+ * Recursive mkdir(2). FreeBSD 16's <libutil.h> does not export mkdirp
+ * in any public header. We provide a local copy.
+ */
+static int
+mkdirp_local(const char *path, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *p;
+	size_t len;
+
+	if (path == NULL || *path == '\0')
+		return (-1);
+
+	len = strlcpy(buf, path, sizeof(buf));
+	if (len >= sizeof(buf))
+		return (-1);
+
+	for (p = buf + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, mode) != 0 && errno != EEXIST)
+			return (-1);
+		*p = '/';
+	}
+
+	if (mkdir(buf, mode) != 0 && errno != EEXIST)
+		return (-1);
+	return (0);
+}
+
+#define	mkdirp(path, mode)	mkdirp_local((path), (mode))
 
 /* Global state */
 static struct user_tree user_registry;
@@ -136,11 +259,11 @@ pam_auth_init(void)
     default_config.pam_service = strdup("ocifbsd");
 
     /* Load existing users from state directory */
-    snprintf(path, sizeof(path), "%s/users", OCIFBSD_VAR_DIR);
+    snprintf(path, sizeof(path), "%s/users", OCIFBSD_STATE_DIR);
     mkdirp(path, 0755);
 
     /* Open audit log */
-    snprintf(path, sizeof(path), "%s/audit.log", OCIFBSD_VAR_DIR);
+    snprintf(path, sizeof(path), "%s/audit.log", OCIFBSD_STATE_DIR);
     audit_fp = fopen(path, "a");
     if (audit_fp == NULL) {
         fprintf(stderr, "Warning: Could not open audit log: %s\n",
@@ -217,7 +340,6 @@ pam_auth_shutdown(void)
 {
     struct ocifbsd_user *user;
     struct group_role_map *map;
-    struct rate_limit_entry *entry;
 
     if (!initialized)
         return;
@@ -254,6 +376,7 @@ user_compare(struct ocifbsd_user *a, struct ocifbsd_user *b)
 {
     return (strcmp(a->username, b->username));
 }
+RB_GENERATE(user_tree, ocifbsd_user, entry, user_compare);
 
 /*
  * Compare group mappings
@@ -263,6 +386,7 @@ group_compare(struct group_role_map *a, struct group_role_map *b)
 {
     return (strcmp(a->group_name, b->group_name));
 }
+RB_GENERATE(group_role_map_tree, group_role_map, entry, group_compare);
 
 /*
  * Get PAM configuration
@@ -360,7 +484,7 @@ pam_authenticate_user(struct pam_auth_request *req,
 
     /* First, check if user exists in registry */
     pthread_mutex_lock(&auth_lock);
-    user = pam_get_user_locked(req->username);
+    user = ocifbsd_pam_get_user_locked(req->username);
     pthread_mutex_unlock(&auth_lock);
 
     if (user == NULL) {
@@ -397,7 +521,7 @@ pam_authenticate_user(struct pam_auth_request *req,
         result = pam_auth_password(req->username, req->password);
         if (result != PAM_SUCCESS) {
             user->failed_count++;
-            if (user->failed_count >= default_config.max_failed_attempts) {
+            if (user->failed_count >= (uint32_t)default_config.max_failed_attempts) {
                 pam_lock_user(req->username, time(NULL) + default_config.lockout_duration);
                 result = PAM_AUTH_LOCKED;
             } else {
@@ -482,9 +606,9 @@ audit_log:
  * Get user from registry (internal, must hold lock)
  */
 struct ocifbsd_user *
-pam_get_user_locked(const char *username)
+ocifbsd_pam_get_user_locked(const char *username)
 {
-    struct ocifbsd_user key, *user;
+    struct ocifbsd_user key;
 
     if (username == NULL)
         return (NULL);
@@ -504,7 +628,7 @@ pam_create_user_locked(struct ocifbsd_user *user)
     if (user == NULL || user->username[0] == '\0')
         return (-1);
 
-    existing = pam_get_user_locked(user->username);
+    existing = ocifbsd_pam_get_user_locked(user->username);
     if (existing != NULL)
         return (-1);  /* User already exists */
 
@@ -517,12 +641,12 @@ pam_create_user_locked(struct ocifbsd_user *user)
  * Get user by username
  */
 struct ocifbsd_user *
-pam_get_user(const char *username)
+ocifbsd_pam_get_user(const char *username)
 {
     struct ocifbsd_user *user;
 
     pthread_mutex_lock(&auth_lock);
-    user = pam_get_user_locked(username);
+    user = ocifbsd_pam_get_user_locked(username);
     pthread_mutex_unlock(&auth_lock);
 
     return (user);
@@ -572,7 +696,7 @@ pam_create_user(struct ocifbsd_user *user)
         /* Save to disk */
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/users/%s.json",
-            OCIFBSD_VAR_DIR, user->username);
+            OCIFBSD_STATE_DIR, user->username);
         save_user_state(user, path);
     }
     pthread_mutex_unlock(&auth_lock);
@@ -593,7 +717,7 @@ pam_update_user(struct ocifbsd_user *user)
 
     pthread_mutex_lock(&auth_lock);
 
-    existing = pam_get_user_locked(user->username);
+    existing = ocifbsd_pam_get_user_locked(user->username);
     if (existing == NULL) {
         pthread_mutex_unlock(&auth_lock);
         return (-1);
@@ -615,7 +739,7 @@ pam_update_user(struct ocifbsd_user *user)
     /* Save to disk */
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/users/%s.json",
-        OCIFBSD_VAR_DIR, user->username);
+        OCIFBSD_STATE_DIR, user->username);
     save_user_state(existing, path);
 
     pthread_mutex_unlock(&auth_lock);
@@ -637,7 +761,7 @@ pam_delete_user(const char *username)
 
     pthread_mutex_lock(&auth_lock);
 
-    user = pam_get_user_locked(username);
+    user = ocifbsd_pam_get_user_locked(username);
     if (user == NULL) {
         pthread_mutex_unlock(&auth_lock);
         return (-1);
@@ -646,7 +770,7 @@ pam_delete_user(const char *username)
     RB_REMOVE(user_tree, &user_registry, user);
 
     /* Remove state file */
-    snprintf(path, sizeof(path), "%s/users/%s.json", OCIFBSD_VAR_DIR, username);
+    snprintf(path, sizeof(path), "%s/users/%s.json", OCIFBSD_STATE_DIR, username);
     unlink(path);
 
     free(user);
@@ -673,7 +797,7 @@ pam_set_user_role(const char *username, const char *role)
 
     pthread_mutex_lock(&auth_lock);
 
-    user = pam_get_user_locked(username);
+    user = ocifbsd_pam_get_user_locked(username);
     if (user == NULL) {
         pthread_mutex_unlock(&auth_lock);
         return (-1);
@@ -684,7 +808,7 @@ pam_set_user_role(const char *username, const char *role)
 
     /* Save to disk */
     char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/users/%s.json", OCIFBSD_VAR_DIR, username);
+    snprintf(path, sizeof(path), "%s/users/%s.json", OCIFBSD_STATE_DIR, username);
     save_user_state(user, path);
 
     pthread_mutex_unlock(&auth_lock);
@@ -734,7 +858,7 @@ int
 pam_verify_token(const char *token, char *username, uint32_t *permissions)
 {
     time_t exp;
-    return (pam_verify_jwt(token, username, permissions, &exp));
+    return (pam_verify_jwt(token, &username, permissions, &exp));
 }
 
 /*
@@ -755,7 +879,7 @@ pam_refresh_token(const char *refresh_token, char **new_token)
 
     pthread_mutex_lock(&auth_lock);
 
-    user = pam_get_user_locked(username);
+    user = ocifbsd_pam_get_user_locked(username);
     if (user == NULL) {
         pthread_mutex_unlock(&auth_lock);
         return (-1);
@@ -844,12 +968,9 @@ pam_generate_token(const char *username, const char *role,
 {
     char header[256], payload[512], signature[128];
     char header_b64[256], payload_b64[512];
-    SHA256_CTX ctx;
     uint8_t hash[SHA256_DIGEST_LENGTH];
     const char *secret;
     size_t secret_len;
-    size_t sig_len;
-    FILE *fp;
 
     if (username == NULL || token_out == NULL)
         return (-1);
@@ -887,9 +1008,8 @@ int
 pam_verify_jwt(const char *jwt, char **username, uint32_t *perms, time_t *exp)
 {
     char *token_copy, *header, *payload, *sig;
-    char header_dec[256], payload_dec[512];
+    char payload_dec[512];
     char expected_sig[128];
-    SHA256_CTX ctx;
     uint8_t hash[SHA256_DIGEST_LENGTH];
     const char *secret;
     size_t secret_len;
@@ -1133,7 +1253,7 @@ pam_query_audit(const char *username, time_t start, time_t end, int *count)
 
     *count = 0;
 
-    snprintf(path, sizeof(path), "%s/audit.log", OCIFBSD_VAR_DIR);
+    snprintf(path, sizeof(path), "%s/audit.log", OCIFBSD_STATE_DIR);
     fp = fopen(path, "r");
     if (fp == NULL)
         return (NULL);
@@ -1259,7 +1379,7 @@ pam_lock_user(const char *username, time_t until)
 
     pthread_mutex_lock(&auth_lock);
 
-    user = pam_get_user_locked(username);
+    user = ocifbsd_pam_get_user_locked(username);
     if (user == NULL) {
         pthread_mutex_unlock(&auth_lock);
         return (-1);
@@ -1296,7 +1416,7 @@ pam_is_user_locked(const char *username)
 
     pthread_mutex_lock(&auth_lock);
 
-    user = pam_get_user_locked(username);
+    user = ocifbsd_pam_get_user_locked(username);
     if (user != NULL && user->locked_until > time(NULL))
         locked = true;
 
@@ -1312,4 +1432,100 @@ void
 pam_set_conv_func(pam_conv_func_t func)
 {
     conv_func = func;
+}
+
+/*
+ * PAM module entry points. These are the symbols that the PAM
+ * framework looks up via dlsym() when it loads pam_ocifbsd.so.1.
+ */
+
+static int
+map_auth_result(int custom)
+{
+	switch (custom) {
+	case PAM_AUTH_SUCCESS:    return (PAM_SUCCESS);
+	case PAM_AUTH_NO_USER:    return (PAM_USER_UNKNOWN);
+	case PAM_AUTH_INVALID_PASS:
+	case PAM_AUTH_FAILURE:    return (PAM_AUTH_ERR);
+	case PAM_AUTH_EXPIRED:    return (PAM_ACCT_EXPIRED);
+	case PAM_AUTH_LOCKED:
+	case PAM_AUTH_TOO_MANY_TRIES: return (PAM_MAXTRIES);
+	case PAM_AUTH_SYSTEM_ERROR:  return (PAM_SYSTEM_ERR);
+	default:                  return (PAM_AUTH_ERR);
+	}
+}
+
+PAM_EXTERN int
+pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+    const char **argv)
+{
+	const char *username = NULL;
+	const char *password = NULL;
+	struct pam_auth_request req;
+	struct pam_auth_response resp;
+	int pam_err;
+
+	(void)flags;
+	(void)argc;
+	(void)argv;
+
+	pam_err = pam_get_user(pamh, &username, NULL);
+	if (pam_err != PAM_SUCCESS || username == NULL)
+		return (PAM_USER_UNKNOWN);
+
+	pam_err = pam_get_item(pamh, PAM_AUTHTOK,
+	    (const void **)&password);
+	if (pam_err != PAM_SUCCESS)
+		password = NULL;
+
+	memset(&req, 0, sizeof(req));
+	req.username = username;
+	req.password = password;
+	req.service = "ocifbsd";
+	req.session_type = SESSION_INTERACTIVE;
+
+	memset(&resp, 0, sizeof(resp));
+	(void)pam_authenticate_user(&req, &resp);
+
+	pam_err = map_auth_result(resp.result);
+
+	if (resp.token != NULL)
+		free(resp.token);
+	if (resp.message != NULL)
+		free(resp.message);
+
+	return (pam_err);
+}
+
+PAM_EXTERN int
+pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv)
+{
+	(void)pamh;
+	(void)flags;
+	(void)argc;
+	(void)argv;
+	return (PAM_SUCCESS);
+}
+
+PAM_EXTERN int
+pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
+{
+	const char *username = NULL;
+	struct ocifbsd_user *user;
+	int pam_err;
+
+	(void)flags;
+	(void)argc;
+	(void)argv;
+
+	pam_err = pam_get_user(pamh, &username, NULL);
+	if (pam_err != PAM_SUCCESS || username == NULL)
+		return (PAM_USER_UNKNOWN);
+
+	user = ocifbsd_pam_get_user(username);
+	if (user == NULL)
+		return (PAM_USER_UNKNOWN);
+	if (pam_is_user_locked(username))
+		return (PAM_MAXTRIES);
+	return (PAM_SUCCESS);
 }
