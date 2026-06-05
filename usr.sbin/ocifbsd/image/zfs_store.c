@@ -368,7 +368,6 @@ zfs_dataset_exists(const char *dataset)
 int
 zfs_destroy_dataset(const char *dataset, bool recursive)
 {
-	int argc = 4;
 	int ret;
 	char *argv[6];
 
