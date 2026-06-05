@@ -4,7 +4,7 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-05 00:34 UTC (19:34 CDT) — live status
+> **Last updated**: 2026-06-05 01:58 UTC (20:58 CDT) — live status
 > **Branch**: `feature/oci-bootstrap`
 > **Owner**: REVYTECH, Inc.
 > **Target**: FreeBSD 16.0-CURRENT (native, tier-1)
@@ -406,11 +406,11 @@ this session's fixes:
 Linker: added `md` to LIBADD for FreeBSD 16's moved-out
 SHA256_Data symbol (was in libc, now in libmd).
 
-### Subdir status: 6 of 16 SUBDIRs are broken (AI-generated stubs)
+### Subdir status: 7 of 16 SUBDIRs are broken (AI-generated stubs)
 
 After the main binary links, build moves to the SUBDIR phase
 (15 module executables: ocifbsd-cert, ocifbsd-export, etc.). The
-following 6 subdirs have issues ranging from syntactically broken
+following 7 subdirs have issues ranging from syntactically broken
 Makefiles to deeply AI-slopped C source:
 
 - `cert/Makefile` — `<include "Makefile.inc">` (bad BSD make
@@ -433,9 +433,17 @@ Makefiles to deeply AI-slopped C source:
   CURLOPT_WRITFUNCTION typo (missing underscore-F), fopen()
   called with 3 args, dozens of unused json_object locals.
   unpack.c and push.c not yet attempted.
+- `network/` — Makefile declares `PROG=ocifbsd_network` but
+  the 4 .c files (network.c, bridge.c, vnet.c, cni.c) have NO
+  main() function. The subdir is meant to be a library, not
+  a standalone program. All 4 files compile clean after
+  extensive fixes (~30 commits). The link phase fails with
+  "undefined symbol: main". The Makefile needs to be
+  converted from PROG to LIB (or a stub main.c needs to be
+  added). Tracked as deferred work.
 
-**Pragmatic decision**: Commented out all 6 SUBDIR entries
-temporarily so the build can complete end-to-end. The 6
+**Pragmatic decision**: Commented out all 7 SUBDIR entries
+temporarily so the build can complete end-to-end. The 7
 subdirs need separate refactor PRs — the work is:
 1. cert/export/gc/logd/pam Makefiles: bad `<include>` →
    `.include` (sed mechanical fix), create missing
@@ -445,6 +453,8 @@ subdirs need separate refactor PRs — the work is:
 2. image/ source files: refactor pull.c (most of it is dead
    code / undeclared callbacks / wrong API usage), unpack.c
    and push.c not yet examined.
+3. network/ Makefile: convert from PROG to LIB, or add a
+   stub main.c. The compiled object files are fine.
 
 Tracked as deferred work, not blocking the bootstrap.
 
@@ -751,6 +761,7 @@ branch, and the full `.omo/drafts/` documentation tree.
 
 | Timestamp (UTC)      | Author    | Change                                                              |
 | -------------------- | --------- | ------------------------------------------------------------------- |
+| 2026-06-05 01:58:00 | mlapointe | Commented out network/ SUBDIR. All 4 .c files (network/bridge/vnet/cni) compile clean after ~30 fixes (uuidgen→uuid_create, mkdirp extern, stdarg+sys/stat+dirent includes, 10+8+5+2+5+2 static additions, unused-var removals, popen argv->string, <netinet6/in6.h> removal, json-c port path, duplicate-static cleanup). Link phase fails: no main() in any of the files, Makefile wrongly declares PROG. Same AI-slop approach as image/: deferred to follow-up refactor PR. | a907cb67f68
 | 2026-06-05 00:34:25 | mlapointe | Commented out image/ SUBDIR (many AI-slop issues in pull.c, unpack.c, push.c not yet seen). zfs_store.c clean after libmd + stdarg + externs + unused-var + sizeof + nested-comment fixes. Deferred to follow-up refactor PR. | 38306f700de
 | 2026-06-04 23:50    | mlapointe | Fix 3 more pull.c issues: removed unused m in parse_manifest, removed unused data/data_len in fetch_config, re-added workingDir/user (used later). | 38306f700de
 | 2026-06-04 23:48    | mlapointe | Fix 7 pull.c issues: fopen 3-arg -> construct path with snprintf; removed unused entrypoint/cmd/workingDir/user/exposed_ports. | 3f0afedc15d
