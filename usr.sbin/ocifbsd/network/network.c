@@ -51,7 +51,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sysexits.h>
-#include <uuid/uuid.h>
+#include <ossp/uuid.h>
 
 #include "network.h"
 
