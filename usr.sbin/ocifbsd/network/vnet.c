@@ -65,7 +65,7 @@ int run_cmd(int argc, ...);
 /*
  * Check if VNET is available and enabled
  */
-bool
+static bool
 vnet_is_available(void)
 {
 	size_t len;
@@ -196,7 +196,7 @@ vnet_setup_nat(const char *jail_name, const char *external_iface, const char *in
 /*
  * Get VNET interface statistics
  */
-int
+static int
 vnet_get_interface_stats(const char *jail_name, const char *interface,
     uint64_t *rx_bytes, uint64_t *tx_bytes, uint64_t *rx_packets, uint64_t *tx_packets)
 {
