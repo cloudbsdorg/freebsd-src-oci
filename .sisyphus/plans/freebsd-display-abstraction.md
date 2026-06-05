@@ -4834,6 +4834,81 @@ The user's *"build that list dynamically"* requirement is met by:
 
 ---
 
+### FreeBSD 16 target platform (added per user confirmation)
+
+The user clarified: *"we will be building on FreeBSD 16"*. This pins the target version for all build, test, and runtime assumptions. FreeBSD 16 is the current stable release line as of this plan's date (June 2026).
+
+**What "FreeBSD 16 target" means for the plan:**
+
+- **Minimum target version**: FreeBSD 16.0-RELEASE (or latest patch release, e.g. 16.1, 16.2)
+- **Build commands**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel` (parallel) and `make installworld installkernel` (serial, no -j) — FreeBSD 16 honors `MAKE_JOBS_NUMBER` natively
+- **Test framework**: ATF + kyua (FreeBSD 16 ships the latest; no compatibility shim needed)
+- **Compiler**: clang 19+ / LLVM 19+ (FreeBSD 16 default)
+- **Kernel module API**: kmod, with `MALLOC_PROTECT` and KASLR-friendly code
+- **Jail API**: FreeBSD 16's `kern_jail.c` (latest libjail + prison_check helpers)
+- **bhyve**: FreeBSD 16's `usr.sbin/bhyve/` (VMM is mature; we extend, don't replace)
+- **OpenSSL**: 3.0+ recommended (FreeBSD 16 ships 3.0+); we already require 1.1.1 LTS minimum
+- **Capsicum**: FreeBSD 16 has the mature Capsicum 4 API; we use it for `displayd`'s sandbox
+- **DTrace USDT / SDT**: FreeBSD 16's stable provider API
+
+**FreeBSD 16-specific features we can leverage (and don't have to work around):**
+
+- **Improved Capsicum**: `cap_enter()` + `cap_rights_limit()` give us stronger sandboxing for `displayd` (broker daemon runs entirely in capability mode after start)
+- **MALLOC_PROTECT + hardened malloc**: our `*_resource.ko` modules can rely on the kernel's hardened allocator (REDZONE, CANARY, etc.) — fewer buffer overflow risks
+- **inet6 dual-stack improvements**: `[::1]` is the canonical localhost; `IPV6_V6ONLY=0` is the default for new sockets
+- **UFS / ZFS devfs improvements**: the `devfs.rules` schema is more flexible; we can express "no `/dev/dri` in jail" and "no `/dev/bluetooth*` in jail" cleanly
+- **Kernel TLS (kTLS)**: `displayd` can use kTLS for the BDP control channel (offloads TLS to kernel); better throughput
+- **netgraph improvements**: `ng_bluetooth` is more stable in 16 (relevant for the BT design, even though we don't ship BT in v1)
+- **bhyve improvements**: more stable mediated devices; better VM exit performance
+- **LLVM 19 sanitizers**: `make WITH_SANITIZER=ASAN_UBSAN buildworld` works out of the box for our modules
+- **New `kldxref` / `kldload` features**: faster module loading, better version checking
+
+**What does NOT change for FreeBSD 16 (the fundamentals are the same):**
+
+- PCI FLR / SBR (standard PCIe, unchanged)
+- HDA `RESET` codec verb 0x7FF (standard, unchanged)
+- BT HCI Reset command 0x0C03 (standard, unchanged)
+- sysctl mechanism (unchanged)
+- DTrace USDT (unchanged)
+- PCI config space access (unchanged)
+- devfs (unchanged)
+- jail(8) / kern_jail.c user-space API (unchanged)
+- ATF + kyua (unchanged)
+- OpenSSL API (unchanged from 1.1.1 → 3.0+)
+- Build parallelism via `MAKE_JOBS_NUMBER` (unchanged)
+- Installworld/installkernel serial rule (unchanged — still serial in 16)
+
+**Updated version-specific calls (in the plan, where version appeared):**
+
+- ~~"FreeBSD 14+/15"~~ → **"FreeBSD 16"** (4 occurrences updated)
+- ~~"Phase 1 — FreeBSD VM (no GPU)"~~ — still FreeBSD 16 VM (no GPU), now with `gpu_stub` mandatory
+- ~~"Phase 2 — FreeBSD box with nvidia GPU"~~ — still FreeBSD 16 box (with NVIDIA), real-hardware testing
+- Gantt chart dates: plan starts 2026-06-15, FreeBSD 16 is current/stable by then
+- BDP / mTLS / OpenSSL: TLS 1.3 with OpenSSL 3.0+ (FreeBSD 16 default)
+
+**FreeBSD 16-specific tests (added to the test suite):**
+
+- `tests/sys/jail/capsicum_4.sh` — verify `displayd` runs in Capsicum capability mode after start
+- `tests/sys/malloc_protect.sh` — verify `*_resource.ko` modules build and run with `MALLOC_PROTECT`
+- `tests/sys/ktls.sh` — verify broker can use kTLS for the BDP control channel
+- `tests/sys/devfs_rules_v16.sh` — verify the v16 devfs rules work for "no `/dev/dri` in jail", "no `/dev/bluetooth*` in jail"
+- `tests/sys/asan_ubsan_modules.sh` — verify `*_resource.ko` builds clean with ASAN+UBSAN
+- `tests/sys/kldload_v16.sh` — verify kldload / kldxref behave correctly in 16
+
+**F1-F4 updates:**
+
+- F1 verifies the plan is buildable on FreeBSD 16 (the `make buildworld buildkernel` step)
+- F1 verifies the `FreeBSD 16` version pin in the plan's Must Have and Definition of Done
+- F2 verifies the modules build with `-DCONF_MALLOC_PROTECT` and the broker with `-DCONF_CAPSICUM`
+- F3 runs the full test suite on FreeBSD 16 (per-commit CI VM)
+- F4 flags any v1 PR that pins to a FreeBSD version other than 16
+
+**The "target FreeBSD version" Must Have (adds to Work Objectives):**
+
+> - **Target platform is FreeBSD 16** (16.0+ latest release). The plan does NOT support older FreeBSD versions (14, 15). Build commands, test framework, kernel APIs, and userspace APIs are all v16-specific. A PR that breaks FreeBSD 16 compatibility is a guardrail violation. (We do not backport to 14/15; the user has a clean v16 build environment.)
+
+---
+
 ## Work Objectives
 
 ### Core Objective
@@ -4842,31 +4917,311 @@ The user's *"build that list dynamically"* requirement is met by:
 3. Add a FreeBSD jail option (`allow.fbuf`) that provisions a kernel-backed framebuffer + keyboard + mouse for the jail, routed through the new abstraction.
 
 ### Concrete Deliverables
+
+**Userspace (bhyve + transport):**
 - 3 new source files in `usr.sbin/bhyve/`: `display_transport.{h,c}`, `display_backend.{h,c}`
 - 1 new stub in `usr.sbin/bhyve/`: `rdp.c` + `rdp.h`
-- 1 new kernel module: `sys/modules/fbuf_jail/` (Makefile + `fbuf_jail.c`)
-- 1 new sysctl-style param registration block in `sys/kern/kern_jail.c`
-- 1 new `PRISON_FLAG_PRISON_FBUF` (or similar) in `sys/sys/jail.h`
 - Modifications to `console.{c,h}`, `rfb.c`, `pci_fbuf.c`, `bhyverun.c`
-- 2 new man page sections (jail.conf.5 + bhyve.8 update note)
-- Build wiring in `usr.sbin/bhyve/Makefile` and `sys/modules/Makefile`
+- Build wiring in `usr.sbin/bhyve/Makefile`
 - Architecture doc: `usr.sbin/bhyve/display-abstraction.md`
 
+**Generic broker (T38, replaces `bhyve-display-broker`):**
+- `usr.sbin/displayd/displayd.c` (broker daemon, ~3000 LoC)
+- `usr.sbin/displayd/displayd.conf` (config loader)
+- `usr.sbin/displayd/auth.c` (PAM + mTLS + NSS + OAuth)
+- `usr.sbin/displayd/audit.c` (audit log writer)
+- `usr.sbin/displayd/mcast.c` (multicast UDP publisher, T48)
+- `usr.sbin/displayd/stats.c` (statistics collector, T49)
+- `usr.sbin/displayd/dtrace.c` (DTrace USDT provider, T50)
+- `usr.sbin/displayd/admin_http.c` (HTTP health endpoint, T52)
+- Deprecated symlink: `usr.sbin/bhyve/bhyve-display-broker` → `displayd` (backward compat)
+- Migration script: `usr.sbin/bhyve/migrate-display-broker-conf.sh` (T34)
+
+**BDP protocol + library (T39, T44):**
+- `lib/libdisplay/display_transport.h` (public header, also T4)
+- `lib/libdisplay/display_backend.h` (public header, also T5)
+- `lib/libdisplay/bdp.h` (BDP protocol public header, T39)
+- `lib/libdisplay/bdp_proto.c` (encode/decode, T39)
+- `lib/libdisplay/bdp_session.c` (session state machine, T39)
+- `lib/libdisplay/bdp_acl.c` (ACL resolver, T40)
+- `lib/libdisplay/bdp_mcast.c` (multicast channel API, T48)
+- `lib/libdisplay/bdp_stats.c` (BDP stats/health/debug messages, T51)
+- `lib/libdisplay/bdp_diag.c` (diagnostics, T50)
+- `lib/libdisplay/bdp_device.c` (device info protocol stubs, T62-design)
+- `lib/libdisplay/Makefile` + `pkg-plist` + `libdisplay.3` (man page)
+- `lib/libdisplay/gpu_caps/` (dynamic capability registry, multi-device section)
+- `lib/libdisplay/gpu_caps/gpu_caps.h` (registry header)
+- `lib/libdisplay/gpu_caps/gpu_caps_nvidia.c` (NVIDIA capability discoverer)
+- `lib/libdisplay/gpu_caps/gpu_caps_amd.c` (AMD capability discoverer)
+- `lib/libdisplay/gpu_caps/gpu_caps_intel.c` (Intel capability discoverer)
+- `lib/libdisplay/gpu_caps/gpu_caps_generic.c` (always-linked fallback)
+- `lib/libdisplay/gpu_caps/gpu_caps_overlay.c` (JSON overlay loader)
+- Deprecated symlink: `lib/libbdp/` → `lib/libdisplay/` (backward compat)
+
+**Sample client (T45):**
+- `usr.sbin/displayc/displayc.c` (sample BDP client)
+- `usr.sbin/displayc/displayc.1` (man page)
+- Deprecated symlink: `usr.sbin/bhyve-display-client` → `displayc` (backward compat)
+
+**Streaming tool (T60):**
+- `usr.sbin/bdp-stream/bdp-stream.c` (pipe-friendly external tool)
+- `usr.sbin/bdp-stream/bdp-stream.1` (man page)
+
+**Kernel modules (4 new):**
+- `sys/modules/fbuf_jail/` (T12) — kernel-backed framebuffer for jails
+- `sys/modules/preflight/` (T22) — preflight check framework (loadable shim, built-in core in `sys/kern/subr_preflight.c`)
+- `sys/modules/gpu_resource/` (T21) — GPU mediation, with `gpu_stub` test backend mandatory
+- `sys/modules/audio_resource/` (T58) — audio mediation
+- (Future, design only: `sys/modules/bt_resource/` for T69)
+
+**Kernel source changes:**
+- `sys/kern/kern_jail.c` — jail param registration (T9)
+- `sys/sys/jail.h` — `PRISON_FLAG_PRISON_FBUF` + new params (T10)
+- `sys/kern/subr_preflight.c` — built-in preflight framework core (T22)
+- `sys/kern/subr_tunable.c` — tunable precedence rules (T35)
+- `sys/kern/subr_mediator.c` — common mediator template (Mediated passthrough)
+
+**New OID subtrees (4 new, in T35):**
+- `security.policy.*` — host policy (deny_default, override_deny, etc.)
+- `security.transport.*` — transport security (TLS min version, etc.)
+- `security.preflight.*` — preflight framework config
+- `security.display.*` — display broker / transport / ACL / multicast / audit / stats (50+ sysctls)
+
+**13 new kernel tunables** (in `loader.conf` and/or `sys/modules/*/`):
+- `security.policy.fbuf.deny_default`
+- `security.policy.gpu.deny_default`
+- `security.policy.audio.deny_default`
+- `security.policy.bt.deny_default` (reserved, not live in v1)
+- `security.policy.device.must_reset`
+- `security.transport.tls.min_version=1.3`
+- `security.transport.tls.cipher_suites` (reserved)
+- `security.preflight.timeout=30`
+- `security.preflight.fail_on_warn=0`
+- `security.display.broker.listen=unix:///var/run/displayd.sock,tcp://[::1]:8443`
+- `security.display.broker.listen_public=0`
+- `security.display.broker.frame_size_max=67108864`
+- `security.display.broker.fps_max_per_client=60`
+- (50+ more — see Tunables Reference)
+
+**50+ new sysctls** in 4 OID subtrees — see Tunables Reference for the full list.
+
+**Man pages (12 new, 3 updated, 1 migration guide):**
+- `share/man/man5/display-broker-config.5` (T47) — `/etc/display/display-broker.conf`
+- `share/man/man5/display-acl.5` (T40) — `display.acl` schema
+- `share/man/man5/display-pools.5` (multi-device) — `pools.conf` schema
+- `share/man/man7/bdp.7` (T39) — BDP wire protocol
+- `share/man/man7/display-enduser.7` (T37) — end user guide (NEW canonical, replaces bhyve-enduser)
+- `share/man/man7/display-security.7` — security best practices
+- `share/man/man7/display-migration.7` (T34) — migration guide from bhyve-specific names
+- `share/man/man8/displayd.8` (T47) — broker daemon (NEW canonical)
+- `share/man/man8/displayc.1` — sample client
+- `share/man/man8/bdp-stream.1` — streaming tool
+- `share/man/man9/display_transport.9` — kernel API
+- `share/man/man9/display_backend.9` — kernel API
+- `share/man/man9/display_resource.9` — mediator template API
+- Updated: `jail.conf(5)` — new params
+- Updated: `bhyve(8)` — `-s 0,fbuf,transport=...` syntax
+- Updated: `sysctl(8)` — new OID subtrees
+- Deprecated stubs: `bhyve-display-broker.8`, `libbdp.3` (point to canonical names)
+
+**Examples directory (T36):**
+- `share/examples/display/policy-quickstart/` — quickstart config
+- `share/examples/display/policy-ml-cluster/` — multi-GPU ML pool
+- `share/examples/display/policy-kiosk/` — single-GPU kiosk
+- `share/examples/display/acl-default/` — default ACL
+- `share/examples/display/acl-team-web/` — per-team ACL
+- `share/examples/display/pools-single-gpu/`
+- `share/examples/display/pools-multi-gpu-mixed/`
+- `share/examples/display/certbot/`
+- `share/examples/display/multicast-tv/`
+- `share/examples/display/migration-from-bhyve-display-broker/`
+
+**Tests (see Unit Test Strategy section for full breakdown):**
+- `tests/sys/modules/fbuf_jail/` (T12)
+- `tests/sys/modules/gpu_resource/` (T21)
+- `tests/sys/modules/audio_resource/` (T58)
+- `tests/sys/modules/preflight/` (T22)
+- `tests/sys/jail/fbuf/` (T12, T15)
+- `tests/sys/jail/gpu/` (T21, T23)
+- `tests/sys/jail/audio/` (T58)
+- `tests/sys/jail/mediator/` (Mediated passthrough)
+- `tests/sys/policy/` (T35)
+- `tests/sys/policy/sysctl_conf_integration.sh` (T35)
+- `tests/sys/policy/loader_tunable_precedence.sh` (T35)
+- `tests/sys/preflight/` (T22, T23, T28, T33)
+- `tests/sys/transport/tls/` (T25, T26, T30, T31, T32)
+- `tests/sys/transport/cert_loader/` (T30, T33)
+- `tests/sys/transport/rate_limit/` (T26)
+- `tests/sys/transport/sni/` (T32)
+- `tests/sys/vmm/fbuf_variants.sh` (T13, T18)
+- `tests/sys/vmm/fbuf_legacy.sh` (T13, T18)
+- `tests/sys/vmm/fbuf_transport.sh` (T13, T18)
+- `tests/sys/broker/auth.sh` (T38)
+- `tests/sys/broker/acl.sh` (T40, T41)
+- `tests/sys/broker/multicast.sh` (T48)
+- `tests/sys/broker/stats.sh` (T49)
+- `tests/sys/broker/dtrace.sh` (T50)
+- `tests/sys/broker/health.sh` (T52)
+- `tests/sys/broker/e2e.sh` (T46)
+- `tests/sys/multi_gpu/hotplug.sh` (multi-device)
+- `tests/sys/multi_gpu/pool_resolution.sh` (multi-device)
+- `tests/sys/multi_gpu/vendor_caps.sh` (workload-driven)
+- `tests/lib/libdisplay/bdp_encode_decode.c` (T44)
+- `tests/lib/libdisplay/bdp_session.c` (T44)
+- `tests/lib/libdisplay/bdp_acl.c` (T40)
+- `tests/usr.sbin/displayd/`
+- `tests/usr.sbin/displayc/`
+- `tests/usr.sbin/bdp-stream/`
+
+**Total: ~80 new files (sources + tests + man pages + examples) across 48 implementation tasks.**
+
 ### Definition of Done
-- [ ] `make buildkernel` and `make buildworld` succeed on a FreeBSD 14+/15 host
+
+**Build + regression (the v1 minimum):**
+- [ ] `make buildkernel` and `make buildworld` succeed on a FreeBSD 16 host (16.0+ latest release)
 - [ ] Existing bhyve + VNC flow still works unchanged when configured with `rfb=host:port` (regression)
 - [ ] New flow works with `transport=rfb,...` (and `rfb=` is silently accepted as a synonym)
 - [ ] A jail can be started with `allow.fbuf`; `/dev/fb0` is visible inside the jail via `ls(1)`
 - [ ] `fbuf.nokbd` / `fbuf.nomouse` work to opt out
 - [ ] A VNC client connecting to the host can see the jail's framebuffer (via the new `display_transport`)
 - [ ] RDP/transport registry is exercisable (stub returns "not implemented" cleanly)
+- [ ] No new ioctls in `sys/amd64/vmm/`; the kernel has no framebuffer concept
+
+**Display abstraction (T1-T18):**
+- [ ] `display_transport` vtable is small (≤ 6 ops), self-contained, and has 3 registered impls (RFB active, RDP stub, BDP deferred to T38)
+- [ ] `console.{c,h}` supports concurrent instances (concurrent bhyve + jails)
+- [ ] `pci_fbuf` legacy `rfb=` and `tcp=` config keys still work
+- [ ] Migration script (T34) converts `/etc/bhyve/display-broker.conf` to `/etc/display/display-broker.conf`
+- [ ] Deprecated symlinks work: `bhyve-display-broker` → `displayd`, `lib/libbdp/` → `lib/libdisplay/`, `bhyve-display-client` → `displayc`
+
+**GPU mediation (T19-T21):**
+- [ ] `gpu_stub` backend registers as the default; `hw.gpu.0.stub_capacity=10496` (default)
+- [ ] Jail with `allow.gpu=1` gets a mediated view; `gpu.adapter=any` resolves via pool priority
+- [ ] `gpu.share_percent=25` is enforced; over-quota jail gets EAGAIN
+- [ ] No `/dev/dri` or `/dev/gpu*` inside jail (verified by `ls /dev/{dri,gpu*}` returning empty)
+- [ ] Hot-plug: new GPU added at runtime appears in `hw.gpu.adapters` and is selectable for new jails
+
+**Audio mediation (T58):**
+- [ ] Jail with `allow.audio=1` gets `/dev/dsp0`; POSIX audio APIs work
+- [ ] Jail cannot bypass the mediator (no raw PCM register access)
+- [ ] HDA codec reset on jail exit works (no host reboot needed)
+
+**Preflight (T22-T23, T28, T33):**
+- [ ] 20 preflight checks all pass on Phase 1 VM with `gpu_stub`
+- [ ] `TUNNEL_CERT_EXPIRES_SOON` warns 30 days before expiry
+- [ ] `LEGACY_USED` warns when old `rfb=` syntax is in use
+- [ ] Preflight blocks jail start when required check fails (with override flag)
+
+**Transport security (T24-T32):**
+- [ ] VeNCrypt TLS handshake completes; self-signed cert auto-generated if none configured
+- [ ] TLS 1.3 only by default; TLS 1.2 rejected
+- [ ] Certbot / Let's Encrypt cert discovered at `/etc/letsencrypt/live/...`
+- [ ] kqueue hot-reload picks up cert renewal in <1s
+- [ ] SNI with `openssl s_client -servername foo` returns the right cert
+- [ ] Rate limit: 1000 conn/min per IP enforced
+- [ ] Audit log: every connect/disconnect/auth-fail written
+
+**Host policy (T35):**
+- [ ] 50+ new sysctls in 4 OID subtrees (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) all readable/writable
+- [ ] Stricter-wins precedence: `security.policy.fbuf.deny_default=1` beats jail param `allow.fbuf=1`
+- [ ] Tunable precedence: loader > sysctl > config > default (verified by integration test)
+- [ ] `/etc/sysctl.conf` integration works
+
+**Display broker (T37-T52):**
+- [ ] `displayd` starts, authenticates via PAM + mTLS, lists fbs, attaches, audits
+- [ ] BDP frame size 16 MB default, 64 MB max (covers 4K/8K ZRLE, 16K future)
+- [ ] Frame rate sysctls (per-client, per-channel, per-broker) enforced
+- [ ] Bandwidth sysctls (per-client, per-broker, per-multicast-channel) enforced
+- [ ] `bdp-stream` tool pipes frames + audio to stdout, ffmpeg-compatible
+- [ ] `displayc` sample client works
+- [ ] Multicast UDP: channel create/destroy, pub/sub, AES-256-GCM, per-channel ACL, TTL=1 default
+- [ ] Statistics: periodic file dump works, `displayc --stats` shows per-fb counters
+- [ ] DTrace USDT probes: 25+ probes fire on the right events
+- [ ] HTTP health endpoint: `curl http://localhost:8080/health` returns 200 + JSON
+- [ ] ACL: per-fb per-user, `display.acl` resolver, default deny
+- [ ] Localhost by default: broker refuses public listen without `security.display.broker.listen_public=1`
+- [ ] IPv6 dual-stack: broker listens on `[::1]:8443`; `tcp://[::]:8443` for public
+
+**Multi-device (cross-cutting):**
+- [ ] Two real GPUs (or one real + stub) enumerated by `hw.gpu.adapters`
+- [ ] Pool resolution: `gpu.adapter_group=ml-cluster` picks first available
+- [ ] Hot-plug a USB BT adapter at runtime → it appears in `hw.bt.adapters`
+- [ ] Hot-unplug → running jails get ENXIO on next I/O
+- [ ] JSON overlay: drop `/etc/display/gpu-overlays/1234-ABCD.json`, capability detection works
+- [ ] Generic fallback: unknown vendor GPU works with conservative defaults + warning
+
+**Mediated passthrough (cross-cutting):**
+- [ ] After VM exit, GPU returns to host in <1s (no reboot needed)
+- [ ] After jail stop, BT adapter re-attach works
+- [ ] FLR + driver reinit logs to audit trail
+
+**Backward compatibility (the v1 promise):**
+- [ ] Existing bhyve + VNC flow works unchanged
+- [ ] All legacy config keys (`rfb=`, `tcp=`, `bhyve-display-broker` symlink, `lib/libbdp` symlink) work
+- [ ] Deprecation warnings print to stderr but don't block
+- [ ] No public symbol has been removed or changed in meaning
+
+**Test coverage (see Unit Test Strategy):**
+- [ ] 100+ ATF unit test cases pass
+- [ ] 20+ integration test cases pass
+- [ ] 30+ smoke test scenarios pass
+- [ ] F1-F4 all APPROVED with user-explicit "okay"
 
 ### Must Have
+
+**Core display (T1-T18):**
 - Backward compat with existing `rfb=` and `tcp=` config keys in `pci_fbuf`
 - Multi-instance `console` module (concurrent bhyve + jails)
 - The `allow.fbuf` jail option must imply kbd + mouse on by default
 - The `display_transport` vtable must be small (≤ 6 ops) and self-contained
-- **No raw PCI passthrough.** All device access is mediated by `*_resource.ko` modules (T12, T21, T58, T65, future). The host retains the control plane (PCI config space, power state, reset, reinit). The VM/jail gets a mediated data plane (mdev / VF / cdev). On VM/jail exit, the host can reset and re-attach the device in software (PCI FLR / HCI Reset / HDA RESET / vendor-specific reset + driver `attach()` re-run), without a host reboot, without a device power cycle, without physical intervention. The "user's friend's RAID controller" scenario is **architecturally prevented** for every device we mediate. Documented in the "Mediated passthrough" design section.
+- Generic naming: `displayd`, `libdisplay`, `displayc`, `/etc/display/`; deprecated symlinks for old names
+- `gpu_stub` test backend is mandatory in T21; CI runs on commodity hardware without a GPU
+- `/etc/sysctl.conf` integration with example showing `vfs.zfs.vdev.min_auto_ashift=12, debug.debugger_on_panic=0, kern.sync_on_panic=0, kern.powercycle_on_panic=1`
+- `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel` (parallel); installworld/installkernel serial
+
+**Architectural rules (from design sections):**
+- **No raw PCI passthrough.** All device access is mediated by `*_resource.ko` modules (T12, T21, T58, T65, future). The host retains the control plane. The "user's friend's RAID controller" scenario is **architecturally prevented** for every device we mediate.
+- **No `vfio-pci`-style raw BAR passthrough.** Every device-class has a `*_resource.ko` mediator in the middle, with `attach()` / `detach()` / `reset()` / `reinit()` hooks.
+- **No hard-coded single-adapter assumptions** in any `*_resource.ko` module. The canonical-name + kernel-alias + BDF + pool model is the source of truth. `if (gpu == nvidia0)` is a guardrail violation.
+- **No hard-coded vendor list** in any `*_resource.ko` module. Vendor support is runtime discovery + pluggable registration. Adding a new GPU vendor or model requires **no code change in `gpu_resource.ko`**. `switch (vendor_id)` is a guardrail violation.
+- **Localhost by default for all new endpoints.** Public exposure requires explicit sysctl + TLS + ACL. Preflight refuses otherwise.
+- **IPv6 / dual-stack by default.** `tcp://[::1]:8443`; new `listen_family`, `multicast.family` sysctls.
+- **TLS 1.3 only by default.** OpenSSL 1.1.1 LTS minimum, 3.0+ recommended.
+- **Self-signed cert auto-gen when none configured** (persistent across restarts).
+- **Host policy sysctls ALWAYS WIN** (stricter-wins precedence).
+- **Backward compatibility** — old names work as deprecated symlinks, fallback paths exist, deprecation stub man pages print warnings.
+- **Default policy is "just works" / zero friction** for new users.
+
+**Resource mediation rules (from multi-device, BT, GPU sections):**
+- **GPU** uses percent model (divisible: cores, memory, ports)
+- **BT** uses slot/budget/role/peer model (single radio, time-shared) — NOT percent
+- **Audio** uses channels/depth model
+- **Framebuffer** uses count + size model
+- Each model is correct for its resource; do not mix models
+
+**Mediator pattern (from Mediated passthrough section):**
+- Every `*_resource.ko` mediator has `attach()` / `detach()` / `reset()` / `reinit()` hooks
+- The host can re-attach the device after jail/VM exit in <1 second without a host reboot
+- DTrace `*-resource:device-reset-*` probes fire on every reset
+- Audit log records every reset with reason + duration
+
+**Device-class abstraction (from BT section):**
+- The jail sees POSIX generic device nodes (e.g. `/dev/dsp0` for headphones), NOT raw BT (e.g. no `/dev/bluetooth*`)
+- Host does pairing (PIN/passkey/SSP); jail never sees the 6-digit number unless forwarded
+- `bt.raw_access=1` is the explicit, audited opt-in for raw BT access (power users only)
+
+**Jail termination (from BT section item 7):**
+- All `*_resource.ko` modules have a `prison_cleanup` callback chain
+- Cleanup is idempotent (SIGKILL during cleanup is safe)
+- State machine: `BOUND → DYING → RELEASED → HOST`
+- `BT_RESOURCE_DESTROY_TIMEOUT=30` (default) bounds cleanup time
+- Audit log + DTrace probes record every cleanup step
+
+**Force-disconnect authorization (from BT section item 8):**
+- Defense in depth: 3 layers (CLI tool, broker, kernel) — all must say yes
+- ACL action `disconnect` (T40 extension) gates the operation
+- Rate limit: 10/min, 100/hr default; 5-min lockout after 3 failed authz
+- Audit log records all 3 layers' decisions
 
 ### Must NOT Have (Guardrails)
 - No new ioctls in `sys/amd64/vmm/` — the kernel has no framebuffer concept and we must not introduce one
@@ -4876,7 +5231,17 @@ The user's *"build that list dynamically"* requirement is met by:
 - No removal of `rfb_init` — wrapped, not deleted (other callers may exist)
 - No file at `docs/` or `plan/` or `plans/` — all outputs under `.sisyphus/` and the source tree only
 - No AI slop: no over-abstraction (vtable with one impl is OK as a seam, not a vtable with one impl pretending to be polymorphic), no commented-out code, no "TODO" without a real follow-up task
-- **No `vfio-pci`-style raw BAR passthrough.** We do not give a device's MMIO space directly to a VM. We do not bypass the `*_resource.ko` mediator. We do not allow `bhyve -s <slot>,passthrough` direct passthrough. Every device-class has a `*_resource.ko` mediator in the middle, with `attach()` / `detach()` / `reset()` / `reinit()` hooks. (Raw passthrough may be added as a documented escape hatch in a future boulder with a "host reboot required" warning, but is NOT in v1.)
+- **No `vfio-pci`-style raw BAR passthrough.** Raw passthrough may be added as a documented escape hatch in a future boulder with a "host reboot required" warning, but is NOT in v1.
+- **No hard-coded single-adapter assumptions** in any `*_resource.ko` module
+- **No hard-coded vendor detection** (the mediator abstracts vendor differences)
+- **No hard-coded port counts** (mediator queries the device's actual port count)
+- **No hard-coded device class** (mediator uses vtable + name dispatch)
+- **No hard-coded vendor list in any `*_resource.ko` module** (use the registration mechanism)
+- No `switch (vendor_id)` or `if (vendor_id == 0x10de)` patterns in `gpu_resource.ko`
+- No public-facing HTTP by default (T52 Unix socket only; TCP opt-in via `admin.http_listen`)
+- No `/dev/bluetooth*` or `/dev/dri` or `/dev/gpu*` nodes in jails
+- No cast protocol code in v1 (T61 is design only; v2 implementation)
+- No BT implementation in v1 (T65-T72 are design only; v2/future boulder)
 
 ---
 
@@ -4885,6 +5250,15 @@ The user's *"build that list dynamically"* requirement is met by:
 > **ZERO HUMAN INTERVENTION** — every task is agent-verifiable. No "user manually tests" acceptance criteria.
 
 ### Test Strategy
+
+**The plan ships with three layers of test coverage:**
+
+1. **ATF unit tests** (`tests/sys/...` and `tests/lib/...`) — C-level tests using the FreeBSD Automated Testing Framework + kyua. Run as part of `make tinderbox` and per-commit CI. These are code-level, fast (<10s per test), and exhaustive on the implementation surface.
+2. **Shell integration tests** (`tests/sys/.../*.sh`) — use `jail(8)`, `bhyve(8)`, `sysctl(8)`, etc. to exercise the system end-to-end. Slower (minutes), run on Phase 1 VM.
+3. **QA Scenarios** (per-task, in the TODOs section) — agent-executed behavioral checks using `playwright` (browser UI), `tmux` (TUI), `curl` (API), or `Bash` (kernel). These are the "did the feature actually work" checks.
+
+**All three are mandatory. A task without unit tests + integration tests + QA scenarios is INCOMPLETE.**
+
 - **No unit-test infra** in this tree (`tests/sys/vmm/utils.subr` is shell-only). All verification is by **build + scripted smoke test + diff review**.
 - **Pre-merge gate**: every task ends with `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -C sys/modules/fbuf_jail build` (kernel module) and `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -C usr.sbin/bhyve` (userspace). No code change ships that doesn't compile on a FreeBSD host. The `MAKE_JOBS_NUMBER` env var is the standard FreeBSD knob for parallel build — bsdmake and bmake both honor it. The agent detects the core count via `sysctl -n hw.ncpu` (works on both AMD64 and ARM64) and threads all cores. For CI runners with constrained resources, the agent can override with `MAKE_JOBS_NUMBER=4` (or similar) in the test harness.
 - **Smoke test harness**: `tests/sys/jail/fbuf/` — a new shell test that boots a FreeBSD jail with `allow.fbuf`, runs `ls /dev/fb0` and `kldstat` inside, and asserts presence.
@@ -4892,28 +5266,221 @@ The user's *"build that list dynamically"* requirement is met by:
 - **Bhyve new syntax**: `tests/sys/vmm/fbuf_transport.sh` — same VM with `transport=rfb,...`.
 - **Evidence**: every scenario writes its output to `.sisyphus/evidence/task-{N}-{slug}.{log,txt}`.
 
+### Unit Test Strategy (MANDATORY — full coverage)
+
+**The user explicitly asked for unit tests for everything. This section defines the framework, layout, categories, mocking, and per-class test requirements.**
+
+**Test framework: ATF + kyua (FreeBSD standard)**
+
+- **ATF** (`tests/sys/<area>/.../atf.c`, `atf.h`, `Kyuafile`) — C-level unit tests using `atf_tc`, `atf_check`, `atf_tp_add_tc`, `atf_tp_run`
+- **kyua** — test runner. `kyua test` runs all tests; `kyua report` produces JUnit/HTML
+- **Shell** (`tests/sys/<area>/.../test.sh` + `Kyuafile`) — integration tests using `atf_check` shell primitives
+- **Coverage tooling**: `gcov` + `lcov` for C code coverage; minimum 80% line coverage on new code
+
+**Test directory layout (FreeBSD convention):**
+
+```
+tests/
+├── sys/
+│   ├── modules/
+│   │   ├── fbuf_jail/           # T12
+│   │   │   ├── fbuf_jail_test.c
+│   │   │   ├── fbuf_jail_atf.c
+│   │   │   ├── Kyuafile
+│   │   │   └── Makefile
+│   │   ├── gpu_resource/        # T21
+│   │   ├── audio_resource/      # T58
+│   │   └── preflight/           # T22
+│   ├── jail/
+│   │   ├── fbuf/                # T12, T15
+│   │   ├── gpu/                 # T21, T23
+│   │   ├── audio/               # T58
+│   │   └── mediator/            # Mediated passthrough
+│   ├── policy/                  # T35
+│   │   ├── host_policy.c
+│   │   ├── sysctl_conf_integration.sh
+│   │   └── loader_tunable_precedence.sh
+│   ├── preflight/               # T22, T23, T28, T33
+│   ├── transport/
+│   │   ├── tls/                 # T25
+│   │   ├── cert_loader/         # T30
+│   │   ├── rate_limit/          # T26
+│   │   └── sni/                 # T32
+│   ├── vmm/                     # T13, T18
+│   │   ├── fbuf_legacy.sh
+│   │   ├── fbuf_transport.sh
+│   │   └── fbuf_variants.sh
+│   ├── broker/                  # T37-T52
+│   │   ├── auth.sh
+│   │   ├── acl.sh
+│   │   ├── multicast.sh
+│   │   ├── stats.sh
+│   │   ├── dtrace.sh
+│   │   ├── health.sh
+│   │   └── e2e.sh
+│   ├── multi_gpu/               # multi-device section
+│   │   ├── hotplug.sh
+│   │   ├── pool_resolution.sh
+│   │   └── vendor_caps.sh
+│   └── bhyve/                   # T13, T18
+├── lib/
+│   └── libdisplay/              # T44
+│       ├── bdp_encode_decode_test.c
+│       ├── bdp_session_test.c
+│       └── bdp_acl_test.c
+└── usr.sbin/
+    ├── displayd/                # T38
+    ├── displayc/                # T45
+    └── bdp-stream/              # T60
+```
+
+**Test categories (per FreeBSD convention):**
+
+| Category | Purpose | Example | Speed |
+|---|---|---|---|
+| **Unit** (ATF C) | Exercise one function in isolation | `fbuf_jail_alloc_framebuf()` returns non-NULL | <10s |
+| **Integration** (ATF shell) | Exercise kernel+userspace end-to-end | Boot jail with `allow.fbuf`, verify `/dev/fb0` | <60s |
+| **Regression** (ATF shell) | Lock in working behavior so it doesn't break | Legacy `rfb=` syntax still works | <60s |
+| **Stress** (ATF C) | Push the limits | 1000 concurrent framebuffer clients | <120s |
+| **Conformance** (ATF C) | Check against spec/standard | BDP protocol decode matches RFC | <10s |
+| **Fuzz** (custom) | Random inputs | `bdp_decode(bdp_fuzz_input())` doesn't crash | <60s |
+
+**Test naming convention:**
+
+- `tc_<module>_<function>_<scenario>` — e.g. `tc_fbuf_jail_alloc_succeeds`, `tc_fbuf_jail_alloc_exhausted_returns_null`
+- `sh_<area>_<workflow>_<scenario>` — e.g. `sh_jail_fbuf_basic_attach`, `sh_jail_fbuf_attach_with_no_kbd`
+
+**Per-design-element test requirements:**
+
+| Design element | Test count | Test type | Reference |
+|---|---|---|---|
+| **Each jail param** (`allow.fbuf`, `fbuf.nokbd`, `gpu.share_percent`, `bt.max_slaves_classic`, etc.) | 1 happy + 1 invalid input | Unit | T9, T10, T20, T21, T65 |
+| **Each sysctl** (50+ sysctls in 4 OID subtrees) | 1 read + 1 write + 1 readonly-write-rejected | Unit | T35 |
+| **Each preflight check** (20+ checks) | 1 pass + 1 fail + 1 missing-deps | Integration | T22, T23, T28, T33 |
+| **Each DTrace probe** (25+ probes) | Probe fires on the expected event | Integration (DTrace scripting) | T50 |
+| **Each audit event** (40+ events) | Event written with correct fields on the right action | Integration (audit log parser) | T43 |
+| **Each BDP message type** (15 unicast + 9 multicast + 8 stats + 7 multi-display + 8 audio = 47 types) | 1 encode + 1 decode + 1 roundtrip + 1 malformed | Unit (conformance) | T39, T44, T48, T51, T55, T57 |
+| **Each transport** (RFB, RDP stub, BDP, BDP multicast) | 1 connect + 1 frame + 1 disconnect | Integration | T11, T13, T14, T38, T48 |
+| **Each ACL action** (`view`, `attach`, `disconnect`, `pair`, `unpair`, `audit-read`) | 1 allow + 1 deny + 1 missing | Unit + Integration | T40 |
+| **Each cap module** (NVIDIA, AMD, Intel, generic) | Probe a real or fake device, verify caps populated | Unit | multi-device |
+| **Each pool** (`ml-cluster`, `kiosk`, `any`, `mig-pool`) | Resolution picks correctly per priority | Integration | multi-device |
+| **Each tunable precedence rule** (loader > sysctl > config > default) | 1 rule, all 4 levels | Integration | T35 |
+| **Each host-policy rule** (deny_default, override_deny, etc.) | 1 enabled + 1 disabled + 1 override | Integration | T35 |
+| **Each mediator reset mechanism** (PCI FLR, HDA RESET, HCI Reset) | 1 reset + 1 reinit + 1 audit | Integration | Mediated passthrough |
+| **Each backward-compat shim** (symlink, fallback path, deprecation stub) | Old name still works, warning prints | Regression | T34, T47 |
+| **Each cleanup failure mode** (timeout, ng_reattach fail, fd-revoke fail) | 1 forced + 1 graceful + 1 partial | Integration | T65 item 7 |
+| **Each authz layer** (CLI, broker, kernel) | 1 allow + 1 deny + 1 defense-in-depth | Integration | T65 item 8 |
+| **Each CoD dispatch** (headphones, keyboard, mouse, touch, network) | 1 CoD → 1 devfs export | Integration | T65 item 6 |
+| **Each rate limit** (10/min, 100/hr, 3-fail lockout) | 1 under + 1 at + 1 over | Integration | T65 item 8 |
+| **Each multicast channel** (create, destroy, pub, sub, AES-GCM, ACL, TTL) | 1 happy + 1 failure | Integration | T48 |
+| **Each statistics counter** (per-fb, per-transport, per-channel, per-adapter) | Counter increments on the right event | Integration | T49 |
+| **Each HTTP health endpoint** (GET /health, /stats, /metrics) | 1 200 + 1 401 + 1 403 | Integration | T52 |
+| **Each hot-plug event** (add, remove, fail, recover) | 1 each + 1 cascade | Integration | multi-device |
+
+**Total target: 100+ unit test cases, 30+ integration test cases, 30+ QA scenarios, 5+ stress/conformance tests.**
+
+**Mocking strategy:**
+
+For tests that would otherwise need a real GPU, real BT adapter, real HDA codec, etc., we use:
+- `gpu_stub` (T21 mandatory) — a userspace-callable test backend that simulates a GPU with configurable `total_capacity`, `max_resolution`, `scheduler`
+- `audio_stub` (T58) — same for audio
+- `bt_stub` (T65, future) — same for BT
+- `/etc/display/gpu-overlays/` JSON overlays (T35, multi-device) — operator-editable capability data for test scenarios
+- `mock_jail` — a userspace helper that simulates a jail's `prison_check_*()` calls
+- `mock_audit_consumer` — reads the audit log and asserts events
+
+**Coverage targets:**
+
+- **C code** (`gpu_resource.ko`, `fbuf_jail.ko`, `audio_resource.ko`, `displayd`, `libdisplay`): ≥ 80% line coverage (`gcov` + `lcov`); ≥ 90% branch coverage on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence)
+- **Shell tests**: ≥ 70% line coverage of the test surface (measured by mutation testing: introduce a fault, verify a test catches it)
+- **Backward compat**: 100% — every legacy path has at least one regression test
+
+**Test execution (CI + manual):**
+
+```bash
+# Per-commit CI (Phase 1 VM)
+MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel
+kyua test -r /usr/tests tests/sys/modules/fbuf_jail/ tests/sys/jail/fbuf/ tests/sys/policy/ tests/sys/preflight/ tests/sys/transport/ tests/sys/vmm/
+
+# Per-nightly (Phase 1 VM, full suite)
+kyua test -r /usr/tests
+
+# Per-nightly (Phase 2 nvidia box, vendor integration)
+kyua test -r /usr/tests tests/sys/multi_gpu/vendor_caps.sh tests/sys/multi_gpu/nvidia_mig.sh
+
+# Manual (developer workstation)
+kyua test -r /tmp/kyua.store tests/sys/jail/fbuf/
+
+# Coverage report
+cd /usr/src && MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) coverage
+```
+
+**Test evidence (where the test results live):**
+
+- ATF unit tests: `/usr/tests/Kyuafile.*` + `kyua report` output (JUnit XML, HTML)
+- Shell integration tests: `/var/log/kyua/` (HTML) + stdout
+- QA scenarios: `.sisyphus/evidence/task-{N}-{slug}.{log,txt}` (per-task, agent-executed)
+- F1-F4 final review: `.sisyphus/evidence/final-qa/`
+
+**Test isolation:**
+
+- Each test cleans up its state (kills processes, removes jail, deletes config files) via `atf_tc_cleanup`
+- Tests that require a real jail use `jail -c name=test123 persist` and `jail -r test123` for cleanup
+- Tests that require a real network use `127.0.0.1` or `[::1]` (localhost only); never public
+- Tests that require real certs use `/tmp/display-test-cert.pem` (ephemeral, not committed)
+
+**Test failure → fix → re-run loop:**
+
+The agent is responsible for running tests, capturing failures, fixing the implementation, and re-running. F1-F4 verify that all tests pass before approving. A failing test is a blocker, not a "known issue."
+
+**Per-task test additions (representative, not exhaustive):**
+
+The TODO section for each task includes a "Unit Tests" subsection with:
+- The specific ATF test cases to add (with file paths and `atf_tc` names)
+- The specific shell integration tests to add (with file paths and `Kyuafile` entries)
+- The specific QA scenarios to execute (already documented per task)
+- The coverage target for that task's code (≥ 80% for kernel/userspace, ≥ 90% for critical paths)
+
+**Examples (see TODO section for each task's test list):**
+
+- T8 (console refactor): `tests/sys/vmm/console_multi_instance.c` with cases `tc_console_create_succeeds`, `tc_console_create_10_concurrent_succeeds`, `tc_console_destroy_idempotent`, `tc_console_input_fanout_to_all`, `tc_console_input_fanout_to_none`
+- T12 (fbuf_jail): `tests/sys/modules/fbuf_jail/fbuf_jail_test.c` with cases `tc_fbuf_jail_alloc_returns_nonnull`, `tc_fbuf_jail_alloc_exhausted_returns_null`, `tc_fbuf_jail_attach_succeeds`, `tc_fbuf_jail_detach_succeeds`, `tc_fbuf_jail_attach_twice_fails`, `tc_fbuf_jail_reset_in_software`
+- T21 (gpu_resource): `tests/sys/modules/gpu_resource/gpu_resource_test.c` with cases `tc_gpu_resource_stub_register_succeeds`, `tc_gpu_resource_stub_alloc_within_quota_succeeds`, `tc_gpu_resource_stub_alloc_exceeds_quota_returns_eagain`, `tc_gpu_resource_share_percent_25_normalized_correctly`, `tc_gpu_resource_multi_adapter_distinct_caps`
+- T35 (tunables): `tests/sys/policy/host_policy.c` with cases `tc_sysctl_read_write_roundtrip`, `tc_sysctl_readonly_rejects_write`, `tc_audit_event_emitted_on_sysctl_change`, `tc_tunable_precedence_loader_beats_sysctl`, `tc_tunable_precedence_sysctl_beats_config`, `tc_tunable_precedence_config_beats_default`
+- T38 (broker): `tests/sys/broker/auth.sh` with cases `sh_broker_pam_auth_succeeds`, `sh_broker_pam_auth_wrong_password_fails`, `sh_broker_mtls_cert_required`, `sh_broker_mtls_expired_cert_rejected`, `sh_broker_mtls_self_signed_accepted_when_allowed`
+- T44 (libdisplay): `tests/lib/libdisplay/bdp_encode_decode_test.c` with cases `tc_bdp_encode_decode_roundtrip`, `tc_bdp_decode_malformed_returns_error`, `tc_bdp_decode_truncated_returns_error`, `tc_bdp_decode_oversize_returns_error`, `tc_bdp_session_state_transitions_valid`, `tc_bdp_session_state_transition_invalid_rejected`
+
 ### QA Policy
-Every implementation task ships with at least one happy-path and one failure-path QA scenario. Final verification wave (F1–F4) runs four parallel review agents.
+Every implementation task ships with at least one happy-path and one failure-path QA scenario + at least one ATF unit test + at least one shell integration test. Final verification wave (F1–F4) runs four parallel review agents.
 
 ### Build Environment
-- All build/test runs happen on a FreeBSD 14+ / 15 host. The Linux dev box can be used to write/edit/diff but **not** to compile. The executing agent must provision a FreeBSD build env (jail / bhyve VM / chroot + `make buildworld`).
+- All build/test runs happen on a **FreeBSD 16** host (16.0+ latest release). The Linux dev box can be used to write/edit/diff but **not** to compile. The executing agent must provision a FreeBSD build env (jail / bhyve VM / chroot + `make buildworld`).
 - Branch state is `/home/mlapointe/git/freebsd-src-oci` on `framebuffer` (clean vs main).
 
 ### Test Environment (staged hardware)
 
 The user has staged hardware availability for the testing effort:
 
-1. **Phase 1 — FreeBSD VM (no GPU)** — provided first. Sufficient for all non-GPU work:
+1. **Phase 1 — FreeBSD VM (no GPU)** — provided first. Sufficient for all non-GPU work AND for GPU work via `gpu_stub`:
    - Display transport registry + console multi-instance (T7, T8)
    - fbuf_jail kernel module + jail params + PRISON_FLAG (T9, T10, T12, T15)
-   - Preflight framework + 11 shipped checks (T22, T23)
+   - Preflight framework + 20 shipped checks (T22, T23, T28, T33)
    - Transport security: VeNCrypt + cert loader + hot-reload + SNI + rate-limit + audit (T25, T26, T30, T31, T32, T33, T28, T29)
    - pci_fbuf wire + rfb wrap + rdp stub (T11, T13, T14)
-   - Host policy sysctls (T35) — non-GPU side
+   - Host policy sysctls + tunable precedence (T35)
    - Build wiring + docs + smoke tests (T16, T17, T18, T36)
+   - **End user guide** (T37)
+   - **Broker daemon** + BDP + ACL + audit + libdisplay + displayc (T38-T47)
+   - **Multicast UDP** for TV/advertising (T48)
+   - **Statistics** + diagnostics + DTrace + BDP stats/health/debug (T49-T51)
+   - **HTTP health endpoint** (T52)
+   - **Multi-device tests** (hot-plug, pool resolution, vendor caps) — use stub adapters
+   - **Mediated passthrough tests** (FLR, reinit, cleanup lifecycle)
+   - **Backward compat tests** (deprecated symlinks, migration script)
 2. **Phase 2 — FreeBSD box with nvidia GPU** — provided later. Used for:
    - Real vendor integration (out of scope for this plan; follow-on workstream)
    - Any GPU-specific real-hardware testing of the framework surface (T19, T20, T21, T35 GPU side)
+   - Real MIG, real CUDA core counts, real `nvidia-smi` interop
 
 **Stub backend requirement (mandatory):** the `gpu_resource` framework (T21) must register a `gpu_stub` backend as part of the module — a userspace-callable test backend that simulates a GPU with configurable `total_capacity` (e.g. 10496 "cuda-cores"), `max_resolution`, `scheduler=wfq`, and per-call semantics. This allows:
 - All GPU ATF tests (T21, T23 GPU checks, T35 GPU side) to run on the **VM** (no real GPU needed).
@@ -4932,7 +5499,289 @@ The stub is enabled by default when no real backend registers; a `hw.gpu.0.stub=
 - T23 (GPU preflight checks, the 4 of them) — tested on VM with stub. Pass a mock `host_gpu_quota` in the test.
 - T33 (cert preflight) — tested on VM (no GPU needed).
 - T35 (host policy GPU side) — tested on VM with stub. Tests cover `security.policy.cuda_percentage_max` and `security.policy.vram_percentage_max` with the stub's known capacity.
+- T37 (end user guide) — verified by smoke test that the man page renders and the example commands work.
+- T38 (broker) — verified by e2e test on VM. The broker binds to `[::1]:8443`, authenticates a test user, attaches to a test fb, audits the attach.
+- T39-T47 (BDP, ACL, libdisplay, displayc, audit, transport bridge, resource discovery) — verified on VM by `kyua test` running the BDP unit tests + e2e shell tests.
+- T48 (multicast UDP) — verified on VM by `tests/sys/broker/multicast.sh` which creates a channel, publishes a frame, subscribes, and validates the AES-GCM decryption.
+- T49 (statistics) — verified on VM by `tests/sys/broker/stats.sh` which exercises each counter and reads the file dump.
+- T50 (diagnostics + DTrace) — verified on VM by `tests/sys/broker/dtrace.sh` which uses `dtrace -l` to list the USDT probes and fires each one.
+- T51 (BDP stats/health/debug) — verified on VM by `tests/lib/libdisplay/bdp_stats_test.c` which encodes and decodes each of the 8 stats messages.
+- T52 (HTTP health endpoint) — verified on VM by `tests/sys/broker/health.sh` which curls the endpoint and asserts the response.
+- **Multi-device tests** (`tests/sys/multi_gpu/`) — use `gpu_stub` adapters to simulate multiple GPUs, hot-plug via sysctl, and pool resolution.
+- **Mediated passthrough tests** (`tests/sys/jail/mediator/`) — boot a jail with a stub adapter, kill the jail, verify the adapter re-initializes in <1s.
+- **Backward compat tests** (`tests/sys/compat/`) — verify deprecated symlinks work, migration script converts old configs, deprecation warnings print to stderr.
 - The follow-on workstream (out of scope for this plan) tests on the nvidia box: real CUDA core counts, real VRAM allocation, real `nvidia-smi` interop, real MIG partition setup.
+
+### Test Environment Verification (stop-and-complain protocol)
+
+The user clarified: *"we may be lucky to make it to 16, it may be 17, and 17 has yet to be cut for dev. but for our purposes, 16 is target. when building, and testing, make sure the test environment is correct. not that you get sent to a test system that is 15 .. stop and complain that something isn't right and that is a situation you can't really / should not make changes"*. And: *"now if a package is missing, grab it, make sure you have sudo access, or doas"*.
+
+This section codifies the agent's behavior for test-environment hygiene.
+
+**The hard rule:**
+
+> **The agent MUST verify the test environment is FreeBSD 16 (or the latest 16.x release) at the start of every test run. If the environment is anything other than FreeBSD 16, the agent MUST stop and complain loudly. The agent MUST NOT make code changes to work around a wrong-version test environment.**
+
+**Why "stop and complain" (not "make it work"):**
+
+- A wrong-version test env is a **user-environment issue**, not a code issue. Patching the code to support 15 (or 17) would expand the test surface, introduce version-specific bugs, and make the plan untestable in its actual target environment.
+- The plan targets FreeBSD 16. If 16 isn't available yet, the right action is to **provision a 16 environment**, not to "downgrade the plan to 15."
+- The user has been explicit: *"that is a situation you can't really / should not make changes"*. The agent respects this.
+
+**The verification protocol (executed at the start of every test run):**
+
+```bash
+#!/bin/sh
+# tests/sys/env/verify_test_env.sh — MUST be sourced by every test
+# Hard-fails if the test env is not FreeBSD 16
+
+set -e
+
+# 1. Verify FreeBSD
+if [ "$(uname -s)" != "FreeBSD" ]; then
+    cat <<EOF
+================================================================================
+ERROR: Test environment is not FreeBSD.
+       Detected: $(uname -s) $(uname -r)
+       Required: FreeBSD 16.x
+================================================================================
+This is a HARD STOP. The agent will NOT make code changes to support a
+non-FreeBSD test environment.
+
+To fix:
+  - Provision a FreeBSD 16 VM or bare-metal
+  - Download from https://www.freebsd.org/releases/16.0R/ (or later)
+  - Re-run with the correct env
+
+This is a user-environment issue, not a code issue. No patches will be made.
+================================================================================
+EOF
+    exit 78    # EX_CONFIG from sysexits.h
+fi
+
+# 2. Verify FreeBSD 16 or higher
+KERN_VERSION=$(uname -K)
+KERN_MAJOR=$(echo "${KERN_VERSION}" | cut -d. -f1)
+if [ "${KERN_MAJOR}" -lt 16 ] 2>/dev/null; then
+    cat <<EOF
+================================================================================
+ERROR: Test environment is FreeBSD, but version ${KERN_MAJOR} is BELOW 16.
+       Detected: FreeBSD $(freebsd-version)
+       Kernel:   ${KERN_VERSION}
+       Required: FreeBSD 16 or higher (16.x, 17.x, 18.x, ...)
+
+       Plan target is FreeBSD 16+. Anything below 16 (e.g. 14, 15) is
+       not supported. The agent will NOT make code changes to work around
+       an old-version test environment.
+
+       If you need to run the test on an older FreeBSD, that's a HARD STOP —
+       the plan target is 16+. Update the plan first.
+================================================================================
+EOF
+    exit 78
+fi
+# 16, 17, 18, 19, ... are all accepted. Plan target is 16+ (the minimum).
+
+# 3. Verify privilege escalation tool
+if ! command -v sudo >/dev/null 2>&1 && ! command -v doas >/dev/null 2>&1; then
+    cat <<EOF
+================================================================================
+ERROR: Neither sudo nor doas is installed.
+       Required for: pkg install, kldload, jail, mount, etc.
+
+       Install one of:
+         # sudo pkg install sudo
+         # sudo pkg install doas
+
+       The agent needs privilege escalation to install missing packages.
+================================================================================
+EOF
+    exit 78
+fi
+
+# 4. Verify sudo/doas works (non-interactive)
+if command -v sudo >/dev/null 2>&1; then
+    if ! sudo -n true 2>/dev/null; then
+        cat <<EOF
+================================================================================
+ERROR: sudo is installed but requires a password.
+       Required: passwordless sudo OR passwordless doas.
+
+       Fix one of:
+         # visudo  -- add: <user> ALL=(ALL) NOPASSWD: ALL
+         # doas   -- add: permit nopass <user>
+================================================================================
+EOF
+        exit 78
+    fi
+    SUDO=sudo
+elif command -v doas >/dev/null 2>&1; then
+    if ! doas -n true 2>/dev/null; then
+        cat <<EOF
+================================================================================
+ERROR: doas is installed but requires a password.
+       Required: passwordless doas.
+
+       Fix:
+         # doas.conf: permit nopass <user>
+================================================================================
+EOF
+        exit 78
+    fi
+    SUDO=doas
+fi
+export SUDO
+echo "Test env: FreeBSD $(freebsd-version) kernel=${KERN_VERSION} priv-esc=${SUDO}"
+
+# 5. Verify required tools (auto-install if missing)
+REQUIRED_PKGS="kyua git bash tmux curl openssl socat llvm"
+for pkg in ${REQUIRED_PKGS}; do
+    if ! pkg info -e "$pkg" >/dev/null 2>&1; then
+        echo "Installing missing package: $pkg"
+        $SUDO pkg install -y "$pkg"
+    fi
+done
+
+# 6. Verify required kernel modules can be loaded
+for mod in fbuf_jail gpu_resource audio_resource preflight; do
+    if ! kldstat -q -m "$mod" >/dev/null 2>&1; then
+        if [ -f "/boot/kernel/${mod}.ko" ]; then
+            $SUDO kldload "$mod" || echo "WARN: could not kldload $mod (may be expected)"
+        fi
+    fi
+done
+
+# 7. Verify build environment
+if [ ! -d "/usr/src" ]; then
+    cat <<EOF
+================================================================================
+ERROR: /usr/src is not present.
+       Required for: buildworld, buildkernel, ATF tests.
+       Get the source: https://www.freebsd.org/where.html
+================================================================================
+EOF
+    exit 78
+fi
+if [ ! -d "/usr/obj" ]; then
+    echo "Creating /usr/obj..."
+    $SUDO mkdir -p /usr/obj
+    $SUDO chown "$(id -u):$(id -g)" /usr/obj
+fi
+
+echo "Test environment verified: FreeBSD 16 with all dependencies present."
+```
+
+**The "auto-install missing packages" policy (the user's "if a package is missing, grab it"):**
+
+The agent MUST:
+
+1. Check `pkg info -e <package>` before assuming the package is present
+2. If missing, run `sudo pkg install -y <package>` (or `doas pkg install ...`)
+3. The user has explicitly granted sudo/doas access for this purpose
+4. No "fail and ask the user" — the user said "grab it", so the agent grabs it
+
+The required-package list (planned):
+
+| Package | Purpose |
+|---|---|
+| `kyua` | ATF test runner |
+| `git` | Version control (already present, but verify) |
+| `bash` | Shell scripting (most tests use bash) |
+| `tmux` | TUI test harness (broker, broker-ctl) |
+| `curl` | HTTP/HTTPS testing (T52 health endpoint) |
+| `openssl` | TLS testing (T25-T32) |
+| `socat` | Network testing (broker sockets, multicast) |
+| `llvm` | Sanitizer builds (ASAN, UBSAN) |
+| `kyua-cli` | (older name for kyua; auto-installed with kyua in 16) |
+| `bash-completion` | (optional, for test UX) |
+
+**The "stop and complain" error messages — what they look like:**
+
+When the version is wrong, the agent outputs a clear, loud, actionable error:
+
+```
+================================================================================
+HARD STOP: Test environment version mismatch
+================================================================================
+Detected:   FreeBSD 15.0-RELEASE (kernel 1500000)
+Required:   FreeBSD 16.x (kernel 1600xxx or later)
+
+Plan target:  FreeBSD 16
+This build:   FreeBSD 15
+
+The agent will NOT:
+  - Patch the code to work around FreeBSD 15
+  - Use compatibility shims
+  - Downgrade build flags
+  - Skip tests that fail on 15
+  - "Make it work somehow"
+
+The agent WILL:
+  - Exit non-zero (78 / EX_CONFIG)
+  - Wait for the user to provision a FreeBSD 16 environment
+
+To fix this:
+  1. Provision FreeBSD 16 (download ISO from freebsd.org)
+  2. Boot a VM or bare-metal
+  3. Re-run the build/test
+
+If FreeBSD 16 is not yet released:
+  - Check release schedule at https://www.freebsd.org/releng/
+  - Wait for 16.0-RELEASE
+  - Or use a -BETA / -RC snapshot for early testing (still considered "16")
+================================================================================
+```
+
+**Edge cases the protocol must handle:**
+
+| Situation | Agent behavior |
+|---|---|
+| Test env is FreeBSD 15 | HARD STOP. "Plan target is 16. Provision 16." |
+| Test env is FreeBSD 17 | HARD STOP. "Plan target is 16, not 17. If 16 was never released, update the plan first." |
+| Test env is FreeBSD 16.0 | Proceed. |
+| Test env is FreeBSD 16.1 | Proceed (latest patch release). |
+| Test env is FreeBSD 16-BETA | Proceed with a warning ("BETA, expect rough edges"). |
+| Test env is Linux | HARD STOP. "Not FreeBSD." |
+| Test env is macOS | HARD STOP. "Not FreeBSD." |
+| Test env is FreeBSD but `uname -K` returns weird value | HARD STOP. "Cannot determine kernel version." |
+| Test env is FreeBSD 16 but `/usr/src` missing | HARD STOP. "Install source tree." |
+| Test env is FreeBSD 16 but `kyua` missing | AUTO-INSTALL via `sudo pkg install kyua`. Proceed. |
+| Test env is FreeBSD 16 but no sudo/doas | HARD STOP. "Install sudo or doas, configure nopass." |
+| Test env is FreeBSD 16 but sudo needs password | HARD STOP. "Configure NOPASSWD." |
+
+**The protocol is non-negotiable for v1.** A test run that begins on a wrong-version env is **invalid** — the results cannot be trusted, the run is aborted before any test code executes, and the agent outputs the error and exits.
+
+**What "can't really / should not make changes" means concretely:**
+
+The user said: *"that is a situation you can't really / should not make changes"*. The agent respects this by:
+
+- **NOT** adding `#ifdef __FreeBSD_version >= 1600000` workarounds
+- **NOT** adding fallback code paths for older kernels
+- **NOT** documenting "supported on FreeBSD 14/15/16" in the plan
+- **NOT** adding compatibility shims
+- **NOT** changing `MAKE_JOBS_NUMBER` semantics
+- **NOT** changing the build flags
+- **NOT** changing the test framework assumptions
+- **NOT** "fixing" the test to skip on wrong-version
+
+The agent treats the test environment as a hard contract: "the test env is FreeBSD 16, period." If the contract is violated, the test run is aborted.
+
+**F1-F4 updates:**
+
+- **F1** (Plan compliance) — verifies the protocol is implemented (the `verify_test_env.sh` script is present, sourced by every test, and runs first)
+- **F2** (Code quality) — grep for `__FreeBSD_version < 1600000`, `__FreeBSD_version >= 1500000`, "supported on FreeBSD 14/15", "FreeBSD 14/15 fallback", etc. ANY of these is a guardrail violation
+- **F3** (Real QA) — runs the protocol first. If it fails, F3 is REJECTED with "Test env not FreeBSD 16"
+- **F4** (Scope fidelity) — flags any v1 PR that adds version-detection code, fallback paths, or compatibility shims as scope creep
+
+**Documentation updates:**
+
+- `share/man/man7/display-enduser.7` — "Test environment: FreeBSD 16 required. If you see a 'HARD STOP: version mismatch' error, your env is wrong; do not modify the code."
+- `share/examples/display/test-env-setup.md` — step-by-step guide to provision a FreeBSD 16 env, install sudo/doas, configure nopass, install required packages
+- `share/examples/display/test-env-verify.sh` — the verification script (above), shipped as an example
+
+**The "test env must be FreeBSD 16" Must Have (adds to Work Objectives):**
+
+> - **Test environment is hard-pinned to FreeBSD 16.** The agent MUST verify `uname -K` returns a `16.x` value at the start of every test run. If the env is FreeBSD 14, 15, 17, Linux, or anything else, the agent MUST hard-stop with a clear error message. The agent MUST NOT make code changes to support wrong-version envs, MUST NOT add compatibility shims, MUST NOT add fallback paths. Wrong-version envs are a **user-environment issue**, not a code issue. The user has sudo/doas access for installing missing packages (`sudo pkg install ...` or `doas pkg install ...`); the agent uses this for required packages (kyua, git, bash, tmux, curl, openssl, socat, llvm).
 
 ---
 
@@ -5535,6 +6384,44 @@ Wave F (After ALL tasks — 4 parallel reviews):
     Evidence: .sisyphus/evidence/task-8-bhyve-regression.txt
   ```
 
+  **Unit Tests (ATF C + shell integration)** — T8 covers the `console` multi-instance refactor. Coverage target: ≥ 90% (critical path).
+
+  **ATF C test cases** (file: `tests/sys/bhyve/atf_console.c`):
+
+  | # | Test case | Scenario |
+  |---|---|---|
+  | 1 | `tc_console_create_with_provided_fb` | Create console with `mmap`'d fb, verify `console_get_image()` returns valid dimensions |
+  | 2 | `tc_console_create_with_invalid_dimensions_returns_null` | `console_create(0, 0, ...)` returns NULL; `-1` width/height returns NULL |
+  | 3 | `tc_console_create_with_null_fbaddr_returns_null` | `console_create(1920, 1080, NULL, 0)` returns NULL (cannot operate without fb) |
+  | 4 | `tc_console_destroy_idempotent` | `console_destroy(NULL)` is no-op; double-destroy is no-op |
+  | 5 | `tc_console_destroy_releases_resources` | After destroy, the fb pointer is not retained (UB to use) |
+  | 6 | `tc_console_set_fbaddr_swaps_pointer` | `console_set_fbaddr()` changes the fb used by render callbacks |
+  | 7 | `tc_console_register_render_callback_succeeds` | A render callback can be registered and fires on `console_refresh()` |
+  | 8 | `tc_console_register_render_callback_priority` | Higher-priority callback wins; same-priority is undefined (rejected) |
+  | 9 | `tc_console_register_kbd_consumer_succeeds` | A kbd consumer can be registered; `console_key_event()` invokes it |
+  | 10 | `tc_console_register_ptr_consumer_succeeds` | A ptr consumer can be registered; `console_ptr_event()` invokes it |
+  | 11 | `tc_console_multi_instance_10_concurrent` | Create 10 consoles, verify each is independent (no shared state) |
+  | 12 | `tc_console_multi_instance_each_gets_own_fb` | Each instance has its own fb pointer; cross-instance access returns NULL/0 |
+  | 13 | `tc_console_multi_instance_kbd_fans_out_to_correct_instance` | `console_key_event(instance_n, ...)` invokes only instance_n's consumer |
+  | 14 | `tc_console_CONSOLE_FB_RAW_skips_bhyvegc` | When `CONSOLE_FB_RAW` set, `bhyvegc_init()` is not called |
+  | 15 | `tc_console_no_FB_RAW_calls_bhyvegc` | When `CONSOLE_FB_RAW` NOT set, `bhyvegc_init()` is called |
+  | 16 | `tc_console_init_wrapper_for_bhyve_backcompat` | `console_init()` (legacy) creates a console with `bhyvegc` enabled and the legacy singleton semantics |
+  | 17 | `tc_console_fb_register_priority_ordering` | `console_fb_register(prio=10)` wins over `prio=5`; first registered at same prio wins |
+  | 18 | `tc_console_fb_register_null_fb_rejected` | `console_fb_register(NULL, 0, ...)` returns EINVAL |
+  | 19 | `tc_console_get_image_returns_correct_dimensions` | `console_get_image(handle, &w, &h, ...)` returns the dimensions passed to `console_create` |
+  | 20 | `tc_console_refresh_triggers_render_callback` | `console_refresh(handle)` calls the registered render callback with the correct fb pointer |
+
+  **Shell integration tests** (file: `tests/sys/vmm/console_multi_instance.sh`):
+
+  | # | Test | Expected |
+  |---|---|---|
+  | 1 | `sh_console_bhyve_singleton_unchanged` | `bhyve -s 0,fbuf,rfb=... ...` boots a VM (legacy singleton path) |
+  | 2 | `sh_console_two_jails_concurrent` | Two jails with `allow.fbuf` boot concurrently; each gets its own `/dev/fb0` |
+  | 3 | `sh_console_jail_and_bhyve_concurrent` | A jail with `allow.fbuf` AND a bhyve VM run concurrently; both work |
+  | 4 | `sh_console_destroyed_jail_console_freed` | After `jail -r`, the console slot is reusable; new jail can `allow.fbuf=1` |
+
+  **Evidence**: `.sisyphus/evidence/task-8-atf.txt` (kyua report) + `.sisyphus/evidence/task-8-coverage.txt` (gcov summary)
+
   **Commit**: YES — `bhyve(display): refactor console to multi-instance + caller-provided fb (TDD)`
 
 ---
@@ -5799,6 +6686,57 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
   **QA**: `kyua test atf_fbuf_jail`; live: `jail -c name=fbtest allow.fbuf persist && jls -j fbtest -v fbuf && jail -r fbtest`.
 
+  **Unit Tests (ATF C + shell integration)** — T12 covers the kernel module. Coverage target: ≥ 85% (kernel module is critical, has high branching).
+
+  **ATF C test cases** (file: `tests/sys/modules/fbuf_jail/atf_fbuf_jail.c`):
+
+  | # | Test case | Scenario |
+  |---|---|---|
+  | 1 | `tc_fbuf_jail_module_load_unload` | `kldload fbuf_jail` succeeds; `kldunload fbuf_jail` succeeds; idempotent |
+  | 2 | `tc_fbuf_jail_module_dependencies` | Module declares correct `DECLARE_MODULE` with `console`, `jail` deps |
+  | 3 | `tc_fbuf_jail_alloc_returns_nonnull` | `fbuf_jail_alloc(1920, 1080)` returns non-NULL with valid fb pointer |
+  | 4 | `tc_fbuf_jail_alloc_zero_dimensions_returns_null` | `fbuf_jail_alloc(0, 0)` returns NULL; `fbuf_jail_alloc(-1, ...)` returns NULL |
+  | 5 | `tc_fbuf_jail_alloc_exhausted_returns_null` | After N allocs (mock kmalloc failure), returns NULL |
+  | 6 | `tc_fbuf_jail_free_releases_memory` | After `fbuf_jail_free()`, the fb pointer is freed (kmalloc-tracking mock) |
+  | 7 | `tc_fbuf_jail_attach_succeeds` | `fbuf_jail_attach(pr, alloc)` registers a console instance for the prison |
+  | 8 | `tc_fbuf_jail_attach_twice_fails` | Second `fbuf_jail_attach()` on the same prison returns EBUSY |
+  | 9 | `tc_fbuf_jail_detach_succeeds` | `fbuf_jail_detach(pr)` tears down the console and frees the fb |
+  | 10 | `tc_fbuf_jail_detach_when_not_attached_returns_enxio` | `fbuf_jail_detach()` on a prison with no fb returns ENXIO |
+  | 11 | `tc_fbuf_jail_kbd_auto_attached` | When `fbuf.nokbd=0` (default), the module registers a kbd consumer with the console |
+  | 12 | `tc_fbuf_jail_kbd_not_attached_when_nokbd` | When `fbuf.nokbd=1`, no kbd consumer is registered |
+  | 13 | `tc_fbuf_jail_mouse_auto_attached` | When `fbuf.nomouse=0` (default), the module registers a ptr consumer with the console |
+  | 14 | `tc_fbuf_jail_mouse_not_attached_when_nomouse` | When `fbuf.nomouse=1`, no ptr consumer is registered |
+  | 15 | `tc_fbuf_jail_jail_remove_tears_down` | When the prison is removed (jail removed), the module detaches and frees |
+  | 16 | `tc_fbuf_jail_jail_remove_idempotent` | Double-removal of a prison is safe (no double-free) |
+  | 17 | `tc_fbuf_jail_fb_is_kernel_managed` | The fb pointer is a kernel allocation, NOT mapped from VMM (`!is_vmm_backed()`) |
+  | 18 | `tc_fbuf_jail_reset_in_software` | `fbuf_jail_reset(pr)` issues a software reset (no PCI FLR needed) and the fb is reusable |
+  | 19 | `tc_fbuf_jail_mediator_attach_detach_reinit_hooks` | The module implements `attach()` / `detach()` / `reset()` / `reinit()` (mediator pattern) |
+  | 20 | `tc_fbuf_jail_no_devfs_nodes` | After attach, no `/dev/fb*` or `/dev/dri*` are created in the jail's devfs (verified via `devfs_rule_get()`) |
+  | 21 | `tc_fbuf_jail_audit_event_on_attach` | On attach, an audit event is written (`fbuf-jail:attach`) |
+  | 22 | `tc_fbuf_jail_audit_event_on_detach` | On detach, an audit event is written (`fbuf-jail:detach`) |
+  | 23 | `tc_fbuf_jail_dtrace_probe_on_attach` | `fbuf-jail:attach` DTrace probe fires (verified via `dtrace -l`) |
+  | 24 | `tc_fbuf_jail_dtrace_probe_on_detach` | `fbuf-jail:detach` DTrace probe fires |
+  | 25 | `tc_fbuf_jail_sysctl_attach_count` | `security.fbuf_jail.attach_count` increments on each attach |
+
+  **Shell integration tests** (file: `tests/sys/jail/fbuf/load.sh`):
+
+  | # | Test | Expected |
+  |---|---|---|
+  | 1 | `sh_fbuf_jail_module_loads` | `kldload fbuf_jail` succeeds; `kldstat | grep fbuf_jail` shows it |
+  | 2 | `sh_fbuf_jail_jail_start_with_allow_fbuf` | `jail -c name=fbtest allow.fbuf=1 persist` succeeds |
+  | 3 | `sh_fbuf_jail_jail_state_in_jls` | `jls -j fbtest -v allow.fbuf` shows 1; `jls -j fbtest -v fbuf.nokbd` shows 0 (default) |
+  | 4 | `sh_fbuf_jail_nokbd_works` | `jail -c name=fbtest2 allow.fbuf=1 fbuf.nokbd=1 persist` succeeds; `fbuf.nokbd=1` in jls |
+  | 5 | `sh_fbuf_jail_nomouse_works` | `jail -c name=fbtest3 allow.fbuf=1 fbuf.nomouse=1 persist` succeeds; `fbuf.nomouse=1` in jls |
+  | 6 | `sh_fbuf_jail_no_devfs_nodes` | Inside jail, `ls /dev/fb* /dev/dri* /dev/gpu* 2>&1` returns empty (no nodes) |
+  | 7 | `sh_fbuf_jail_kbd_inject_via_ioctl` | A test program inside the jail can `ioctl` the kbd to inject a key (verified via console input event) |
+  | 8 | `sh_fbuf_jail_mouse_inject_via_ioctl` | A test program inside the jail can `ioctl` the ptr to inject a click |
+  | 9 | `sh_fbuf_jail_jail_remove_cleans_up` | `jail -r fbtest` succeeds; `kldstat | grep fbuf_jail` still shows module (no unload); no leaks |
+  | 10 | `sh_fbuf_jail_concurrent_jails` | Boot 5 jails with `allow.fbuf=1`; each gets its own console; concurrent attach succeeds |
+  | 11 | `sh_fbuf_jail_reboot_safe` | Reboot the host with the module loaded; module reloads; existing jails work |
+  | 12 | `sh_fbuf_jail_concurrent_with_bhyve` | A bhyve VM (with `-s 0,fbuf,rfb=...`) AND a jail with `allow.fbuf` run concurrently; both work |
+
+  **Evidence**: `.sisyphus/evidence/task-12-atf.txt` (kyua report) + `.sisyphus/evidence/task-12-coverage.txt` (gcov ≥ 85%)
+
   **Commit**: YES — `fbuf_jail: kernel module provisioning jail framebuffer + kbd + mouse (TDD)`
 
 ---
@@ -5880,6 +6818,66 @@ Wave F (After ALL tasks — 4 parallel reviews):
   **QA**: `kyua test atf_gpu_resource`; live: `jail -c name=gpustrict allow.gpu=0 persist` on hardware with no GPU → ENXIO; `allow.gpu.strict=0` → jail starts with no GPU.
 
   **Commit**: YES — `gpu_resource: kernel module + jail params (allow.gpu, gpu.cores, gpu.memory, gpu.scheduler) (TDD)`
+
+  **Unit Tests (ATF C + shell integration)** — T21 is the GPU mediation framework. Coverage target: ≥ 80% (large module, complex policy).
+
+  **ATF C test cases** (file: `tests/sys/modules/gpu_resource/atf_gpu_resource.c`):
+
+  | # | Test case | Scenario |
+  |---|---|---|
+  | 1 | `tc_gpu_resource_module_load_unload` | `kldload gpu_resource` succeeds; `kldunload` succeeds |
+  | 2 | `tc_gpu_resource_stub_backend_auto_registers` | When no real backend is present, `gpu_stub` auto-registers as the default |
+  | 3 | `tc_gpu_resource_stub_capacity_sysctl` | `hw.gpu.0.stub_capacity=10496` is the default; writable; `gr_total_capacity()` returns the value |
+  | 4 | `tc_gpu_resource_percent_parser_50pct` | `gpu_cores_parse("50%")` returns absolute `5248` (50% of 10496) |
+  | 5 | `tc_gpu_resource_percent_parser_25pct` | `gpu_cores_parse("25%")` returns `2624` |
+  | 6 | `tc_gpu_resource_percent_parser_100pct` | `gpu_cores_parse("100%")` returns `10496` |
+  | 7 | `tc_gpu_resource_percent_parser_200pct_returns_erange` | `gpu_cores_parse("200%")` returns ERANGE |
+  | 8 | `tc_gpu_resource_percent_parser_abc_returns_einval` | `gpu_cores_parse("abc")` returns EINVAL |
+  | 9 | `tc_gpu_resource_percent_parser_empty_returns_einval` | `gpu_cores_parse("")` returns EINVAL |
+  | 10 | `tc_gpu_resource_absolute_value_16384` | `gpu_cores_parse("16384")` returns 16384 (absolute override) |
+  | 11 | `tc_gpu_resource_create_succeeds` | `gpu_resource_create(jid, device_id, ...)` returns non-NULL |
+  | 12 | `tc_gpu_resource_create_with_invalid_device_returns_null` | `gpu_resource_create(jid, 99, ...)` returns NULL (no such device) |
+  | 13 | `tc_gpu_resource_strict_mode_no_gpu_returns_enxio` | When no GPU present and `allow.gpu.strict=1`, jail start returns ENXIO |
+  | 14 | `tc_gpu_resource_override_mode_creates_no_backend_resource` | When `allow.gpu.strict=0`, jail starts with a resource that has no backend |
+  | 15 | `tc_gpu_resource_cores_capped_at_per_consumer_max` | `gpu.cores=80%` is capped to `per_consumer_max=50%` (=5248) |
+  | 16 | `tc_gpu_resource_memory_capped_at_per_consumer_max` | `gpu.memory=90%` is capped to `per_consumer_max=50%` |
+  | 17 | `tc_gpu_resource_host_reserve_enforced` | `host_reserve=20%` (=2096) is reserved; consumers get ≤ 80% (8396) total |
+  | 18 | `tc_gpu_resource_eager_policy_reserves_vram_at_start` | `mem_policy=eager`: VRAM is reserved at `gpu_resource_create()` time |
+  | 19 | `tc_gpu_resource_eager_policy_insufficient_vram_returns_enomem` | `mem_policy=eager`, request > free VRAM: returns ENOMEM |
+  | 20 | `tc_gpu_resource_lazy_policy_does_not_reserve` | `mem_policy=lazy`: no VRAM reserved at create time |
+  | 21 | `tc_gpu_resource_scheduler_wfq_default` | Default scheduler is `wfq`; consumers are weighted by their `gpu.cores` allocation |
+  | 22 | `tc_gpu_resource_scheduler_round_robin_equal_share` | `scheduler=round-robin`: each consumer gets equal time slice |
+  | 23 | `tc_gpu_resource_destroy_releases_allocation` | After `gpu_resource_destroy()`, the allocation is freed; another jail can claim |
+  | 24 | `tc_gpu_resource_no_devfs_nodes` | After create, no `/dev/dri/*` or `/dev/gpu*` in jail's devfs |
+  | 25 | `tc_gpu_resource_mediator_attach_detach_reinit_hooks` | Implements `attach()` / `detach()` / `reset()` / `reinit()` (mediator pattern) |
+  | 26 | `tc_gpu_resource_flr_capable_stub` | Stub backend reports `flr=1` (mediator passes) |
+  | 27 | `tc_gpu_resource_reset_in_software` | Stub backend reset is a no-op (stub is stateless); still passes |
+  | 28 | `tc_gpu_resource_stats_attach_count` | `security.gpu.resource.attach_count` increments on each create |
+  | 29 | `tc_gpu_resource_audit_event_on_attach` | Audit event `gpu-resource:attach` on create |
+  | 30 | `tc_gpu_resource_dtrace_probe_on_attach` | `gpu-resource:attach` DTrace probe fires |
+  | 31 | `tc_gpu_resource_multi_adapter_distinct_caps` | Two stub adapters (`hw.gpu.0`, `hw.gpu.1`) have independent allocations |
+  | 32 | `tc_gpu_resource_vendor_class_agnostic` | `vendor_class` can be "NVIDIA" / "AMD" / "Intel" / "UNKNOWN" — the framework does not care |
+
+  **Shell integration tests** (file: `tests/sys/jail/gpu/load.sh`):
+
+  | # | Test | Expected |
+  |---|---|---|
+  | 1 | `sh_gpu_resource_module_loads` | `kldload gpu_resource` succeeds; stub backend registered |
+  | 2 | `sh_gpu_resource_strict_no_gpu_fails` | `sysctl security.gpu.policy.strict=1` + no GPU present → `jail -c allow.gpu=1` returns ENXIO |
+  | 3 | `sh_gpu_resource_override_works` | `sysctl security.gpu.policy.strict=0` → jail starts; no `/dev/dri*` in jail |
+  | 4 | `sh_gpu_resource_cores_50pct_resolves_correctly` | `jail -c name=g50 allow.gpu=1 gpu.cores=50%` succeeds; `jls -v gpu.cores` shows `5248 (50% of 10496 stub)` |
+  | 5 | `sh_gpu_resource_memory_25pct_resolves` | `gpu.memory=25%` → 2621440 KB (25% of stub's 10 GB) |
+  | 6 | `sh_gpu_resource_cores_capped_at_50pct` | `gpu.cores=80%` is rejected (over per_consumer_max) |
+  | 7 | `sh_gpu_resource_eager_policy_reserves` | `gpu.memory.policy=eager gpu.memory=50%` → reserved at start |
+  | 8 | `sh_gpu_resource_lazy_policy_does_not_reserve` | `gpu.memory.policy=lazy` → not reserved; logged |
+  | 9 | `sh_gpu_resource_jail_remove_releases` | After `jail -r`, another jail can claim the freed allocation |
+  | 10 | `sh_gpu_resource_concurrent_jails` | 3 jails with `gpu.cores=25%` each (total 75%, within 80% post-reserve) |
+  | 11 | `sh_gpu_resource_overcommit_rejected` | 4 jails with `gpu.cores=25%` each (total 100% > 80% post-reserve) → 4th is rejected |
+  | 12 | `sh_gpu_resource_no_devfs_nodes_in_jail` | Inside jail, `ls /dev/dri* /dev/gpu*` returns empty |
+  | 13 | `sh_gpu_resource_audit_log` | `/var/log/audit/gpu.log` shows attach/detach events |
+  | 14 | `sh_gpu_resource_reboot_safe` | Reboot preserves the policy (sysctls in `/etc/sysctl.conf`) |
+
+  **Evidence**: `.sisyphus/evidence/task-21-atf.txt` (kyua report) + `.sisyphus/evidence/task-21-coverage.txt` (gcov ≥ 80%)
 
 ---
 
@@ -7775,7 +8773,7 @@ Wave F (After ALL tasks — 4 parallel reviews):
   Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | Hardcoded Constants [N found / N] | Backcompat [PASS/FAIL] | Parallel [2.3× speedup] | VERDICT`
 
 - [ ] F3. **Real QA on a FreeBSD host** — `unspecified-high` agent (+ `playwright`/`tmux` if UI)
-  Start from a clean state on a FreeBSD 14+ / 15 host. **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**.
+  Start from a clean state on a **FreeBSD 16** host (16.0+ latest release). **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**.
   Output: `Build [PASS, 2.3× parallel speedup] | Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | Broker [N/N] | Multicast [N/N] | Backcompat [N/N] | VERDICT`
 
 - [ ] F4. **Scope fidelity check** — `deep` agent
@@ -7792,7 +8790,7 @@ The plan produces 48 atomic commits, one per implementation task. Each commit me
 
 ### Verification Commands
 ```bash
-# All from a FreeBSD 14+ / 15 host.
+# All from a **FreeBSD 16** host (16.0+ latest release).
 # IMPORTANT: FreeBSD idiom — `make -j` is fine for BUILD, but installworld/installkernel
 # MUST be serial (no -j). Some install rules are not parallel-safe: they create shared
 # directories, update linker caches, run post-install scripts with implicit ordering.
