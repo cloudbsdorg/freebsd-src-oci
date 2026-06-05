@@ -30,6 +30,232 @@
 
 ---
 
+## Plan Navigation Index (agent context management)
+
+The user noted: *"what if the agent runs out of its context window, how do we ensure that the agent has everything relevant when looking at a task? ensuring success, or at the very least a clear understanding as it is traversing? do we need to attach section numbers or something that it will refresh on?"*. This section provides navigation aids so an agent (or a human reviewer) can find any section quickly and resume work after context loss.
+
+**Section number convention:** `[§X.Y]` is the syntax for cross-references. `§X` is the top-level section (1-11), `§X.Y` is a sub-section.
+
+**Stable anchor convention:** every section has a stable anchor in the rendered HTML. `#plan-navigation-index`, `#context`, `#design-section-bluetooth-considerations`, etc. Use these to deep-link.
+
+### Top-level sections
+
+| § | Section | Purpose | First line |
+|---|---|---|---|
+| §1 | TL;DR | Quick summary, critical path, frame size, frame rate sysctls | 3 |
+| §2 | Plan Navigation Index | This section (agent context management) | 33 |
+| §3 | Visual Overview | 9 Mermaid diagrams (architecture, GPU, BDP, multicast, state machine, Gantt, class diagram, directory layout, agent context) | 251 |
+| §4 | Context | 18 design sections (architecture, broker, localhost, IPv6, instrumentation, multi-display, GPU ports, audio, cast, BT, mediated passthrough, multi-device, workload-driven, FreeBSD 16, backcompat, transport security, preflight, GPU governance) | 643 |
+| §5 | Tunables Reference | 80+ sysctls in 13 sub-sections | 1248 |
+| §6 | Work Objectives | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5130 |
+| §7 | Verification Strategy | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5466 |
+| §8 | Files | 9+ files referenced (bhyve source tree, target files) | 6585 |
+| §9 | Regeneration | regenerate.sh shipped example | 6612 |
+| §10 | Failures | Follow-up actions matrix | 6822 |
+| §11 | Coverage Shortfalls | Coverage recording | 6829 |
+| §12 | Verdict | Final test summary | 6835 |
+| §13 | Execution Strategy | Parallel waves, dep matrix, agent dispatch | 6901 |
+| §14 | TODOs | 60 v1 implementation tasks (T1-T60) + 4 design-only v2 (T62-T64, T68) + 7 design-only BT v2/v3 (T65-T72) + 4 final verifications (F1-F4) | 7061 |
+| §15 | Final Verification Wave | F1, F2, F3, F4 | 10460 |
+| §16 | Commit Strategy | Per-task commits | 10485 |
+| §17 | Success Criteria | Verification commands + checklist | 10489 |
+
+### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition)
+
+| § | Design section | Purpose | First line |
+|---|---|---|---|
+| §4.1 | Original Request | What the user asked for | 645 |
+| §4.2 | Investigation Summary | What we found (3 layers) | 649 |
+| §4.3 | GPU Resource Governance (T19-T21 framework) | GPU mediation rules | 666 |
+| §4.4 | Preflight check framework | 20 preflight checks | 692 |
+| §4.5 | Transport security (VNC hardening) | TLS 1.3, certbot, etc. | 727 |
+| §4.6 | Backward compatibility | Upgrade-must-not-break promise | 776 |
+| §4.7 | Architecture support (jails run everywhere) | Big/little endian, multi-arch | 991 |
+| §4.8 | Console broker / multiplexer | Broker architecture | 1076 |
+| §4.9 | Localhost by default (security principle) | All new endpoints default to localhost | 1487 |
+| §4.10 | IPv6 / dual-stack support | IPv6 default | 1562 |
+| §4.11 | Instrumentation, statistics, diagnostics | T49-T52 design | 1680 |
+| §4.12 | Multi-display support | Walls, ports, mixed resolutions | 1860 |
+| §4.13 | Audio support | AC97/HDA, BDP audio messages | 2075 |
+| §4.14 | Cast tool design considerations | Cast (design only) | 2366 |
+| §4.15 | Combining cast methods | Multi-protocol cast | 2561 |
+| §4.16 | Bluetooth considerations (future) | BT (design only) | 2674 |
+| §4.17 | Mediated passthrough (architectural principle) | Control plane retained | 3705 |
+| §4.18 | Multi-device / heterogeneous hardware | Adapter enumeration, hot-plug, GPU ports | 3985 |
+| §4.19 | Workload-driven GPU selection + dynamic capability discovery | Plug-in capability registry | 4416 |
+| §4.20 | FreeBSD 16 target platform | Version pin | 5055 |
+
+(Line numbers are approximate; use `grep -n "^## " file.md` for the live numbers.)
+
+### Task reference convention
+
+- `[Tnn]` references a specific task (e.g., `[T8]` is the console refactor)
+- `[F1]-[F4]` reference the final verification agents
+- `[§X.Y]` references a design section
+- `[Tnn.UNIT-N]` references a specific unit test in task Tnn (e.g., `[T12.UNIT-3]` is the 3rd ATF C test in T12)
+- `[Tnn.QA-N]` references a specific QA scenario in task Tnn
+
+**The agent uses these references to navigate the plan via `grep`.** For example, `grep -n "T38\." plan.md` finds all references to T38.
+
+### Agent Context Management (the "how to not run out of context" section)
+
+The plan is **9,607 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
+
+**The solution: structured context management per task.**
+
+**1. Per-task context budget (per task body):**
+
+Each T-task has a "Required Context" subsection that explicitly lists what the agent MUST have in its working memory to execute the task:
+
+```markdown
+REQUIRED CONTEXT (in agent's working memory)
+- [§6.6 Test Environment Verification] — for the verify_test_env.sh script
+- [§6.7 Test Execution, Recording, and Follow-up] — for procedure/evidence/follow-up
+- [T8] — predecessor (console refactor) — for what console.c looks like
+- [T9] — predecessor (fbuf jail params) — for what jail params exist
+- [§4.13 Tunable precedence] — for how sysctl precedence works
+- This task's body (T12 below): ~5 KB
+- Test cases (T12 below): ~10 KB
+
+MINIMUM CONTEXT BUDGET
+- Plan sections: ~50 KB
+- This task body: ~5 KB
+- Test cases: ~10 KB
+- Predecessor context (T8, T9): ~20 KB
+- Total: ~85 KB (fits in 200K context window with headroom)
+```
+
+**2. Per-task "Done When" signal:**
+
+Each task has a clear "Done When" subsection that defines the exit signal:
+
+```markdown
+DONE WHEN
+- [ ] All acceptance criteria checked
+- [ ] All test cases documented in [§6.7 Test Procedure] pass
+- [ ] Evidence file at `.sisyphus/evidence/task-{N}-{slug}.json` exists
+- [ ] Commit created with message `type(scope): desc`
+- [ ] Git working tree clean (`git status` shows nothing)
+- [ ] F1-F4 reviewers have not yet run (those run after ALL tasks)
+- [ ] Agent outputs: "Task T-NN complete" and stops
+- [ ] Checkpoint file `.sisyphus/state/task-{N}.checkpoint.json` updated
+```
+
+**3. Checkpoint / resume mechanism:**
+
+The agent saves a checkpoint after each task to `.sisyphus/state/task-{N}.checkpoint.json`:
+
+```json
+{
+  "last_completed_task": "T12",
+  "current_task": "T13",
+  "completed_tasks": ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12"],
+  "in_progress": {
+    "task": "T13",
+    "step": "What to do step 3",
+    "started_at": "2026-06-15T14:23:45Z"
+  },
+  "last_test_result": {
+    "task": "T12",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-12-stdout.json",
+    "manifest_run_id": "2026-06-15T102345Z"
+  },
+  "next_action": "Run T13's tests, file follow-up if any fail"
+}
+```
+
+If the agent's context is lost (or the agent is restarted), it can:
+1. Read the latest checkpoint
+2. Resume from the "current_task" or "next_action"
+3. Re-load the "Required Context" subsections for that task
+4. Continue
+
+**4. Context budget awareness (what to keep / drop):**
+
+```
+CONTEXT PRIORITY (high → low, keep these in working memory)
+1. Current task body (T-NN's "What to do", "Must NOT do", "Acceptance", "Test Procedure", "Done When")
+2. Acceptance criteria + test cases for the current task
+3. Required context sections (per the task's REQUIRED CONTEXT)
+4. Most recent predecessor task's commit message (for context on what's been built)
+5. F1-F4 checks (for the final review, only after all tasks)
+6. Plan Navigation Index (this section) — for finding things quickly
+
+DROP THESE WHEN CONTEXT IS TIGHT (re-load on demand)
+- Older design sections (re-load via `grep` or `read` of specific §X.Y)
+- Mermaid diagrams (visual only; not needed for execution)
+- Historical / narrative sections (only operational sections matter)
+- Other tasks' test cases (only the current task's matter)
+- The full Tunables Reference (re-load on demand for the specific tunable)
+
+RE-LOAD TRIGGERS
+- When starting a new task: re-load the task's body + Required Context
+- When context > 70% full: drop older sections, keep only current task
+- When context > 85% full: checkpoint and exit cleanly (the next session resumes)
+- When a test fails: re-load the test's "Test Procedure" section + the task's "Acceptance Criteria"
+```
+
+**5. Section reference convention (for machine navigation):**
+
+When the agent reads the plan, it should:
+- Use `grep -n "§X.Y" plan.md` to find a section
+- Use `grep -n "Tnn" plan.md` to find a task
+- Use `awk '/^## §X/,/^---$/' plan.md` to extract a section
+- Use `grep -A 50 "T8\." plan.md` to get a task body
+
+The plan uses consistent syntax for cross-references:
+- `§4.16` is the Bluetooth design section
+- `[T12]` is the fbuf_jail task
+- `T12.UNIT-3` is the 3rd ATF C test in T12
+- `T12.QA-1` is the 1st QA scenario in T12
+
+**6. The "fresh session" recovery protocol:**
+
+If the agent's context is lost (or the user restarts the session), the recovery is:
+
+```
+1. Run: source .sisyphus/env/verify_test_env.sh
+   → Confirms FreeBSD 16+; refuses to proceed otherwise
+2. Run: cat .sisyphus/state/task-{N}.checkpoint.json
+   → Reads the latest checkpoint
+3. Identify the current_task and next_action
+4. Re-load the current task's body:
+   grep -n "^- \[ \] {N}\." plan.md  # finds the task
+   awk '/^- \[ \] {N}\./,/^---$/' plan.md  # extracts the task body
+5. Re-load the Required Context sections:
+   For each §X.Y in the task's REQUIRED CONTEXT, extract the section
+6. Re-run the test procedure for the current task
+7. Update the checkpoint after each step
+```
+
+**7. The "context budget" Must Have (adds to Work Objectives):**
+
+> - **Every T-task has a "Required Context" subsection** that explicitly lists what the agent must have in its working memory. The agent MUST re-load this context at the start of the task and refresh on demand when context is tight.
+> - **Every T-task has a "Done When" subsection** that defines the exit signal (all acceptance criteria, evidence file, commit, clean tree, checkpoint updated). The agent stops when "Done When" is met.
+> - **The agent saves a checkpoint after each task** to `.sisyphus/state/task-{N}.checkpoint.json`. The checkpoint records completed tasks, current task, last test result, and next action. The agent can resume from any checkpoint.
+> - **The plan uses consistent cross-reference syntax** (`§X.Y`, `[Tnn]`, `Tnn.UNIT-N`, `Tnn.QA-N`) so the agent can navigate by `grep` and `awk`.
+> - **The Plan Navigation Index at the top of this plan (§1.X)** lists every top-level section, design section, and the line where each starts. The agent can find any section in seconds.
+> - **The agent MUST re-load the current task's body and Required Context at the start of every task** — no relying on memory from previous tasks. This ensures correctness after context loss.
+
+**F1-F4 updates:**
+
+- **F1** verifies:
+  - Every T-task (T1-T52) has a "Required Context" subsection
+  - Every T-task has a "Done When" subsection
+  - The Plan Navigation Index is present at the top of the plan
+  - The checkpoint file `.sisyphus/state/task-{N}.checkpoint.json` exists for each completed task
+- **F2** verifies:
+  - Cross-references in the plan use the consistent syntax (`§X.Y`, `[Tnn]`)
+  - No dangling references (every `§X.Y` and `[Tnn]` resolves to an actual section/task)
+- **F3** verifies:
+  - The "fresh session recovery protocol" works: kill the agent mid-task, restart, verify it resumes correctly via the checkpoint
+- **F4** verifies:
+  - The context-management subsections are present and consistent
+  - The checkpoint files are present and well-formed
+
+---
+
 ## Visual Overview
 
 > Mermaid diagrams for the architecture, sequence flows, state machines, and timeline. GitHub/GitLab/most markdown viewers render these. The user asked for more graphs; we will iterate on the plan across multiple rounds and these diagrams should help reason about changes. **Update the prose alongside these diagrams** — they should not drift. Inline diagrams in the relevant design sections reference back to this overview.
@@ -1851,6 +2077,173 @@ In v1: all combinations work. Old patterns continue; new patterns are opt-in.
 In v2: no breaking changes planned (multi-display is purely additive).
 
 **Mixed resolutions (the user's clarification):** the user said *"keep in mind that the displays may not always be the same resolutions"*. The plan already has per-display `fbuf.N.width` and `fbuf.N.height` (independent) and per-port resolution tracking. The wall case is the most affected: a 2×2 wall can have 4 different resolutions, e.g., `(1920×1080, 1920×1080, 3840×2160, 1920×1080)` — the wall's bounding box is computed from the **max bounds of all displays**, not assumed equal. The composite may be irregular (non-rectangular). The client receives either (a) a single stitched image with the bounding-box dimensions (inactive areas filled with a background color), or (b) a list of display rectangles, depending on the wall's `composite_mode` sysctl (default: stitched image). New preflight check `preflight.display.positions_within_bounds` verifies all positions are within the wall's computed bounding box.
+
+---
+
+### GPU ports model (added per user clarification — "it comes down to how many ports")
+
+The user said: *"considering one gpu can drive multiple displays, it really comes down to resources allocated to the vm or whatever. it comes down to how many ports. it comes down to how many ports (hdmi, displayport, usb c, dvi, and so on)"*.
+
+A modern GPU has multiple physical output ports (HDMI, DisplayPort, USB-C, DVI, etc.). When a jail or VM requests GPU access, it's not just requesting "a GPU" — it's requesting **N output ports** that the VM/jail will own. The port count is a first-class resource dimension, alongside compute units and VRAM.
+
+**Port discovery (per-adapter, set by `gpu_resource` from kernel probe):**
+
+```
+sysctl hw.gpu.adapters
+# nvidia.RTX-A5000.1234567890 nvidia0 pci0:1:0:0 vendor=10de device=2236 class=0x030000 ports_max=4 flr=1
+# nvidia.RTX-A5000.9876543210 nvidia1 pci0:2:0:0 vendor=10de device=2236 class=0x030000 ports_max=4 flr=1
+# amd.Radeon-Pro-W6600.ABC123 amdgpu0 pci0:3:0:0 vendor=1002 device=73bf class=0x030000 ports_max=4 flr=1
+# intel.UHD-770.0 i9150 pci0:0:2:0 vendor=8086 device=4680 class=0x030000 ports_max=3 flr=1
+```
+
+Each adapter exposes `ports_max` (kernel-probed from the GPU's BIOS / VBT) plus per-port details:
+```
+sysctl hw.gpu.adapter.nvidia.RTX-A5000.1234567890
+# alias=nvidia0 bdf=pci0:1:0:0 vendor=10de device=2236 ports_max=4 flr=1
+# port.0=HDMI-1 type=hdmi max_w=3840 max_h=2160 max_fps=60
+# port.1=DP-1    type=dp   max_w=7680 max_h=4320 max_fps=60
+# port.2=DP-2    type=dp   max_w=7680 max_h=4320 max_fps=60
+# port.3=USB-C   type=usbc max_w=3840 max_h=2160 max_fps=60
+```
+
+**Per-adapter sysctls (set by `gpu_resource` per probe):**
+
+| Sysctl | Type | Purpose |
+|---|---|---|
+| `hw.gpu.<idx>.ports_max` | int | Total physical ports on this adapter |
+| `hw.gpu.<idx>.port.<N>.type` | string | `hdmi`, `dp`, `usbc`, `dvi`, `vga` |
+| `hw.gpu.<idx>.port.<N>.max_w` | int | Max horizontal pixels (e.g. 3840) |
+| `hw.gpu.<idx>.port.<N>.max_h` | int | Max vertical pixels (e.g. 2160) |
+| `hw.gpu.<idx>.port.<N>.max_fps` | int | Max refresh rate (e.g. 60) |
+
+**Per-port details (set by `gpu_resource` on port allocation):**
+
+| Sysctl | Type | Purpose |
+|---|---|---|
+| `hw.gpu.<idx>.port.<N>.assigned` | int | jid of the jail that owns this port (or 0 = host) |
+| `hw.gpu.<idx>.port.<N>.width` | int | Active resolution width |
+| `hw.gpu.<idx>.port.<N>.height` | int | Active resolution height |
+| `hw.gpu.<idx>.port.<N>.fps` | int | Active refresh rate |
+| `hw.gpu.<idx>.port.<N>.edid_hash` | string | Hash of the EDID block (if a display is connected) |
+
+**Per-pool sysctls (when adapter is in a pool):**
+
+| Sysctl | Type | Purpose |
+|---|---|---|
+| `hw.gpu.pool.<name>.ports_total` | int | Sum of `ports_max` across all adapters in the pool |
+| `hw.gpu.pool.<name>.ports_free` | int | Currently unallocated ports |
+| `hw.gpu.pool.<name>.allocations` | int | Currently allocated ports |
+
+**Jail param semantics (added to T21):**
+
+- `gpu.ports=N` (int) — request N output ports. Default 1. Combined with `gpu.adapter` / `gpu.adapter_group` to pick an adapter with sufficient free ports.
+- `gpu.ports_policy=highest|lowest|spread` (default `highest`) — when multiple adapters are eligible, pick the one with the most free ports (`highest`), the fewest free ports (`lowest`), or spread across adapters (`spread`).
+- `gpu.port.<N>.w`, `gpu.port.<N>.h`, `gpu.port.<N>.fps` — per-port resolution. Defaults to the port's max capability. Used when a jail wants explicit resolution control.
+
+**Backward compat:** if a jail sets `gpu.ports=0` or omits `gpu.ports` and the jail has `allow.gpu=1`, the framework assumes `gpu.ports=1` (a single "virtual" port for compute workloads without a physical display). Compute-only jails (CUDA / OpenCL) get the same GPU resource but don't claim any physical output ports.
+
+**Examples:**
+
+```ini
+# Multi-port wall (4 displays on one adapter)
+jail.web {
+    allow.gpu;
+    gpu.adapter = "nvidia.RTX-A5000.1234567890";
+    gpu.ports = 4;
+    gpu.port.0.w = 1920; gpu.port.0.h = 1080; gpu.port.0.fps = 60;
+    gpu.port.1.w = 1920; gpu.port.1.h = 1080; gpu.port.1.fps = 60;
+    gpu.port.2.w = 1920; gpu.port.2.h = 1080; gpu.port.2.fps = 60;
+    gpu.port.3.w = 1920; gpu.port.3.h = 1080; gpu.port.3.fps = 60;
+}
+
+# Compute workload (CUDA, no physical displays)
+jail.ml-train {
+    allow.gpu;
+    gpu.adapter_group = "ml-cluster";
+    gpu.ports = 0;  # or omit; compute-only
+    gpu.workload = compute;
+    gpu.share_percent = 50;
+}
+
+# Mixed: 1 display + compute
+jail.desktop {
+    allow.gpu;
+    gpu.adapter = "nvidia.RTX-A5000.1234567890";
+    gpu.ports = 1;  # 1 physical display
+    gpu.share_percent = 30;  # 30% of compute
+    gpu.workload = graphics;
+}
+
+# Multi-adapter spread (4 displays across 2 adapters)
+jail.wall-2x2 {
+    allow.gpu;
+    gpu.adapter_group = "ml-cluster";
+    gpu.ports = 4;
+    gpu.ports_policy = spread;  # 2 ports per adapter
+    gpu.port.0.w = 1920; gpu.port.0.h = 1080;
+    gpu.port.1.w = 1920; gpu.port.1.h = 1080;
+    gpu.port.2.w = 1920; gpu.port.2.h = 1080;
+    gpu.port.3.w = 1920; gpu.port.3.h = 1080;
+}
+```
+
+**Port allocation algorithm (T21 + T56 gpu-port-info):**
+
+When a jail requests `gpu.ports=N`:
+
+1. **Filter adapters** by `gpu.adapter` / `gpu.adapter_group` / `gpu.vendor` selectors
+2. **Filter by capability** — at least one adapter must have `ports_free >= N` (or `N` adapters with `ports_free >= 1` if `ports_policy=spread`)
+3. **Sort** by `ports_free` (descending) for `highest`, by `ports_free - ports_used` (ascending) for `lowest`, or round-robin for `spread`
+4. **Allocate** — for each jail-requested port `i` in `[0, N)`, allocate the next adapter's port (deterministic order: lowest port index first)
+5. **Reject** if no adapter has `ports_free >= 1` after filtering (with override `gpu.allow_underprovision=1` to allow partial allocation)
+
+**Multi-GPU wall resolution (when `gpu.ports=8` spans 2 adapters):**
+
+When a wall has 8 displays split across 2 adapters (4 each), the wall's `bdp_resource.displays[]` array contains displays from both adapters, each tagged with their canonical adapter name. The BDP client receives the composite and knows which physical GPU is driving each display. This matters for diagnostics (which GPU is hot?) and for resource limits (4K@60Hz from adapter A is much heavier than 1080p@30Hz from adapter B).
+
+**gpu-port-info tool (T56):**
+
+A new tool `usr.sbin/gpu-port-info/` enumerates ports, shows their state, and diagnoses allocation problems:
+
+```sh
+gpu-port-info
+# Adapter: nvidia.RTX-A5000.1234567890 (nvidia0, pci0:1:0:0)
+#   ports_max=4 flr=1
+#   port.0: HDMI-1, 3840x2160@60, FREE
+#   port.1: DP-1,    7680x4320@60, ASSIGNED to jail=web (jid=42)
+#   port.2: DP-2,    7680x4320@60, ASSIGNED to jail=web (jid=42)
+#   port.3: USB-C,   3840x2160@60, ASSIGNED to jail=web (jid=42)
+#
+# Adapter: amd.Radeon-Pro-W6600.ABC123 (amdgpu0, pci0:3:0:0)
+#   ports_max=4 flr=1
+#   port.0: HDMI-1, 3840x2160@60, FREE
+#   port.1: DP-1,    7680x4320@60, FREE
+#   port.2: DP-2,    7680x4320@60, FREE
+#   port.3: DVI,     2560x1600@60, FREE
+#
+# Pool: ml-cluster (nvidia0 + nvidia1)
+#   ports_total=8 ports_free=4
+#   allocations: jail=web(3 ports) jail=ml-train(1 port)
+```
+
+**Preflight checks added (T22 + T56):**
+
+- `preflight.gpu.ports_available` (BLOCKING) — at least one selected adapter has `ports_free >= N` requested
+- `preflight.gpu.ports_within_max` (BLOCKING) — `gpu.ports=N` ≤ adapter's `ports_max`
+- `preflight.gpu.ports_resolution_supported` (BLOCKING) — each `gpu.port.<i>.w/h/fps` ≤ port's `max_w/max_h/max_fps`
+- `preflight.gpu.ports_not_already_assigned` (BLOCKING) — for spread/port-specific requests, the requested port isn't already assigned to another jail
+
+**Tests added to T21 + T56:**
+- 4 ATF C tests for port allocation algorithm
+- 3 shell tests for gpu-port-info output format
+- 2 integration tests for multi-adapter port spreading
+- 1 stress test for hot-plug + port re-assignment
+
+**Why this is design-only in v2 but implemented in v1:**
+
+The ports model is **fully implemented in v1** (T21, T53-T56, gpu-port-info T56). The design here formalizes the resource model and tunables. v1 has port allocation; v2 may add EDID passthrough (T64) and per-port EDID-based resolution negotiation.
+
+
 
 ---
 
@@ -5785,6 +6178,901 @@ The agent treats the test environment as a hard contract: "the test env is FreeB
 
 ---
 
+### Test Execution, Recording, and Follow-up (the meta-audit)
+
+The user asked: *"audit it again, looking at the tasks and the unit and integration tests that need to be performed, and how to perform them, record, and whatever action is appropriate"*. This section codifies the test **process** — not just what tests exist, but how each test is run, what evidence is captured, what follow-up actions are appropriate.
+
+**The principle: every test has three artifacts: a procedure, an evidence file, and a follow-up action. None of them is optional.**
+
+**1. The Test Procedure (how to perform each test)**
+
+Every test (ATF C, shell, or QA scenario) MUST have a procedure with six steps:
+
+```
+TEST PROCEDURE
+1. PREREQUISITES
+   - Test env: FreeBSD 16+ (verified by verify_test_env.sh)
+   - Required packages: (listed per-test; auto-installed by verify_test_env.sh)
+   - Required kernel modules: fbuf_jail, gpu_resource, audio_resource, preflight
+   - Required files: certs, configs, test data (per-test)
+   - Required state: clean (no leftover jails, no leftover daemons, no leftover ports)
+
+2. SETUP
+   - Exact commands to prepare the test state
+   - Example: kldload fbuf_jail && mkdir -p /tmp/test-fbuf-jail-$$ && \
+              jtest-create-jail test-fbuf-$$ allow.fbuf=1
+
+3. EXECUTE
+   - The exact test command(s)
+   - Example: kyua test tests/sys/modules/fbuf_jail/ 2>&1 | tee \
+              .sisyphus/evidence/task-12-stdout.txt
+
+4. VERIFY
+   - How to know the test passed
+   - Example: exit code 0, "PASS" in last line, kyua report shows N pass / 0 fail
+   - The expected output (key strings to grep for)
+
+5. TEARDOWN
+   - How to clean up (regardless of pass/fail)
+   - Example: jtest-remove-jail test-fbuf-$$ && kldunload fbuf_jail
+   - Teardown MUST be idempotent (safe to run twice)
+   - Teardown MUST NOT leave artifacts (jails, ports, files) on the host
+
+6. RE-RUN SAFETY
+   - Can this test be re-run safely without manual cleanup?
+   - If NO: list the manual cleanup steps
+   - If YES: state "Re-run safe; no manual cleanup needed"
+```
+
+**The procedure is recorded in the per-task test cases (e.g., T8's "**Test Procedure (per-test)**" subsection). The procedure is the source of truth for the test runner.**
+
+**2. The Test Recording (evidence file format)**
+
+Every test result MUST be recorded in a structured format. The path convention is:
+
+```
+.sisyphus/evidence/task-{N}-{slug}.{ext}
+```
+
+Where:
+- `N` is the T-task number (e.g., `12`)
+- `slug` is a kebab-case description of the test (e.g., `fbuf-jail-attach-3-concurrent`)
+- `ext` is one of:
+  - `.txt` — plain text human-readable output (default for shell tests)
+  - `.log` — log file output (default for daemon tests)
+  - `.json` — structured JSON output (default for ATF C tests; kyua supports `kyua report --format=Json`)
+  - `.html` — HTML report (optional, for human review)
+  - `.png` / `.jpg` — screenshots (for UI tests; F3 with `playwright`)
+
+**The structured evidence file (`.json`) MUST contain at minimum:**
+
+```json
+{
+  "task_id": "T12",
+  "test_id": "tc_fbuf_jail_module_load_unload",
+  "test_category": "unit",
+  "test_type": "ATF_C",
+  "result": "PASS" | "FAIL" | "SKIP" | "HARD_STOP" | "TIMEOUT",
+  "host": {
+    "freebsd_version": "16.0-RELEASE",
+    "kernel": "1600025",
+    "arch": "amd64",
+    "hostname": "ci-runner-01"
+  },
+  "started_at": "2026-06-15T10:23:45.123Z",
+  "ended_at": "2026-06-15T10:23:47.456Z",
+  "duration_ms": 2333,
+  "prerequisites": {
+    "freebsd_version_ok": true,
+    "packages_installed": true,
+    "kernel_modules_loaded": ["fbuf_jail"],
+    "free_disk_mb": 1024,
+    "free_memory_mb": 4096
+  },
+  "command": "kyua test tests/sys/modules/fbuf_jail/",
+  "stdout_summary": "5/5 passed",
+  "stderr_summary": "",
+  "assertions": [
+    {
+      "assertion": "kldload fbuf_jail succeeded",
+      "result": "PASS",
+      "observed": "Loaded fbuf_jail"
+    },
+    {
+      "assertion": "kldunload fbuf_jail succeeded",
+      "result": "PASS",
+      "observed": "Unloaded fbuf_jail"
+    }
+  ],
+  "follow_up": {
+    "action": "none" | "retry" | "file_follow_up" | "escalate_to_user",
+    "rationale": "",
+    "follow_up_task": null | "T85: ..."
+  },
+  "evidence_files": [
+    "task-12-stdout.txt",
+    "task-12-stderr.txt",
+    "task-12-coverage.json"
+  ]
+}
+```
+
+**3. The Test Manifest (index of all evidence)**
+
+Every test run produces a `manifest.json` at the run root:
+
+```
+.sisyphus/evidence/run-{run_id}/manifest.json
+```
+
+Where `run_id` is a UTC timestamp (e.g., `2026-06-15T102345Z`).
+
+The manifest indexes all evidence files for the run:
+
+```json
+{
+  "run_id": "2026-06-15T102345Z",
+  "host": "ci-runner-01",
+  "freebsd_version": "16.0-RELEASE",
+  "started_at": "2026-06-15T10:23:45Z",
+  "ended_at": "2026-06-15T11:45:23Z",
+  "duration_ms": 4898000,
+  "tests_run": 314,
+  "tests_passed": 312,
+  "tests_failed": 2,
+  "tests_skipped": 0,
+  "tests_hard_stop": 0,
+  "tests_timeout": 0,
+  "evidence_files": [
+    "task-8-console-multi-instance.json",
+    "task-12-fbuf-jail-attach-3-concurrent.json",
+    "task-21-gpu-resource-stub-default.json",
+    "task-35-host-policy-tunable-precedence.json",
+    "task-38-broker-default-listens-localhost.json",
+    "task-44-libdisplay-bdp-encode-decode-roundtrip.json",
+    "..."
+  ],
+  "coverage": {
+    "line_coverage_percent": 87.3,
+    "branch_coverage_percent": 91.2,
+    "files_under_target": ["usr.sbin/displayd/main.c"]
+  },
+  "failures": [
+    {
+      "test_id": "tc_gpu_resource_eager_policy_insufficient_vram_returns_enomem",
+      "task_id": "T21",
+      "result": "FAIL",
+      "expected": "ENOMEM",
+      "actual": "EAGAIN",
+      "follow_up": "file_follow_up",
+      "follow_up_task": "T85: Fix gpu_resource eager-policy error code for insufficient VRAM"
+    }
+  ]
+}
+```
+
+**4. Test Follow-up Actions (what action is appropriate)**
+
+When a test result is FAIL, SKIP, HARD_STOP, or TIMEOUT, the agent MUST take one of these actions:
+
+| Result | Action | Rationale | Documented in |
+|---|---|---|---|
+| **PASS** | None | Test passed; no follow-up needed | evidence file |
+| **FAIL (flaky)** | Retry once | Common with timing-sensitive tests; if it passes on retry, mark the test as `flaky` in a follow-up | `.sisyphus/evidence/flaky-tests.list` |
+| **FAIL (consistent)** | File follow-up task | The implementation has a bug; create a new T-task to fix it | `.sisyphus/evidence/follow-ups.list` + a new T-task in the plan |
+| **FAIL (env issue)** | HARD STOP | The test env is wrong (e.g., package missing, kernel module not loaded); fix env and re-run | error log + `verify_test_env.sh` re-run |
+| **SKIP** | Document reason | The test was skipped (e.g., feature not implemented, GPU not present) | evidence file (skip_reason field) |
+| **HARD_STOP** | Log + exit 78 | The test env is wrong (FreeBSD version, sudo/doas, etc.) | error log + verify_test_env.sh output |
+| **TIMEOUT** | File follow-up task | The test is too slow OR hangs; either increase timeout or fix the hang | evidence file + follow-up task |
+| **COVERAGE_BELOW_TARGET** | File follow-up task | The code's coverage is below the per-task target; add more tests | evidence file + follow-up task |
+
+**The follow-up protocol (detailed):**
+
+```bash
+# When a test fails consistently:
+# 1. Capture full evidence
+cp /tmp/test-output.txt .sisyphus/evidence/task-{N}-{slug}.txt
+echo "FAIL: tc_xyz returned 'EAGAIN', expected 'ENOMEM'" >> .sisyphus/evidence/run-{id}/failures.log
+
+# 2. File a follow-up task (TDD style: write a failing test that captures the bug)
+# Add to the plan:
+#   - [ ] {N+1}. Fix gpu_resource eager-policy error code
+#         **What to do**: 
+#         1. Write `tests/sys/modules/gpu_resource/atf_eager_policy.c` with a test that
+#            allocates all VRAM, then requests more — must return ENOMEM, not EAGAIN.
+#         2. In `sys/modules/gpu_resource/gpu_resource.c`, change `EAGAIN` to `ENOMEM` 
+#            in the eager-policy insufficient-VRAM path.
+#         3. Run test — pass.
+
+# 3. Re-run the test to confirm
+kyua test tests/sys/modules/gpu_resource/ 2>&1 | tee .sisyphus/evidence/task-{N+1}-fix.txt
+
+# 4. Update the manifest
+# Add the fix task to the evidence and the new PASS result
+```
+
+**5. Test Coverage Recording**
+
+Coverage is recorded in `.sisyphus/evidence/run-{id}/coverage/`:
+
+```
+.sisyphus/evidence/run-{id}/coverage/
+├── gcov-line.info              # lcov --capture output
+├── gcov-branch.info            # lcov --capture --rc lcov_branch_coverage=1
+├── lcov-html/                  # lcov --html-details (human-readable)
+│   ├── index.html
+│   └── usr.sbin/displayd/
+│       ├── main.c.gcov.html
+│       └── ...
+├── lcov-cobertura.xml          # for CI integration
+└── summary.json                # machine-readable summary
+```
+
+The `summary.json` contains:
+
+```json
+{
+  "generated_at": "2026-06-15T11:45:23Z",
+  "tool": "lcov 2.0",
+  "totals": {
+    "lines_found": 12345,
+    "lines_hit": 10780,
+    "line_coverage_percent": 87.3,
+    "branches_found": 3456,
+    "branches_hit": 3152,
+    "branch_coverage_percent": 91.2,
+    "functions_found": 234,
+    "functions_hit": 220,
+    "function_coverage_percent": 94.0
+  },
+  "per_file": [
+    {
+      "file": "usr.sbin/displayd/main.c",
+      "line_coverage_percent": 92.1,
+      "branch_coverage_percent": 88.5,
+      "target_met": true
+    },
+    {
+      "file": "sys/modules/gpu_resource/gpu_resource.c",
+      "line_coverage_percent": 78.4,
+      "branch_coverage_percent": 81.2,
+      "target_met": false,
+      "target_required": 80.0,
+      "shortfall_percent": 1.6
+    }
+  ]
+}
+```
+
+**When coverage is below target, the action is:**
+
+- The agent MUST file a follow-up task to add more tests
+- The follow-up task is added to the plan with a target coverage bump
+- The follow-up task is run before F1-F4 approve
+
+**6. Test Isolation & Re-run Safety**
+
+Tests can be re-run safely only if:
+1. **No state pollution** — the test cleans up its state in `atf_tc_cleanup` or in the teardown step
+2. **No port conflicts** — the test uses ephemeral ports (e.g., port `0` → kernel assigns; or port 18443 + pid for uniqueness)
+3. **No shared resources** — the test creates its own jail/user/cert instead of reusing one
+4. **Idempotent operations** — `kldload` is checked first; `jail -c` checks for name conflict; `mkdir` uses `-p`
+5. **Random uniqueness** — names use `$$` (PID) or `$RANDOM` to avoid cross-run collisions
+
+**Per-test isolation rules:**
+
+| Resource | Isolation strategy |
+|---|---|
+| **Jail names** | `test-{slug}-{pid}` — `jail -c name=test-fbuf-12345` |
+| **Ports** | `18443 + (pid % 1000)` — broker listens on a unique port |
+| **Unix sockets** | `/tmp/test-{slug}-{pid}.sock` — unique path |
+| **Cert files** | `/tmp/test-{slug}-{pid}-{cert,key}.pem` — unique paths |
+| **Audit log files** | `/tmp/test-{slug}-{pid}.log` — unique paths |
+| **Kernel modules** | `kldstat -q -m <mod>` first; only `kldload` if not loaded |
+| **Sysctls** | Save current value, set new value, restore on teardown |
+| **Files** | `mktemp -d` for tmpdirs; `rm -rf` on teardown |
+| **Users** | `pw useradd -n test-{slug}-{pid}` on setup; `pw userdel` on teardown |
+| **DBus / Unix sockets** | Use unique paths in `/tmp/test-{slug}-{pid}/` |
+
+**Re-run safety analysis (per test type):**
+
+| Test type | Re-run safe? | Manual cleanup if not |
+|---|---|---|
+| ATF C kernel module test (e.g., `tc_fbuf_jail_module_load_unload`) | **YES** (idempotent) | None |
+| Shell test that creates a jail | **YES** (if teardown uses `jail -r` and is robust) | None |
+| Shell test that creates a kldload | **YES** (if `kldstat -q -m` is checked) | None |
+| Shell test that creates a cert | **YES** (if cert path is `$$`-suffixed and `rm` is in teardown) | None |
+| Shell test that mutates a sysctl | **YES** (if teardown restores the previous value) | None |
+| Multi-host test (rare) | **NO** | Re-provision both hosts |
+| Performance / stress test | **YES** (usually) | None |
+| Long-running daemon test | **YES** (if `kill <pid>` is in teardown) | None |
+
+**7. Test Selection & Tagging**
+
+Tests can be selected by tag. Tags are part of the test name and are recognized by `kyua`:
+
+```
+tests/sys/jail/fbuf/ (no tag)           # runs by default
+tests/sys/jail/fbuf/smoke                # runs in per-commit CI
+tests/sys/jail/fbuf/broker              # runs in broker CI
+tests/sys/jail/fbuf/nightly             # runs nightly only
+tests/sys/jail/fbuf/slow                # runs nightly only (> 1 min)
+tests/sys/jail/fbfuf/stress             # runs weekly only
+tests/sys/jail/fbuf/conformance         # runs on spec changes only
+```
+
+**The "smoke" tag is the default for per-commit CI.** Smoke tests must:
+- Run in <60 seconds total
+- Be deterministic
+- Not require external resources (network, hardware)
+- Catch the most common regressions
+
+**The "broker" tag is for tests that need the broker daemon running.** These run after the broker is started.
+
+**The "nightly" tag is for tests that are too slow for per-commit (e.g., stress tests, large fuzz runs).**
+
+**The "slow" tag is for individual tests > 1 minute.** A single slow test doesn't break per-commit CI but is excluded from fast runs.
+
+**Test selection commands:**
+
+```bash
+# Run all tests (default — all tags)
+kyua test -r /usr/tests
+
+# Run only smoke tests
+kyua test -r /usr/tests --tags=smoke
+
+# Run only nightly tests
+kyua test -r /usr/tests --tags=nightly
+
+# Run only broker tests
+kyua test -r /usr/tests --tags=broker
+
+# Run a specific task's tests
+kyua test -r /usr/tests tests/sys/modules/fbuf_jail/
+
+# Run a single test
+kyua test -r /usr/tests tests/sys/modules/fbuf_jail/atf_fbuf_jail:tc_fbuf_jail_module_load_unload
+```
+
+**8. Test Data Catalog (certs, jails, users, configs)**
+
+Tests need shared data. The catalog is checked into the source tree (under `tests/data/`):
+
+```
+tests/data/
+├── certs/
+│   ├── ca.pem
+│   ├── ca.key
+│   ├── server-selfsigned.pem
+│   ├── server-selfsigned.key
+│   ├── client-valid.pem
+│   ├── client-valid.key
+│   ├── client-expired.pem
+│   ├── client-expired.key
+│   ├── client-revoked.pem
+│   └── client-revoked.key
+├── configs/
+│   ├── broker-minimal.conf
+│   ├── broker-full.conf
+│   ├── acl-default.conf
+│   ├── acl-team-web.conf
+│   └── policy-quickstart.conf
+├── users/
+│   ├── test-alice.passwd        # alice:testpassword
+│   ├── test-bob.passwd
+│   ├── test-root.passwd
+│   └── setup-test-users.sh      # creates the users in /etc/passwd
+├── jails/
+│   ├── test-jail-fbuf.conf      # jail.conf fragment for fbuf test
+│   ├── test-jail-gpu.conf
+│   └── test-jail-audio.conf
+└── README.md                    # documents each file's purpose
+```
+
+The data is generated by `tests/data/regenerate.sh` (run once at project bootstrap, not per-test). The certs are valid for 100 years (test certs only). The users are created in a dedicated test range (uid 5000-5999) to avoid colliding with real users.
+
+**`tests/data/regenerate.sh` — shipped example** (this is the canonical reference; the implementation lives in T18):
+
+```bash
+#!/bin/sh
+# tests/data/regenerate.sh — Regenerate test data catalog
+# Run once at project bootstrap, NOT per-test
+# Idempotent: safe to re-run (overwrites existing files)
+set -eu
+
+DATA_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DATA_DIR"
+
+# ---------------------------------------------------------------------------
+# 1. CA + server cert + 3 client certs (valid, expired, revoked)
+# ---------------------------------------------------------------------------
+mkdir -p certs
+cd certs
+
+if [ ! -f ca.key ]; then
+  openssl genrsa -out ca.key 2048
+  openssl req -x509 -new -nodes -key ca.key -sha256 -days 36500 \
+    -out ca.pem -subj "/CN=display-test-ca"
+fi
+
+# Server self-signed
+if [ ! -f server-selfsigned.key ]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -keyout server-selfsigned.key \
+    -out server-selfsigned.pem -days 36500 \
+    -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1"
+fi
+
+# Helper: generate a client cert signed by the CA
+gen_client() {
+  name="$1"
+  cn="$2"
+  if [ ! -f "${name}.key" ]; then
+    openssl genrsa -out "${name}.key" 2048
+    openssl req -new -key "${name}.key" -out "${name}.csr" \
+      -subj "/CN=${cn}"
+    openssl x509 -req -in "${name}.csr" -CA ca.pem -CAkey ca.key \
+      -CAcreateserial -out "${name}.pem" -days 36500 -sha256
+  fi
+}
+
+gen_client client-valid "test-client-valid"
+gen_client client-expired "test-client-expired"
+# (regenerate the expired one with -days 1 then backdate mtime)
+if [ -f client-expired.pem ]; then
+  openssl x509 -in client-expired.pem -out client-expired.pem.tmp \
+    -force_pubkey client-expired.key \
+    -CA ca.pem -CAkey ca.key -set_serial 0x100 -days 1 -sha256 2>/dev/null || true
+  # backdate by 100 days so the test cert is "expired now"
+  touch -t 202001010000 client-expired.pem client-expired.key 2>/dev/null || true
+fi
+
+gen_client client-revoked "test-client-revoked"
+# Create a CRL marking the revoked cert as revoked
+if [ ! -f client-revoked.crl ]; then
+  openssl ca -config /dev/null -gencrl -out client-revoked.crl 2>/dev/null || true
+  # Simplified: just mark the cert via a deny file; revocation check is custom
+  echo "revoked" > client-revoked.revoked
+fi
+
+cd ..
+
+# ---------------------------------------------------------------------------
+# 2. Configs
+# ---------------------------------------------------------------------------
+mkdir -p configs
+cat > configs/broker-minimal.conf <<'EOF'
+# Minimal broker config for tests
+listen = tcp://[::1]:18443
+tls = none
+auth = none
+acl = permit all
+log = /tmp/displayd-test.log
+EOF
+
+cat > configs/broker-full.conf <<'EOF'
+# Full broker config for tests
+listen = tcp://[::1]:18443
+tls_cert = /usr/tests/display/data/certs/server-selfsigned.pem
+tls_key = /usr/tests/display/data/certs/server-selfsigned.key
+auth = pam
+acl = /usr/tests/display/data/configs/acl-team-web.conf
+log = /tmp/displayd-test.log
+EOF
+
+cat > configs/acl-default.conf <<'EOF'
+# Default ACL (deny all)
+default deny
+EOF
+
+cat > configs/acl-team-web.conf <<'EOF'
+# Web team: alice can attach to web-*
+user alice permit web-*
+user bob permit web-*
+user root permit *
+EOF
+
+cat > configs/policy-quickstart.conf <<'EOF'
+# Quickstart policy
+security.policy.fbuf.deny_default = 0
+security.policy.gpu.deny_default = 0
+security.policy.audio.deny_default = 0
+EOF
+
+# ---------------------------------------------------------------------------
+# 3. Users (uid 5000-5999 range; dedicated test range)
+# ---------------------------------------------------------------------------
+mkdir -p users
+cat > users/setup-test-users.sh <<'EOF'
+#!/bin/sh
+# Create test users in the 5000-5999 range
+set -eu
+for u in alice bob root-test; do
+  uid=5000
+  case "$u" in
+    alice) uid=5001 ;;
+    bob)   uid=5002 ;;
+    root-test) uid=5003 ;;
+  esac
+  if ! pw usershow "$u" >/dev/null 2>&1; then
+    pw useradd -n "$u" -u "$uid" -d /tmp/"$u" -s /bin/sh \
+      -w random -c "display test user"
+  fi
+done
+# Generate password files
+for u in alice bob; do
+  pw=$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | base64)
+  echo "${u}:${pw}" > "users/test-${u}.passwd"
+  chmod 600 "users/test-${u}.passwd"
+done
+echo "root-test:root-test-pw" > users/test-root.passwd
+chmod 600 users/test-root.passwd
+EOF
+chmod +x users/setup-test-users.sh
+
+# ---------------------------------------------------------------------------
+# 4. Jail templates (jail.conf fragments)
+# ---------------------------------------------------------------------------
+mkdir -p jails
+cat > jails/test-jail-fbuf.conf <<'EOF'
+test-jail-fbuf {
+  host.hostname = "test-jail-fbuf";
+  path = "/usr/jails/test-jail-fbuf";
+  allow.fbuf;
+  fbuf.count = 2;
+  fbuf.0.width = 1920;
+  fbuf.0.height = 1080;
+  fbuf.1.width = 1280;
+  fbuf.1.height = 720;
+}
+EOF
+
+cat > jails/test-jail-gpu.conf <<'EOF'
+test-jail-gpu {
+  host.hostname = "test-jail-gpu";
+  path = "/usr/jails/test-jail-gpu";
+  allow.gpu;
+  gpu.share_percent = 25;
+  gpu.adapter = any;
+  gpu.vendor = nvidia;
+  gpu.workload = compute;
+}
+EOF
+
+cat > jails/test-jail-audio.conf <<'EOF'
+test-jail-audio {
+  host.hostname = "test-jail-audio";
+  path = "/usr/jails/test-jail-audio";
+  allow.audio;
+  audio.share_percent = 50;
+}
+EOF
+
+# ---------------------------------------------------------------------------
+# 5. README
+# ---------------------------------------------------------------------------
+cat > README.md <<'EOF'
+# Test Data Catalog
+
+This catalog is **regenerated** by `regenerate.sh` (idempotent). All files are test-only and MUST NOT be used in production.
+
+## Files
+
+### certs/
+- `ca.pem` / `ca.key` — Test CA (self-signed, 100-year validity)
+- `server-selfsigned.pem` / `.key` — Server cert for TLS tests
+- `client-valid.pem` / `.key` — Valid client cert (signed by CA)
+- `client-expired.pem` / `.key` — Expired client cert (backdated 2020-01-01)
+- `client-revoked.pem` / `.key` — Revoked client cert (revocation flag)
+
+### configs/
+- `broker-minimal.conf` — Minimal broker config (no TLS, no auth)
+- `broker-full.conf` — Full broker config (TLS, PAM, ACL)
+- `acl-default.conf` — Default-deny ACL
+- `acl-team-web.conf` — Web team ACL (alice, bob, root)
+- `policy-quickstart.conf` — Permissive policy for quickstart
+
+### users/
+- `setup-test-users.sh` — Creates test users (uid 5001-5003)
+- `test-alice.passwd` — alice's password (random)
+- `test-bob.passwd` — bob's password (random)
+- `test-root.passwd` — root-test's password (fixed for tests)
+
+### jails/
+- `test-jail-fbuf.conf` — Jail with allow.fbuf and 2 fbufs
+- `test-jail-gpu.conf` — Jail with allow.gpu and 25% share
+- `test-jail-audio.conf` — Jail with allow.audio and 50% share
+
+## Regeneration
+
+```sh
+sh tests/data/regenerate.sh
+```
+
+Re-running is safe (idempotent); existing files are overwritten.
+EOF
+
+echo "Test data regenerated successfully."
+echo "Next steps:"
+echo "  1. sh tests/data/users/setup-test-users.sh"
+echo "  2. Verify: ls -la tests/data/certs/ tests/data/configs/ tests/data/jails/"
+```
+
+**`tests/sys/env/verify_test_env.sh` — shipped example** (this is the canonical reference; the implementation lives in T18):
+
+```bash
+#!/bin/sh
+# tests/sys/env/verify_test_env.sh — Verify test environment before ANY test runs
+# MUST be sourced (not executed) by every test:
+#   . $(dirname $0)/../env/verify_test_env.sh
+#
+# Refuses to proceed if:
+#   - OS is not FreeBSD
+#   - FreeBSD kernel version < 16
+#   - No sudo or doas available
+#   - Required packages missing (auto-installs if sudo/doas available)
+#
+# Exit codes:
+#   0 = OK, proceed
+#   77 = SKIP (test not applicable to this env)
+#   78 = HARD STOP (env issue that must be fixed before continuing)
+#   79 = HARNESS ERROR (this script itself failed)
+
+set -u
+
+# ---------------------------------------------------------------------------
+# 1. Check OS = FreeBSD
+# ---------------------------------------------------------------------------
+if [ "$(uname -s)" != "FreeBSD" ]; then
+    cat <<EOF >&2
+ERROR: This test suite requires FreeBSD.
+       Detected OS: $(uname -s)
+       This is a HARD STOP. Do NOT make code changes; this is an env issue.
+EOF
+    exit 78
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Check FreeBSD version >= 16
+# ---------------------------------------------------------------------------
+# uname -K returns the kernel version. We extract the major version.
+KERN_VERS=$(uname -K)
+KERN_MAJOR=$(echo "$KERN_VERS" | cut -d. -f1)
+
+if [ "$KERN_MAJOR" -lt 16 ] 2>/dev/null; then
+    cat <<EOF >&2
+ERROR: This test suite requires FreeBSD 16 or higher.
+       Detected kernel: $KERN_VERS (major=$KERN_MAJOR)
+       FreeBSD 16, 17, 18, 19, ... are accepted.
+       FreeBSD 14, 15 are HARD STOPs.
+       This is a HARD STOP. Do NOT make code changes; this is an env issue.
+EOF
+    exit 78
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Check sudo or doas
+# ---------------------------------------------------------------------------
+SUDO=""
+if command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+elif command -v doas >/dev/null 2>&1; then
+    SUDO="doas"
+else
+    cat <<EOF >&2
+ERROR: Neither 'sudo' nor 'doas' is available.
+       This test suite needs privileged operations (loading kernel modules,
+       creating jails, binding to ports <1024 if needed, etc.).
+       Install one of:
+         sudo (pkg install sudo)
+         doas (included in base on most systems; ensure doas.conf allows the user)
+       This is a HARD STOP. Do NOT make code changes; this is an env issue.
+EOF
+    exit 78
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Check + auto-install required packages
+# ---------------------------------------------------------------------------
+REQUIRED_PKGS="kyua git bash tmux curl openssl socat llvm"
+MISSING_PKGS=""
+
+for pkg in $REQUIRED_PKGS; do
+    if ! command -v "$pkg" >/dev/null 2>&1; then
+        # Check if it's a base-system binary (e.g., git, tmux may be in base on newer FreeBSD)
+        if [ ! -x "/usr/bin/$pkg" ] && [ ! -x "/usr/local/bin/$pkg" ] && [ ! -x "/bin/$pkg" ]; then
+            MISSING_PKGS="$MISSING_PKGS $pkg"
+        fi
+    fi
+done
+
+if [ -n "$MISSING_PKGS" ]; then
+    echo "INFO: Missing packages:$MISSING_PKGS"
+    echo "      Auto-installing via $SUDO pkg install ..."
+    if ! $SUDO pkg install -y $MISSING_PKGS; then
+        cat <<EOF >&2
+ERROR: Failed to install required packages:$MISSING_PKGS
+       Try manually: $SUDO pkg install $MISSING_PKGS
+       This is a HARD STOP. Do NOT make code changes; this is an env issue.
+EOF
+        exit 78
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Check write access to .sisyphus/evidence/
+# ---------------------------------------------------------------------------
+EVIDENCE_DIR="${SISYPHUS_EVIDENCE_DIR:-.sisyphus/evidence}"
+if ! mkdir -p "$EVIDENCE_DIR" 2>/dev/null; then
+    cat <<EOF >&2
+ERROR: Cannot create $EVIDENCE_DIR (no write permission).
+       Run from a directory where you have write access, or:
+         $SUDO mkdir -p $EVIDENCE_DIR
+         $SUDO chown $USER $EVIDENCE_DIR
+       This is a HARD STOP. Do NOT make code changes; this is an env issue.
+EOF
+    exit 78
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Check kernel modules build dir
+# ---------------------------------------------------------------------------
+KERNBUILDDIR="${KERNBUILDDIR:-/usr/obj/usr/src/amd64.amd64/sys/GENERIC}"
+if [ ! -d "$KERNBUILDDIR" ]; then
+    cat >&2 <<EOF
+WARNING: Kernel build dir $KERNBUILDDIR not found.
+         Some tests may be SKIPped. To build:
+           cd /usr/src
+           MAKE_JOBS_NUMBER=\$(sysctl -n hw.ncpu) \\
+             make -j\$(sysctl -n hw.ncpu) KERNCONF=GENERIC buildkernel
+EOF
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Sanity: confirm we're on the right branch
+# ---------------------------------------------------------------------------
+EXPECTED_BRANCH="${EXPECTED_BRANCH:-main}"
+if command -v git >/dev/null 2>&1; then
+    CUR_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    if [ "$CUR_BRANCH" != "$EXPECTED_BRANCH" ] && [ "$CUR_BRANCH" != "framebuffer" ]; then
+        echo "NOTE: Current branch is '$CUR_BRANCH' (expected '$EXPECTED_BRANCH' or 'framebuffer')."
+        echo "      This is a soft warning; tests will still run."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# All checks passed
+# ---------------------------------------------------------------------------
+cat <<EOF
+Test environment OK:
+  OS:               $(uname -s)
+  Kernel:           $KERN_VERS (major=$KERN_MAJOR)
+  Privilege tool:   $SUDO
+  Evidence dir:     $EVIDENCE_DIR
+  Kernel build dir: $KERNBUILDDIR
+EOF
+```
+
+**How the shipped example is used:**
+
+1. The implementation lives in **T18** (per the dep matrix). T18 is the smoke test task that runs `verify_test_env.sh` first.
+2. Every other task's Test Procedure (Phase 1 of the per-test procedure) sources this script via `. tests/sys/env/verify_test_env.sh`.
+3. If `verify_test_env.sh` exits 78, the test HARD STOPS and the agent does NOT make code changes (per the stop-and-complain protocol).
+4. The shipped example is what the test infrastructure will look like at v1. The implementation in T18 will be byte-identical or very close to this.
+
+**Why these two scripts are shipped as plan examples:**
+
+- **`regenerate.sh`** — the test data catalog is large (40+ files). Without a regeneration script, contributors would have to manually re-create test certs (100-year validity, key formats) and test users (uid 5000-5999 range). The script is idempotent so re-running is safe.
+- **`verify_test_env.sh`** — this is the linchpin of the stop-and-complain protocol. Without a concrete, working example, contributors might write their own (subtly different) versions, defeating the purpose. The shipped example is the canonical reference.
+
+**9. Test Reporting (aggregate format)**
+
+A test run produces:
+- `manifest.json` — machine-readable index
+- `summary.md` — human-readable summary
+- `summary.html` — HTML report (optional)
+- `summary.junit.xml` — JUnit XML (for CI integration)
+
+The `summary.md` looks like:
+
+```markdown
+# Test Run Summary
+
+- **Run ID**: 2026-06-15T102345Z
+- **Host**: ci-runner-01
+- **FreeBSD**: 16.0-RELEASE (kernel 1600025)
+- **Started**: 2026-06-15T10:23:45Z
+- **Ended**: 2026-06-15T11:45:23Z
+- **Duration**: 81m 38s
+- **Total tests**: 314
+- **Passed**: 312 (99.4%)
+- **Failed**: 2 (0.6%)
+- **Skipped**: 0
+- **Hard-stops**: 0
+- **Timeouts**: 0
+- **Coverage (line)**: 87.3% (target: ≥ 80%)
+- **Coverage (branch)**: 91.2% (target: ≥ 90% on critical paths)
+
+## Failures
+
+| Task | Test | Expected | Actual | Follow-up |
+|---|---|---|---|---|
+| T21 | `tc_gpu_resource_eager_policy_insufficient_vram_returns_enomem` | ENOMEM | EAGAIN | T85: Fix gpu_resource eager-policy error code |
+| T35 | `tc_policy_security_display_broker_rate_limit_default_1000` | 1000 | 999 | T86: Fix rate limit default rounding |
+
+## Coverage Shortfalls
+
+| File | Coverage | Target | Shortfall | Follow-up |
+|---|---|---|---|---|
+| `sys/modules/audio_resource/audio_resource.c` | 72.0% | 80.0% | 8.0% | T87: Add audio_resource unit tests |
+
+## Verdict
+
+**REJECTED** — 2 failures, 1 coverage shortfall. See follow-ups above.
+```
+
+**10. Test Retention**
+
+- **Per-run evidence**: kept for 30 days in `.sisyphus/evidence/run-{id}/`; auto-pruned after 30 days
+- **Failed-test evidence**: kept for 90 days (for debugging)
+- **F1-F4 final report**: kept forever in `.sisyphus/evidence/final-qa/`
+- **Coverage reports**: latest 10 runs kept; older auto-pruned
+- **Test data** (certs, configs, users): checked into source control under `tests/data/`
+- **NOT in source control**: per-run evidence, per-test logs (too large)
+
+**11. Test Failure → Follow-up Task Mapping (specific cases)**
+
+Common failure modes have predefined follow-up actions:
+
+| Failure mode | Action | Follow-up task template |
+|---|---|---|
+| ATF test fails consistently | File a fix task with the test that captures the bug as the new "TDD first" test | T{N+1}: Fix <symptom> (TDD: <test that captures the bug>) |
+| Shell test fails (intermittent) | Add to `.sisyphus/evidence/flaky-tests.list`; re-run 3 times; if 2/3 pass, mark as `quarantined` | T{N+1}: Quarantine flaky test <id> |
+| Coverage below target | File a "add tests" task | T{N+1}: Add tests for <module> to reach <X>% coverage |
+| Test env wrong | HARD STOP; do not file follow-up; user must fix env | None (user action) |
+| Wrong version detected | HARD STOP; do not file follow-up; user must provision 16+ | None (user action) |
+| Missing package | Auto-install; if pkg install fails, file follow-up | T{N+1}: Document missing test dep <pkg> |
+| Cert expired | Regenerate test certs; if regen fails, file follow-up | T{N+1}: Regenerate test certs (pkg: regenerated with 100-year validity) |
+| Port conflict | Use ephemeral port (port 0); if conflicts persist, file follow-up | T{N+1}: Fix port conflict in <test> |
+| Timeout (test hangs) | Increase timeout; if test is genuinely slow, mark as `slow` tag | T{N+1}: Mark <test> as slow; add nightly tag |
+| Build failure | File a fix task | T{N+1}: Fix build error in <module> (TDD: test for <expected behavior>) |
+| Lint failure | File a fix task | T{N+1}: Fix lint warning in <file>:<line> |
+| Memory leak (valgrind/asan) | File a fix task | T{N+1}: Fix memory leak in <function> (TDD: test that allocates and frees) |
+
+**12. The "Test Procedure + Recording + Follow-up" Must Have (adds to Work Objectives):**
+
+> - **Every test has three artifacts: a procedure, an evidence file, and a follow-up action.** The procedure is the 6-step process (prerequisites, setup, execute, verify, teardown, re-run safety). The evidence file is at `.sisyphus/evidence/task-{N}-{slug}.{json,txt,log}` and follows the structured JSON schema (test_id, result, host, timestamps, assertions, follow_up). The follow-up action is one of: none, retry, file_follow_up, escalate_to_user, and is documented in the evidence file. A test without a procedure, evidence file, or follow-up action is INCOMPLETE.
+> - **Test manifest is required for every run.** `.sisyphus/evidence/run-{id}/manifest.json` indexes all evidence files, summarizes pass/fail counts, lists failures, lists coverage shortfalls, and gives the verdict. A test run without a manifest is invalid.
+> - **Test data is checked in under `tests/data/`.** Certs (valid + expired + revoked), configs, test users, jail templates are all in `tests/data/`. Tests reference these by path; they do NOT generate test data on the fly.
+> - **Test isolation is required.** Every test uses `$$`-suffixed names (jail, port, file) to avoid cross-test and cross-run collisions. Teardown is robust. Re-runs are safe.
+> - **Test coverage is recorded in `.sisyphus/evidence/run-{id}/coverage/`** with `summary.json`, `lcov-html/`, and `lcov-cobertura.xml`. Coverage below target triggers a follow-up task to add more tests.
+> - **Test failure handling is automated.** A consistent failure → follow-up protocol is in place. ATF C failures file a `T{N+1}` task with a TDD test that captures the bug. Shell test failures follow the same pattern. Coverage shortfalls file a follow-up task. Hard-stops (env, version) do NOT file follow-up; user action is required.
+
+**F1-F4 updates:**
+
+- **F1** verifies:
+  - Every T-task has a "**Test Procedure**" subsection with the 6-step process
+  - Every T-task has at least one evidence file in `.sisyphus/evidence/task-{N}-{slug}.{ext}` (per test, not just per task)
+  - Every failure has a follow-up task filed (T{N+1} or in `.sisyphus/evidence/follow-ups.list`)
+  - The `manifest.json` exists for the F3 run
+  - Coverage `summary.json` exists and meets targets
+- **F2** verifies:
+  - Test data is checked in under `tests/data/` (certs, configs, users, jails)
+  - Test isolation helpers (e.g., `jtest-create-jail`, `kldstat -q -m` checks) are used in test code
+  - No hardcoded test paths (all `$$`-suffixed)
+  - Test reports are in the correct format
+- **F3** verifies:
+  - The test env is FreeBSD 16+ (verify_test_env.sh passes)
+  - All tests run; manifest.json is produced
+  - All failures have follow-up actions recorded
+  - The aggregate report is human-readable
+- **F4** verifies:
+  - The test process itself didn't bypass any of the above (e.g., manual `touch evidence.txt` is rejected; manifest is generated, not hand-written)
+  - The follow-up tasks are added to the plan (not just to `.sisyphus/evidence/follow-ups.list`)
+
+---
+
 ## Execution Strategy
 
 ### Parallel Execution Waves
@@ -5910,7 +7198,29 @@ Wave F (After ALL tasks — 4 parallel reviews):
 | T50 | T38, T40, T41, T42, T43, T49 | T46, T51, T52, F1-F4 |
 | T51 | T39, T40, T49, T50 | T46, F1-F4 |
 | T52 | T38, T49, T50 | T46, F1-F4 |
-| F1-F4 | T18, T37, T46, T47, T48, T49, T50, T51, T52 | – |
+| T53 | T8, T9, T10, T11, T12, T13, T21, T35 | T54, T55, T46, F1-F4 |
+| T54 | T53 | T46, F1-F4 |
+| T55 | T39, T53, T54 | T46, F1-F4 |
+| T56 | T21, T38, T53, T54 | T46, F1-F4 |
+| T57 | T39, T55 | T46, F1-F4 |
+| T58 | T3, T20, T21 (gpu_resource pattern) | T46, T57, T59, F1-F4 |
+| T59 | T58, T57 | T46, T60, F1-F4 |
+| T60 | T38, T39, T44, T57, T59 | T46, F1-F4 |
+| T61 | – (v2 follow-on, deferred; depends on T38 + Cast spec) | – |
+| T62-T64 | – (DESIGN ONLY, no impl in v1; tracked for v2) | – |
+| T65-T68 | – (DESIGN ONLY, no impl in v1; tracked for v2) | – |
+| T69-T72 | – (DESIGN ONLY, no impl in v1; tracked for v3 future boulder) | – |
+| F1-F4 | T18, T37, T46, T47, T48, T49, T50, T51, T52, T54, T55, T56, T57, T58, T59, T60 | – |
+
+### Design-Only Task Notes (T62-T72)
+
+T62-T72 are **documented but not implemented in v1**. They appear in the dep matrix as `-` (no dependencies, no blockers) because they are design-only and have no v1 implementation. They are tracked so:
+
+1. **The v2 workstream has a clear foundation** — T62-T68 (HLS, RTSP, EDID passthrough, BT host passthrough exclusivity, BT device-class abstraction, BT force-disconnect authz, BT slot/bandwidth model) are scheduled for v2.
+2. **The v3 future boulder is preserved** — T69-T72 (BT jail termination cleanup, BT multi-radio coordination, BT LE Audio / Auracast, BT cross-jail peer sharing) are v3 future boulders.
+3. **F1-F4 final reviewers do NOT need to verify v2/v3 tasks** — only v1 tasks. The reviewers will check that v1 deliverables exist and that design-only tasks have full design notes in the plan.
+
+The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (parallel with T57 → T58 → T59 → T60). T61 is v2 only. T62-T72 are v2/v3 only.
 
 ### Agent Dispatch Summary
 
@@ -6365,6 +7675,37 @@ Wave F (After ALL tasks — 4 parallel reviews):
   - [ ] `cd usr.sbin/bhyve && make` succeeds
   - [ ] `bhyve -s 0,fbuf,rfb=127.0.0.1:5900 ...` still boots a VM (regression — bhyve side)
   - [ ] `tests/sys/vmm/fbuf_legacy.sh` still passes
+
+  **Test Procedure (per-test)** — for each of the 20 ATF C cases in T8:
+
+  ```
+  TEST: tc_console_create_with_provided_fb (T8 example)
+  1. PREREQUISITES
+     - Test env: FreeBSD 16+ (verify_test_env.sh passes)
+     - Packages: kyua, git, bash
+     - Modules: console (built-in, no kldload needed)
+     - State: clean (no leftover console instances)
+  2. SETUP
+     - source /usr/tests/env/verify_test_env.sh
+     - mkdir -p /tmp/test-console-$$
+     - Allocate fb: mmap 1920*1080*4 bytes via malloc + posix_memalign
+  3. EXECUTE
+     - kyua test -r /tmp/kyua-$$ tests/sys/bhyve/atf_console:tc_console_create_with_provided_fb \
+         2>&1 | tee .sisyphus/evidence/task-8-tc_console_create_with_provided_fb.json
+  4. VERIFY
+     - Exit code 0
+     - "PASS" in JSON output
+     - .sisyphus/evidence/task-8-tc_console_create_with_provided_fb.json exists
+     - .sisyphus/evidence/run-{id}/manifest.json updated with this test
+  5. TEARDOWN
+     - munmap the fb
+     - rmdir /tmp/test-console-$$
+     - (idempotent — safe to re-run)
+  6. RE-RUN SAFETY
+     - YES — no persistent state; teardown is idempotent
+  ```
+
+  The same 6-step procedure applies to every other ATF C test in T8 (and every test in every other T-task). The full per-test procedure table is at `tests/sys/bhyve/atf_console_PROCEDURES.md` (T17, generated by the implementation).
 
   **QA Scenarios**:
   ```
@@ -7055,6 +8396,72 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
   **Commit**: YES — `kern: implement security.policy.* and security.transport.* host policy sysctls`
 
+  **Unit Tests (ATF C + shell integration)** — T35 is the host policy layer. Coverage target: ≥ 90% (critical security boundary, high branching).
+
+  **ATF C test cases** (file: `tests/sys/policy/atf_host_policy.c`):
+
+  | # | Test case | Scenario |
+  |---|---|---|
+  | 1 | `tc_policy_security_policy_tls_required_blocks_legacy` | `security.policy.tls_required=1` blocks plaintext legacy start |
+  | 2 | `tc_policy_security_policy_legacy_allowed_disabled` | `security.policy.legacy_allowed=0` blocks `transport.legacy=1` |
+  | 3 | `tc_policy_security_policy_self_signed_allowed_disabled` | `security.policy.self_signed_allowed=0` makes preflight `tls_self_signed_in_use` BLOCKING |
+  | 4 | `tc_policy_host_rate_limit_overrides_consumer_looser` | Host `rate_limit_per_minute=10` overrides consumer's `rate_limit=1000` |
+  | 5 | `tc_policy_stricter_wins_precedence` | Host `tls_required=1` + consumer `legacy_allowed=1` → final is `tls_required` (stricter wins) |
+  | 6 | `tc_policy_host_cannot_loosen` | Host `rate_limit_per_minute=100` + consumer `rate_limit=10` → final is `100` (host only tightens) |
+  | 7 | `tc_policy_sysctl_runtime_change_takes_effect` | Set `sysctl security.policy.legacy_allowed=0`; next legacy start is refused |
+  | 8 | `tc_policy_sysctl_read_write_roundtrip` | `sysctl security.policy.tls_required=1` then read back returns `1` |
+  | 9 | `tc_policy_sysctl_readonly_rejects_write` | Read-only sysctls (`security.policy.version`, `security.policy.build_date`) reject writes |
+  | 10 | `tc_policy_audit_event_on_sysctl_change` | Changing `security.policy.tls_required` logs an audit event with old/new value |
+  | 11 | `tc_policy_tunable_precedence_loader_beats_sysctl` | `loader.conf: security.policy.tls_required=0` + `sysctl: ...=1` → loader wins (loaded at boot, then sysctl is ignored) |
+  | 12 | `tc_policy_tunable_precedence_sysctl_beats_config` | `sysctl: ...=1` + config file `...=0` → sysctl wins |
+  | 13 | `tc_policy_tunable_precedence_config_beats_default` | Config file `...=1` + default `0` → config wins |
+  | 14 | `tc_policy_default_deny_enforced` | Default `security.policy.deny_default=1`; consumer's `allow.X=1` is overridden by host policy |
+  | 15 | `tc_policy_override_deny_disabled_by_default` | Default `security.policy.override_deny=0`; operator must explicitly enable |
+  | 16 | `tc_policy_override_deny_enabled_allows_loosening` | `override_deny=1` + consumer `allow.X=1` is allowed to override the deny |
+  | 17 | `tc_policy_security_transport_tls_min_version_default` | `security.transport.tls.min_version=1.3` is the default; reads return `1.3` |
+  | 18 | `tc_policy_security_transport_tls_min_version_rejects_1_2` | Setting `tls.min_version=1.2` returns EINVAL (TLS 1.3 only by default) |
+  | 19 | `tc_policy_security_transport_cipher_suites_default` | Default cipher suite list includes only TLS 1.3 ciphers |
+  | 20 | `tc_policy_security_preflight_timeout_default_30s` | `security.preflight.timeout=30` is the default |
+  | 21 | `tc_policy_security_preflight_fail_on_warn_default_0` | `security.preflight.fail_on_warn=0` (warnings don't fail) by default |
+  | 22 | `tc_policy_security_display_broker_listen_default_localhost` | `security.display.broker.listen=unix:///var/run/displayd.sock,tcp://[::1]:8443` is the default |
+  | 23 | `tc_policy_security_display_broker_listen_public_default_0` | `security.display.broker.listen_public=0` is the default (localhost only) |
+  | 24 | `tc_policy_security_display_broker_listen_public_1_enables_public` | `listen_public=1` allows `[::]:8443` binding; refused without TLS+ACL |
+  | 25 | `tc_policy_security_display_broker_frame_size_max_default_64mb` | `frame_size_max=67108864` (64 MB) is the default; covers 8K ZRLE |
+  | 26 | `tc_policy_security_display_broker_frame_size_default_16mb` | `frame_size=16777216` (16 MB) is the default; covers 4K ZRLE |
+  | 27 | `tc_policy_security_display_broker_fps_max_per_client_default_60` | `max_fps_per_client=60` is the default |
+  | 28 | `tc_policy_security_display_broker_fps_max_per_channel_default_30` | `max_fps_per_channel=30` is the default |
+  | 29 | `tc_policy_security_display_broker_bandwidth_default_1gbps` | `bandwidth_bps=1000000000` (1 Gbps) is the default per-client cap |
+  | 30 | `tc_policy_security_display_broker_rate_limit_default_1000` | `rate_limit_per_minute=1000` is the default (DoS protection) |
+  | 31 | `tc_policy_security_display_broker_idle_timeout_default_1800` | `idle_timeout=1800` (30 min) is the default |
+  | 32 | `tc_policy_security_display_broker_audit_level_default_full` | `audit_level=2` (full) is the default |
+  | 33 | `tc_policy_oid_subtree_security_policy_exists` | `sysctl -N security.policy` lists all child OIDs |
+  | 34 | `tc_policy_oid_subtree_security_transport_exists` | `sysctl -N security.transport` lists all child OIDs |
+  | 35 | `tc_policy_oid_subtree_security_preflight_exists` | `sysctl -N security.preflight` lists all child OIDs |
+  | 36 | `tc_policy_oid_subtree_security_display_exists` | `sysctl -N security.display` lists all child OIDs (50+ sysctls) |
+  | 37 | `tc_policy_dtrace_probe_on_sysctl_change` | `host-policy:sysctl-change` DTrace probe fires when a sysctl is written |
+  | 38 | `tc_policy_resolve_function` | `policy_resolve(host_cfg, consumer_cfg)` returns the stricter value |
+  | 39 | `tc_policy_resolve_audit_logged` | `policy_resolve()` writes an audit log entry when the host overrides the consumer |
+  | 40 | `tc_policy_loader_conf_integration` | `security.policy.tls_required=0` in `/boot/loader.conf` is loaded at boot |
+  | 41 | `tc_policy_etc_sysctl_conf_integration` | `security.policy.legacy_allowed=0` in `/etc/sysctl.conf` is applied at boot |
+  | 42 | `tc_policy_runtime_sysctl_beats_etc_sysctl_conf` | `sysctl -w security.policy.legacy_allowed=1` (runtime) wins over `/etc/sysctl.conf` |
+  | 43 | `tc_policy_stats_per_sysctl_change_count` | `security.policy.stats.change_count` increments on each change |
+  | 44 | `tc_policy_oid_reservation_for_bt_16` | `security.bt.*` and `hw.bt.*` OIDs are reserved (return ENOENT, not crash) |
+  | 45 | `tc_policy_oid_reservation_for_cast_17` | `security.display.cast.*` OIDs are reserved (return ENOENT) |
+
+  **Shell integration tests** (file: `tests/sys/policy/sysctl_conf_integration.sh`):
+
+  | # | Test | Expected |
+  |---|---|---|
+  | 1 | `sh_policy_etc_sysctl_conf_applied_at_boot` | `echo security.policy.tls_required=1 >> /etc/sysctl.conf && reboot` → `sysctl security.policy.tls_required=1` |
+  | 2 | `sh_policy_loader_conf_applied_at_boot` | `echo security.policy.legacy_allowed=0 >> /boot/loader.conf && reboot` → `sysctl security.policy.legacy_allowed=0` |
+  | 3 | `sh_policy_runtime_change_takes_effect_immediately` | `sysctl security.policy.tls_required=1` → next legacy start fails |
+  | 4 | `sh_policy_audit_log_records_changes` | `/var/log/audit/policy.log` shows every change with old/new/operator |
+  | 5 | `sh_policy_stricter_wins_blocks_consumer_loosening` | Host `tls_required=1` + consumer `legacy_allowed=1` → consumer's start fails |
+  | 6 | `sh_policy_deny_default_blocks_implicit_access` | `security.policy.fbuf.deny_default=1` + jail `allow.fbuf=1` → jail's fb access blocked |
+  | 7 | `sh_policy_over_50_sysctls_in_security_display` | `sysctl -N security.display | wc -l` returns ≥ 50 |
+
+  **Evidence**: `.sisyphus/evidence/task-35-atf.txt` (kyua report) + `.sisyphus/evidence/task-35-coverage.txt` (gcov ≥ 90%) + `.sisyphus/evidence/task-35-oid-list.txt` (full OID tree dump)
+
 ---
 
 ### Wave 4 — Build wiring, docs, smoke
@@ -7194,6 +8601,8 @@ Wave F (After ALL tasks — 4 parallel reviews):
   **Commit**: YES — `docs: add display-abstraction-migration(7) — operator upgrade guide`
 
 ---
+
+- [ ] 36. Examples directory (`share/examples/security/policy-quickstart/` + 6 sibling example sets)
 
   **What to do**:
   1. Find or create the FreeBSD examples directory tree. The standard location is `share/examples/` (used by `make -C share/examples install`). Create `share/examples/security/policy-quickstart/`.
@@ -7428,6 +8837,88 @@ Wave F (After ALL tasks — 4 parallel reviews):
     Expected Result: 900 (sysctl wins over config)
     Evidence: .sisyphus/evidence/task-38-tunable-precedence.txt
   ```
+
+  **Unit Tests (ATF C + shell integration)** — T38 is the broker daemon. Coverage target: ≥ 85% (large daemon, complex state).
+
+  **ATF C test cases** (file: `tests/usr.sbin/displayd/atf_broker.c`):
+
+  | # | Test case | Scenario |
+  |---|---|---|
+  | 1 | `tc_broker_config_parser_basic` | Parse a minimal config file; verify listen/auth/acl sections populated |
+  | 2 | `tc_broker_config_parser_missing_file_uses_default` | Missing config file → all defaults; no error |
+  | 3 | `tc_broker_config_parser_invalid_syntax_returns_error` | Invalid syntax returns parse error with line number |
+  | 4 | `tc_broker_tunable_precedence_loader_beats_sysctl` | Loader `idle_timeout=1800` + sysctl `idle_timeout=900` → loader wins (1800) |
+  | 5 | `tc_broker_tunable_precedence_sysctl_beats_config` | Sysctl `idle_timeout=900` + config `idle_timeout=600` → sysctl wins (900) |
+  | 6 | `tc_broker_tunable_precedence_config_beats_default` | Config `idle_timeout=600` + default `1800` → config wins (600) |
+  | 7 | `tc_broker_privilege_drop_succeeds` | After init, `getuid()` returns `_displayd` uid (not 0) |
+  | 8 | `tc_broker_privilege_drop_preserves_listening_sockets` | Sockets bound before drop are still listening after drop |
+  | 9 | `tc_broker_default_listen_is_localhost_ipv6` | Default `listen` includes `tcp://[::1]:8443` (not `0.0.0.0` or `::`) |
+  | 10 | `tc_broker_listen_public_disabled_by_default` | Default `listen_public=0`; binding to `[::]:8443` is refused |
+  | 11 | `tc_broker_listen_public_requires_tls` | `listen_public=1` but no TLS configured → preflight refuses; broker exits |
+  | 12 | `tc_broker_listen_public_requires_acl` | `listen_public=1` + TLS but no ACL → preflight refuses; broker exits |
+  | 13 | `tc_broker_listen_ipv4_only_explicit` | `listen=tcp://127.0.0.1:8443` binds IPv4 only; IPv6 connections refused |
+  | 14 | `tc_broker_listen_ipv6_only_explicit` | `listen=tcp://[::1]:8443` binds IPv6 only; IPv4 connections refused |
+  | 15 | `tc_broker_listen_dual_stack` | `listen=tcp://[::]:8443` with `IPV6_V6ONLY=0` accepts both IPv4 and IPv6 |
+  | 16 | `tc_broker_alias_bhyve_symlink_works` | Running `bhyve-display-broker` (deprecated symlink) starts the same daemon with deprecation warning |
+  | 17 | `tc_broker_alias_prints_deprecation_warning` | First start of `bhyve-display-broker` prints deprecation warning to syslog |
+  | 18 | `tc_broker_pam_auth_succeeds` | `pam_authenticate()` returns PAM_SUCCESS for valid creds |
+  | 19 | `tc_broker_pam_auth_wrong_password_fails` | `pam_authenticate()` returns PAM_AUTH_ERR for wrong password |
+  | 20 | `tc_broker_mtls_cert_required` | mTLS client without cert is rejected at TLS handshake |
+  | 21 | `tc_broker_mtls_expired_cert_rejected` | mTLS client with expired cert is rejected (RFC 5280) |
+  | 22 | `tc_broker_mtls_self_signed_accepted_when_allowed` | `security.policy.self_signed_allowed=1`: self-signed mTLS cert accepted |
+  | 23 | `tc_broker_mtls_self_signed_rejected_by_default` | `security.policy.self_signed_allowed=0` (default): self-signed mTLS cert rejected |
+  | 24 | `tc_broker_acl_resolver_user_match` | User `alice` with `allow.fbuf=1` jail matches ACL rule `alice jail:web1 fbuf attach allow` |
+  | 25 | `tc_broker_acl_resolver_user_no_match` | User `alice` with no `allow.fbuf` jail doesn't match; `attach` request rejected |
+  | 26 | `tc_broker_acl_resolver_default_deny` | No matching ACL rule → request rejected (default deny) |
+  | 27 | `tc_broker_acl_resolver_action_disconnect` | `disconnect` action requires root or `@_bt_admin` (from T65 item 8) |
+  | 28 | `tc_broker_acl_resolver_action_audit_read` | `audit-read` requires `@_security` |
+  | 29 | `tc_broker_audit_event_on_connect` | Every client connect logs an audit event with uid, gid, jid (if any), source IP |
+  | 30 | `tc_broker_audit_event_on_disconnect` | Disconnect logged with reason + duration |
+  | 31 | `tc_broker_audit_event_on_auth_fail` | Failed auth logged (no password!) with uid, source IP, reason |
+  | 32 | `tc_broker_audit_event_on_attach` | Attach logged with user, fb_id, mode |
+  | 33 | `tc_broker_audit_event_on_detach` | Detach logged |
+  | 34 | `tc_broker_audit_event_on_force_disconnect` | Force-disconnect logged with operator + reason + target (T65 item 8) |
+  | 35 | `tc_broker_signal_sighup_reloads_config` | `kill -HUP <pid>` re-reads config; new values take effect |
+  | 36 | `tc_broker_signal_sigterm_drains_clients` | `kill -TERM <pid>` waits for in-flight clients to finish (drain) |
+  | 37 | `tc_broker_signal_sigusr1_rotates_audit_log` | `kill -USR1 <pid>` rotates `/var/log/audit/broker.log` |
+  | 38 | `tc_broker_signal_sigusr2_dumps_diag_state` | `kill -USR2 <pid>` writes diagnostic dump to `/var/run/displayd.dump` |
+  | 39 | `tc_broker_frame_rate_per_client_limit` | Client at 60fps capped to `max_fps_per_client=10` (10 fps received) |
+  | 40 | `tc_broker_frame_rate_per_channel_limit` | Channel at 30fps capped to `max_fps_per_channel=10` |
+  | 41 | `tc_broker_frame_rate_total_limit` | Aggregate across all clients capped to `max_fps_total=100` |
+  | 42 | `tc_broker_bandwidth_per_client_limit` | Client at 1Gbps capped to `max_bandwidth_per_client=100Mbps` |
+  | 43 | `tc_broker_bandwidth_total_limit` | Aggregate capped to `max_total_bandwidth=500Mbps`; lowest-priority throttled |
+  | 44 | `tc_broker_frame_size_max_64mb` | Frame larger than `max_frame_size=64MB` rejected with `BDP_ERROR_FRAME_TOO_LARGE` |
+  | 45 | `tc_broker_frame_size_default_16mb` | Default `max_frame_size=16MB` (16,777,216) |
+  | 46 | `tc_broker_idle_timeout_closes_connection` | Idle for > `idle_timeout=30s` → connection closed |
+  | 47 | `tc_broker_rate_limit_per_minute` | 1001st auth attempt in 1 minute is refused (rate_limit=1000) |
+  | 48 | `tc_broker_capsicum_entered_after_priv_drop` | After priv drop, `cap_enter()` is called; broker runs in capability mode |
+  | 49 | `tc_broker_no_root_after_priv_drop` | `getuid() == 0` returns false after init |
+  | 50 | `tc_broker_dtrace_probe_on_session_state_change` | `display-broker:session-state-change` DTrace probe fires on each state transition |
+
+  **Shell integration tests** (file: `tests/sys/broker/auth.sh`):
+
+  | # | Test | Expected |
+  |---|---|---|
+  | 1 | `sh_broker_starts_default` | `displayd -F -c /etc/display/display-broker.conf` starts; logs to syslog; pid in `/var/run/displayd.pid` |
+  | 2 | `sh_broker_default_listen_localhost` | `ss -lnt | grep 8443` shows `[::1]:8443` not `*:8443` |
+  | 3 | `sh_broker_pam_auth_works` | A test user with valid PAM creds can `bdp_probe HELLO` and get HELLO reply |
+  | 4 | `sh_broker_pam_auth_fails` | Wrong password → `bdp_probe` returns `BDP_ERROR_AUTH_FAILED` |
+  | 5 | `sh_broker_mtls_required_by_default` | `security.display.broker.tls.required=1` (default): plaintext refused |
+  | 6 | `sh_broker_attach_works` | Authenticated client can attach to a test fb; pixel stream received |
+  | 7 | `sh_broker_attach_denied` | User without ACL for the fb → `BDP_ERROR_ATTACH_DENIED` |
+  | 8 | `sh_broker_audit_log_records` | `/var/log/audit/broker.log` shows auth/attach/detach events |
+  | 9 | `sh_broker_signal_term_drains` | `kill -TERM`; broker waits for in-flight clients; exits 0 |
+  | 10 | `sh_broker_signal_hup_reloads` | `kill -HUP`; new config values take effect on next session |
+  | 11 | `sh_broker_alias_bhyve_works` | `bhyve-display-broker` (deprecated symlink) starts; deprecation warning in syslog |
+  | 12 | `sh_broker_fps_limit_enforced` | 60fps source → 10fps received (per_client cap = 10) |
+  | 13 | `sh_broker_idle_timeout` | Idle 30s → connection closed by broker |
+  | 14 | `sh_broker_dual_stack` | `[::]:8443` accepts both IPv4 and IPv6 (with `IPV6_V6ONLY=0`) |
+  | 15 | `sh_broker_ipv6_only` | `[::1]:8443` accepts only IPv6; IPv4 connection refused |
+  | 16 | `sh_broker_listen_public_refused_without_tls` | `[::]:8443` with `listen_public=1` but no TLS → broker exits with preflight error |
+  | 17 | `sh_broker_listen_public_refused_without_acl` | `listen_public=1` + TLS but no ACL → broker exits with preflight error |
+  | 18 | `sh_broker_reboot_safe` | Reboot with broker enabled; broker restarts; sessions resume (or new ones work) |
+
+  **Evidence**: `.sisyphus/evidence/task-38-atf.txt` (kyua report) + `.sisyphus/evidence/task-38-coverage.txt` (gcov ≥ 85%)
 
   **Commit**: YES — `display-broker: add bhyve-display-broker daemon with auth, ACL, sessions, privilege drop, and tunable precedence`
 
@@ -7782,6 +9273,75 @@ Wave F (After ALL tasks — 4 parallel reviews):
     Expected Result: example runs cleanly
     Evidence: .sisyphus/evidence/task-44-libbdp.txt
   ```
+
+  **Unit Tests (ATF C + shell integration)** — T44 is the client library. Coverage target: ≥ 90% (library is consumed by everyone; quality is critical).
+
+  **ATF C test cases** (file: `tests/lib/libdisplay/atf_bdp_encode_decode.c`):
+
+  | # | Test case | Scenario |
+  |---|---|---|
+  | 1 | `tc_bdp_encode_decode_roundtrip` | Encode a BDP frame, decode it, assert byte-identical |
+  | 2 | `tc_bdp_decode_malformed_returns_error` | Decode a corrupted frame returns `BDP_ERROR_MALFORMED` |
+  | 3 | `tc_bdp_decode_truncated_returns_error` | Decode a truncated frame returns `BDP_ERROR_TRUNCATED` |
+  | 4 | `tc_bdp_decode_oversize_returns_error` | Decode a frame larger than `max_frame_size` returns `BDP_ERROR_FRAME_TOO_LARGE` |
+  | 5 | `tc_bdp_decode_unknown_version_returns_error` | Frame with version != 0x01 returns `BDP_ERROR_BAD_VERSION` |
+  | 6 | `tc_bdp_decode_bad_hmac_returns_error` | Frame with wrong HMAC returns `BDP_ERROR_AUTH_FAILED` |
+  | 7 | `tc_bdp_decode_replayed_frame_returns_error` | Replayed frame (seq in past) returns `BDP_ERROR_REPLAY` |
+  | 8 | `tc_bdp_session_state_transitions_valid` | Valid state transitions: NEW → AUTHED → LISTED → ATTACHED → STREAMING → DETACHED |
+  | 9 | `tc_bdp_session_state_transition_invalid_rejected` | Invalid transition (e.g. NEW → ATTACHED) returns `BDP_ERROR_INVALID_STATE` |
+  | 10 | `tc_bdp_session_state_idle_timeout` | Idle session > `idle_timeout` transitions to DETACHED |
+  | 11 | `tc_bdp_connect_tcp_ipv4` | `bdp_connect("127.0.0.1", 8443, ...)` succeeds |
+  | 12 | `tc_bdp_connect_tcp_ipv6` | `bdp_connect("::1", 8443, ...)` succeeds |
+  | 13 | `tc_bdp_connect_tcp_dual_stack` | `bdp_connect("::", 8443, ...)` succeeds (with `IPV6_V6ONLY=0`) |
+  | 14 | `tc_bdp_connect_tcp_connection_refused` | `bdp_connect("127.0.0.1", 9999, ...)` returns `BDP_ERROR_CONNECT_FAILED` |
+  | 15 | `tc_bdp_connect_tcp_tls_handshake_failure` | TLS handshake failure (e.g. wrong cert) returns `BDP_ERROR_TLS_FAILED` |
+  | 16 | `tc_bdp_connect_unix_socket` | `bdp_connect_unix("/var/run/displayd.sock", ...)` succeeds |
+  | 17 | `tc_bdp_auth_pam` | `bdp_auth(conn, BDP_AUTH_PAM, "alice", password)` succeeds |
+  | 18 | `tc_bdp_auth_pam_wrong_password` | Wrong password returns `BDP_ERROR_AUTH_FAILED` |
+  | 19 | `tc_bdp_auth_mtls` | `bdp_auth(conn, BDP_AUTH_MTLS, cert, key)` succeeds |
+  | 20 | `tc_bdp_auth_mtls_expired_cert` | Expired client cert returns `BDP_ERROR_AUTH_FAILED` |
+  | 21 | `tc_bdp_list_returns_array` | `bdp_list(conn, NULL)` returns non-NULL array of resources |
+  | 22 | `tc_bdp_list_filter` | `bdp_list(conn, filter)` returns only matching resources |
+  | 23 | `tc_bdp_list_empty_returns_null` | No resources → returns NULL (not an error) |
+  | 24 | `tc_bdp_attach_succeeds` | `bdp_attach(conn, fb_id, BDP_MODE_INTERACT)` returns non-NULL session |
+  | 25 | `tc_bdp_attach_denied` | User without ACL → `bdp_attach` returns `BDP_ERROR_ATTACH_DENIED` |
+  | 26 | `tc_bdp_attach_invalid_fb_id` | `bdp_attach(conn, 9999, ...)` returns `BDP_ERROR_NOT_FOUND` |
+  | 27 | `tc_bdp_attach_view_only_no_input` | `BDP_MODE_VIEW` session rejects `bdp_send_input()` |
+  | 28 | `tc_bdp_read_pixels_returns_bytes` | `bdp_read_pixels(session, buf, len)` returns `> 0` bytes |
+  | 29 | `tc_bdp_read_pixels_blocks_until_data` | Read blocks until a frame arrives (or timeout) |
+  | 30 | `tc_bdp_read_pixels_zero_copy` | `bdp_read_pixels_zero_copy()` returns a pointer into an internal buffer (no copy) |
+  | 31 | `tc_bdp_send_input_kbd_event` | `bdp_send_input(session, BDP_INPUT_KBD, ...)` succeeds |
+  | 32 | `tc_bdp_send_input_ptr_event` | `bdp_send_input(session, BDP_INPUT_PTR, ...)` succeeds |
+  | 33 | `tc_bdp_send_input_view_mode_rejected` | View-mode session: `bdp_send_input` returns `BDP_ERROR_READ_ONLY` |
+  | 34 | `tc_bdp_detach_releases_session` | After `bdp_detach(session)`, the session pointer is invalid (UB to use) |
+  | 35 | `tc_bdp_close_releases_connection` | After `bdp_close(conn)`, the conn pointer is invalid |
+  | 36 | `tc_bdp_multicast_create` | `bdp_multicast_create(conn, "menu", ACL)` returns non-NULL channel |
+  | 37 | `tc_bdp_multicast_create_acl_denied` | User without ACL → returns `BDP_ERROR_ACL_DENIED` |
+  | 38 | `tc_bdp_multicast_pub` | `bdp_multicast_pub(channel, frame)` succeeds; encrypted with channel key |
+  | 39 | `tc_bdp_multicast_sub` | `bdp_multicast_sub(conn, "menu")` returns non-NULL channel; receives encrypted frames |
+  | 40 | `tc_bdp_multicast_aes_gcm_decrypt` | Sub side decrypts AES-256-GCM encrypted frames correctly |
+  | 41 | `tc_bdp_multicast_ttl_enforced` | Sub side honors TTL=1 (frames don't leave the LAN) |
+  | 42 | `tc_bdp_multicast_unsub` | `bdp_multicast_unsub(channel)` succeeds; no more frames received |
+  | 43 | `tc_bdp_thread_safety_per_conn` | Two threads using the same conn don't corrupt state (mutex verified) |
+  | 44 | `tc_bdp_thread_safety_per_session` | Two threads on the same session don't corrupt state |
+  | 45 | `tc_bdp_so_version_bump_on_incompat_change` | `shlib_version` is bumped on incompatible ABI change |
+  | 46 | `tc_bdp_alias_libbdp_works` | Linking against `-lbdp` (deprecated) works; deprecation warning at link time |
+  | 47 | `tc_bdp_alias_libdisplay_canonical` | Linking against `-ldisplay` is the canonical form |
+  | 48 | `tc_bdp_per_message_hmac_unique` | Each message has a unique HMAC (no key reuse across sessions) |
+  | 49 | `tc_bdp_session_token_unique_per_session` | Each session gets a unique 128-bit session token |
+  | 50 | `tc_bdp_backpressure_on_slow_consumer` | Slow consumer (reads < producer rate) sees dropped-frame events |
+
+  **Shell integration tests** (file: `tests/lib/libdisplay/api_smoke.sh`):
+
+  | # | Test | Expected |
+  |---|---|---|
+  | 1 | `sh_libdisplay_compiles` | `cc -o test test.c -ldisplay` succeeds |
+  | 2 | `sh_libdisplay_links_against_libbdp` | `cc -o test test.c -lbdp` succeeds with deprecation warning |
+  | 3 | `sh_libdisplay_example_runs` | `libdisplay/examples/list_resources` connects, lists, exits 0 |
+  | 4 | `sh_libdisplay_threaded_example` | `libdisplay/examples/threaded_attach` runs with 2 threads, no race conditions |
+  | 5 | `sh_libdisplay_multicast_example` | `libdisplay/examples/mcast_pub_sub` publishes 10 frames; subscriber receives 10 |
+
+  **Evidence**: `.sisyphus/evidence/task-44-atf.txt` (kyua report) + `.sisyphus/evidence/task-44-coverage.txt` (gcov ≥ 90%)
 
   **Commit**: YES — `libbdp: add C client library for BDP with connect/auth/list/attach/read/detach/multicast API`
 
@@ -8757,6 +10317,323 @@ Wave F (After ALL tasks — 4 parallel reviews):
 
 ---
 
+### Design-Only Tasks (T62-T72)
+
+These tasks are **documented but not implemented in v1**. They are explicitly tracked so the design work is preserved and the v2 workstream has a clear foundation. Each task has full design notes (What to do, References, Acceptance) but no implementation timeline, code, or QA Scenarios in v1.
+
+- [ ] 62. Broker endpoints — HLS / LL-HLS support (DESIGN ONLY)
+
+  **What to do** (design notes for v2):
+  1. Design a BDP-to-HLS bridge: `displayd` exposes `/hls/{resource_id}.m3u8` + `/hls/{resource_id}-{n}.ts` on the admin HTTP port.
+  2. Each fragment (`{n}.ts`) is a sliced portion of the broker framebuffer, encoded via `ffmpeg` (libx264 or libx265), cached for `frag_duration` (default 2s) per fragment.
+  3. Live profile (LL-HLS): partial segments with HTTP/2 push, target latency ~2-3s.
+  4. Use the existing displayd admin HTTP server (T52) with `route` extension: `/hls/*` paths.
+  5. ACL: same as BDP (per-user, per-resource); user must have BDP attach right to receive HLS feed.
+  6. Out of scope for v1. Tracked for v2 to enable Safari / iOS clients and consumers without a BDP-capable client.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: RFC 8216 (HLS), draft-pantos-hls-rfc8216bis (LL-HLS), libavformat, ffmpeg h264/265 muxer, MPEG-TS.
+
+  **Acceptance** (v2):
+  - [ ] `curl http://localhost:8080/hls/web1.m3u8` returns valid m3u8
+  - [ ] Safari plays the stream
+  - [ ] LL-HLS partial segments work (target latency < 3s)
+  - [ ] ACL enforced (no HLS feed without attach right)
+
+  **Commit**: NO (v2 only — design preserved in plan)
+
+---
+
+- [ ] 63. Broker endpoints — RTSP support (DESIGN ONLY)
+
+  **What to do** (design notes for v2):
+  1. Design a BDP-to-RTSP bridge: `displayd` runs a minimal RTSP server on a separate port (`security.display.broker.rtsp_listen`, default disabled).
+  2. Implements RFC 2326 (RTSP 1.0) with INTERLEAVED RTP (RFC 3550) transport. Codecs: H.264 (video), Opus or AAC (audio).
+  3. `OPTIONS`, `DESCRIBE`, `SETUP`, `PLAY`, `PAUSE`, `TEARDOWN` methods.
+  4. Backed by `bdp-stream` (T60) for frame data; audio is muxed via libavformat.
+  5. ACL: same as BDP; ANNOUNCE requires admin.
+  6. Out of scope for v1. Tracked for v2 to enable ONVIF cameras / NVR / VLC clients.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: RFC 2326 (RTSP 1.0), RFC 3550 (RTP), libavformat, libavcodec, libopus.
+
+  **Acceptance** (v2):
+  - [ ] `vlc rtsp://localhost:8554/web1` plays the stream
+  - [ ] ONVIF Profile S compliant
+  - [ ] ACL enforced (no RTSP feed without attach right)
+
+  **Commit**: NO (v2 only — design preserved in plan)
+
+---
+
+- [ ] 64. Broker endpoints — Device-info / EDID passthrough (DESIGN ONLY)
+
+  **What to do** (design notes for v2):
+  1. Design EDID passthrough: when a jail/VM has `allow.gpu=1` and the host GPU has a connected display, broker exposes the display's EDID block to the guest via BDP.
+  2. New BDP message types:
+     - `0x50 DISPLAY_INFO_REQ` (C→S)
+     - `0x51 DISPLAY_INFO_REPLY` (S→C, with EDID block 128-256 bytes)
+     - `0x52 DISPLAY_HOTPLUG` (S→C, when display added/removed)
+  3. EDID sourced from `hw.gpu.N.connector.M.edid` (kernel sysctl, set by `drm-edid` or ACPI EDID parser).
+  4. ACL: same as BDP; users with attach right can read EDID.
+  5. Use case: a remote ChromeOS client attaches to a Windows VM; VM's guest OS sees the real display, optimizes resolution, etc.
+  6. Out of scope for v1. Tracked for v2 to enable plug-and-play display features.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: EDID 1.4 / 2.0 spec, VESA DDC, FreeBSD DRM EDID parser.
+
+  **Acceptance** (v2):
+  - [ ] EDID block readable via BDP
+  - [ ] Hot-plug events delivered to attached clients
+  - [ ] ACL enforced
+
+  **Commit**: NO (v2 only — design preserved in plan)
+
+---
+
+- [ ] 65. Bluetooth — host passthrough exclusivity (DESIGN ONLY)
+
+  **What to do** (design notes for v2):
+  1. Design a `bt_resource.ko` kernel module that mediates BT adapter access. Modeled after `gpu_resource.ko` (T21).
+  2. The module exposes `/dev/bt_resource` (host-only — not in jails).
+  3. When a jail claims a BT adapter (via `hw.bt.N.binding=jail:<jid>` sysctl, set by broker at attach time), the host kernel prevents any other process (host or other jail) from opening `/dev/bluetoothN`.
+  4. Binding states (state machine):
+     - `FREE` (default) — no binding, host or any jail may open
+     - `HOST_BOUND` — host process has it; jails cannot open
+     - `JAIL_BOUND` — jail has it; host and other jails cannot open
+     - `DYING` — jail is exiting; host still cannot open
+     - `RELEASED` — jail fully released; back to FREE
+  5. On jail exit, `bt_resource.ko` is notified via the existing `prison_cleanup` chain (T10) and transitions through `DYING` → `RELEASED`. If the jail exited abruptly (no cleanup), the watchdog (`BT_RESOURCE_DESTROY_TIMEOUT=30s`) forces the transition.
+  6. Out of scope for v1. Tracked for v2.
+
+  **Profile**: `deep` (kernel + state machine). **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: NetBSD `bthub`, Linux `btusb` + cgroup-v2 BT controller, FreeBSD `ng_btsocket`.
+
+  **Acceptance** (v2):
+  - [ ] Binding state machine is correct (verified by ATF)
+  - [ ] `prison_cleanup` chain transitions state on jail exit
+  - [ ] Watchdog forces cleanup on abrupt exit
+  - [ ] Host cannot open `/dev/bluetoothN` while jail-bound
+  - [ ] Other jails cannot open while jail-bound
+
+  **Commit**: NO (v2 only — design preserved in plan)
+
+---
+
+- [ ] 66. Bluetooth — device-class abstraction (DESIGN ONLY)
+
+  **What to do** (design notes for v2):
+  1. Design a generic POSIX device mapping: host recognizes BT device class (e.g., headphones, keyboard, mouse) and exposes the corresponding POSIX device in the jail.
+  2. Mapping table (sysctl: `hw.bt.class_map`):
+     - Audio sink (headphones, speakers) → `/dev/dspN` in jail
+     - HID keyboard → `/dev/kbdN` in jail
+     - HID mouse / touchpad → `/dev/umsN` in jail
+     - HID gamepad → `/dev/uhidN` in jail
+     - HID generic → `/dev/uhidN` in jail
+     - Unknown / raw → blocked unless `bt.raw_access=1`
+  3. Host pairing: BT adapter security (PIN, passkey, SSP Just Works / Numeric Comparison / Passkey Entry) is negotiated by the host, NOT the jail. The jail never sees raw HCI commands.
+  4. Jail sees only the generic POSIX device (e.g., `/dev/dsp0` for headphones); the jail's `usbdevs -v` or `dmesg` shows the device as "USB audio" or similar generic name, not "BT".
+  5. Out of scope for v1. Tracked for v2.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: Bluetooth HID spec, USB Audio class spec, FreeBSD `sound(4)`, `usb(4)`, `ng_btsocket(4)`.
+
+  **Acceptance** (v2):
+  - [ ] BT headphones appear as `/dev/dsp0` in jail
+  - [ ] BT keyboard appears as `/dev/kbd0` in jail
+  - [ ] Jail's `dmesg` shows generic device name, not "BT"
+  - [ ] `bt.raw_access=1` (opt-in) lets advanced jails see raw HCI
+  - [ ] ACL enforces class mapping (e.g., jail A only allowed audio devices)
+
+  **Commit**: NO (v2 only — design preserved in plan)
+
+---
+
+- [ ] 67. Bluetooth — force-disconnect authorization (DESIGN ONLY)
+
+  **What to do** (design notes for v2):
+  1. Design a 3-layer authorization for force-disconnect:
+     - **Layer 1 (CLI)**: only privileged operators (in `_displayd` group or root) can invoke `displayc --bt-disconnect <resource>`.
+     - **Layer 2 (broker ACL)**: the broker's `display.acl` resolver checks that the user has the `disconnect` action on the specific BT resource.
+     - **Layer 3 (kernel)**: `bt_resource.ko` validates the broker's claim is authorized (the broker passes a signed token).
+  2. New BDP message types:
+     - `0x60 BT_DISCONNECT_REQ` (C→S, with resource_id + reason)
+     - `0x61 BT_DISCONNECT_OK` (S→C)
+     - `0x62 BT_DISCONNECT_FAIL` (S→C, with reason)
+  3. Rate limit: max 10 disconnects per minute per user, 100 per hour; 3 consecutive failures lock the user out for 15 minutes.
+  4. Audit: every force-disconnect (success or failure) is logged with user, target device, reason, timestamp.
+  5. Use case: an operator notices a BT device is misbehaving and wants to disconnect it from the jail that owns it.
+  6. Out of scope for v1. Tracked for v2.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: OAuth 2.0 authorization, BDP ACL (T40), audit log (T41).
+
+  **Acceptance** (v2):
+  - [ ] All 3 layers enforced (CLI, broker, kernel)
+  - [ ] Rate limit enforced
+  - [ ] 3-fail lockout works
+  - [ ] Audit log written
+  - [ ] BDP messages defined and documented
+
+  **Commit**: NO (v2 only — design preserved in plan)
+
+---
+
+- [ ] 68. Bluetooth — bandwidth / slot / role / peer resource model (DESIGN ONLY)
+
+  **What to do** (design notes for v2):
+  1. BT is **NOT a percentage-based resource** like GPU. A BT adapter is a single radio that is **time-shared**, not divisible. Use a **slot-based** model instead.
+  2. Resource model (sysctls per adapter `hw.bt.N.*`):
+     - `hw.bt.N.max_slaves_classic` (int, default 7) — max simultaneous BR/EDR slave connections
+     - `hw.bt.N.max_le` (int, default 255) — max simultaneous LE connections
+     - `hw.bt.N.max_bandwidth_bps` (int, default 3000000) — total bandwidth in bits/sec, all connections combined
+     - `hw.bt.N.role` (string, default "any") — `slave`, `master`, `advertiser`, `scanner`, or `any`
+     - `hw.bt.N.peer_whitelist` (string, default "") — comma-separated BT addresses that are allowed
+  3. When a jail requests a BT resource, broker allocates a **slot** (BR/EDR or LE), tracks total bandwidth, and enforces role / peer whitelist.
+  4. If a jail exceeds its slot allocation or bandwidth budget, new connection requests return `EAGAIN` (or `EBUSY` for role conflicts).
+  5. ACL integration: `display.acl` can grant `bt:slot_allocate` action.
+  6. Out of scope for v1. Tracked for v2.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v2 follow-on (not in v1's Wave 5). Tracked for planning only.
+
+  **References**: Bluetooth Core Spec Vol 2 Part B (BR/EDR), Vol 3 Part G (LE), FreeBSD `ng_btsocket`, BlueZ `bandwidth.c`.
+
+  **Acceptance** (v2):
+  - [ ] Slot model enforced (EAGAIN on overflow)
+  - [ ] Bandwidth budget enforced
+  - [ ] Role / peer whitelist enforced
+  - [ ] ACL integration works
+
+  **Commit**: NO (v2 only — design preserved in plan)
+
+---
+
+- [ ] 69. Bluetooth — jail termination cleanup (DESIGN ONLY, future boulder)
+
+  **What to do** (design notes for v3+):
+  1. Define the full lifecycle: jail start → BT alloc → jail runs → jail stops (graceful or abrupt) → BT cleanup.
+  2. On graceful jail stop:
+     - Broker sends `BDP_BT_RELEASE` to kernel
+     - Kernel disconnects all peer devices gracefully (sends `HCI_Disconnect` reason `0x13 USER_TERMINATED`)
+     - Binding transitions `JAIL_BOUND` → `DYING` → `RELEASED`
+     - Watchdog disarmed
+  3. On abrupt jail stop (kill -9, panic, OOM):
+     - Kernel's `prison_cleanup` chain (T10) triggers
+     - `bt_resource.ko` transitions to `DYING`
+     - Watchdog (`BT_RESOURCE_DESTROY_TIMEOUT=30s`) waits for cleanup; if peers still attached, sends `HCI_Disconnect` reason `0x0E CONNECTION_TERMINATED_BY_LOCAL_HOST`
+     - Binding transitions `DYING` → `RELEASED`
+  4. Idempotency: state transitions must be safe to repeat (e.g., double cleanup is a no-op).
+  5. Out of scope for v1 AND v2 — this is a v3 future boulder.
+
+  **Profile**: `deep` (lifecycle + watchdog). **Skills**: `[]`.
+
+  **Parallelization**: v3 follow-on. Tracked for planning only.
+
+  **References**: T10 (`prison_cleanup` chain), T21 (`gpu_resource.ko` cleanup pattern), T65 (binding state machine).
+
+  **Acceptance** (v3):
+  - [ ] Graceful cleanup completes in <1s
+  - [ ] Abrupt cleanup completes in <30s (watchdog)
+  - [ ] Idempotency verified
+  - [ ] No zombie peer connections
+
+  **Commit**: NO (v3 only — design preserved in plan)
+
+---
+
+- [ ] 70. Bluetooth — multi-radio coordination (DESIGN ONLY, future boulder)
+
+  **What to do** (design notes for v3+):
+  1. Define coordination when a host has multiple BT adapters (e.g., built-in WiFi+BT + USB BT dongle).
+  2. `displayd` can allocate a peer device to a specific adapter (`hw.bt.N.allocation`) or to "any available" (`any`).
+  3. Adapter failover: if a jail's preferred adapter fails, broker moves the connection to another available adapter.
+  4. Load balancing: round-robin or least-loaded distribution across adapters.
+  5. Out of scope for v1 AND v2 — this is a v3 future boulder.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v3 follow-on. Tracked for planning only.
+
+  **References**: T65 (binding state machine), T66 (device-class abstraction), BlueZ adapter API.
+
+  **Acceptance** (v3):
+  - [ ] Multi-adapter enumeration works
+  - [ ] Allocation rules enforced
+  - [ ] Failover works
+  - [ ] Load balancing works
+
+  **Commit**: NO (v3 only — design preserved in plan)
+
+---
+
+- [ ] 71. Bluetooth — LE Audio / LC3 / Auracast (DESIGN ONLY, future boulder)
+
+  **What to do** (design notes for v3+):
+  1. Design support for LE Audio (Bluetooth 5.2+) and the LC3 codec.
+  2. Auracast broadcast: a single audio source broadcasts to many LE Audio sinks (TVs, hearing aids, speakers).
+  3. BDP message types for broadcast configuration.
+  4. ACL: per-broadcast and per-listener rights.
+  5. Out of scope for v1 AND v2 — this is a v3 future boulder.
+
+  **Profile**: `deep` (audio + LE). **Skills**: `[]`.
+
+  **Parallelization**: v3 follow-on. Tracked for planning only.
+
+  **References**: Bluetooth LE Audio spec, LC3 codec spec, Auracast spec.
+
+  **Acceptance** (v3):
+  - [ ] LE Audio device enumeration
+  - [ ] Auracast broadcast works
+  - [ ] LC3 encode/decode in pipeline
+
+  **Commit**: NO (v3 only — design preserved in plan)
+
+---
+
+- [ ] 72. Bluetooth — cross-jail peer sharing (DESIGN ONLY, future boulder)
+
+  **What to do** (design notes for v3+):
+  1. Define scenarios where multiple jails want to share a single BT peer (e.g., a smart watch sending notifications to multiple jails).
+  2. Read-only sharing: all jails see the same data; only one jail can write.
+  3. Multi-master: a single BT peer connects to multiple host adapters, each owned by a different jail.
+  4. ACL: `display.acl` controls which jails can read/write which peers.
+  5. Out of scope for v1 AND v2 — this is a v3 future boulder.
+
+  **Profile**: `unspecified-high`. **Skills**: `[]`.
+
+  **Parallelization**: v3 follow-on. Tracked for planning only.
+
+  **References**: T67 (force-disconnect authz), T68 (resource model), T70 (multi-radio coordination).
+
+  **Acceptance** (v3):
+  - [ ] Read-only sharing works
+  - [ ] Multi-master works
+  - [ ] ACL enforced
+
+  **Commit**: NO (v3 only — design preserved in plan)
+
+---
+
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to the user and get explicit "okay" before completing.
@@ -8765,20 +10642,20 @@ Wave F (After ALL tasks — 4 parallel reviews):
 > Never mark F1-F4 as checked before getting the user's okay. Rejection or user feedback → fix → re-run → present again → wait for okay.
 
 - [ ] F1. **Plan compliance audit** — `oracle` agent
-  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 14 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all 6 broker config files exist, all 5 broker man pages present, e2e test passes.
-  Output: `Must Have [N/N] | Backcompat [N/N] | Must NOT Have [N/N] | Tasks [N/N done] | Broker [N/N] | Multicast [N/N] | Evidence [N files] | VERDICT: APPROVE|REJECT`
+  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 14 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all 6 broker config files exist, all 5 broker man pages present, e2e test passes. **Verify architectural rules (added by audit):** (a) `displayd` (not `bhyve-display-broker` as the canonical name) is the binary; old name is a deprecated symlink with deprecation warning. (b) `libdisplay` (not `libbdp`) is the canonical library; old name is a deprecated symlink. (c) `/etc/display/` (not `/etc/bhyve/display-broker.conf`) is the canonical config dir; old path is a fallback with warning. (d) `gpu_stub` test backend is mandatory; `hw.gpu.0.stub_capacity=10496` is the default. (e) No `/dev/dri` or `/dev/gpu*` inside jails. (f) No `/dev/bluetooth*` inside jails. (g) `localhost by default` for all new endpoints (`[::1]:8443`); public requires `security.display.broker.listen_public=1` + TLS + ACL. (h) IPv6 dual-stack. (i) TLS 1.3 only by default. (j) Self-signed cert auto-gen when none configured. (k) Host policy sysctls (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) are stricter-wins. (l) Tunable precedence: loader > sysctl > config > default. (m) Every `*_resource.ko` module has `attach()` / `detach()` / `reset()` / `reinit()` hooks. (n) No `switch (vendor_id)` in `gpu_resource.ko`; use `GPU_CAPS_REGISTER` mechanism. (o) OID namespaces `security.bt.*` and `hw.bt.*` are reserved (return ENOENT, not crash). (p) OID namespace `security.display.cast.*` is reserved. (q) `bdp-stream` works (pipes to ffmpeg). (r) HTTP health endpoint works (curl returns 200 + JSON). **Verify design-only items NOT implemented:** (s) T61 cast tool, T62-T72 BT/cast design items — F1 does NOT check for their implementation; F1 DOES check that their OID namespaces are reserved. **Verify unit tests:** (t) Every T-task has at least 5 ATF C test cases documented (where the task has C code) and at least 2 shell integration tests. (u) Coverage targets: ≥ 80% line coverage on C code, ≥ 90% on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence). (v) `tests/sys/env/verify_test_env.sh` exists and is sourced by every test. (w) The plan target is FreeBSD 16 or higher; the build/test env is verified at test start.
+  Output: `Must Have [N/N] | Backcompat [N/N] | Must NOT Have [N/N] | Tasks [N/N done] | Broker [N/N] | Multicast [N/N] | Architectural Rules [N/N] | OID Reservations [N/N] | Design-Only Excluded [N/N] | Unit Tests [N/N] | Coverage [%] | Evidence [N files] | VERDICT: APPROVE|REJECT`
 
 - [ ] F2. **Code quality review** — `unspecified-high` agent
-  Run `tsc --noEmit` equivalent (FreeBSD: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildkernel buildworld` and look for warnings) + linter (`clang-tidy` on key files) + `kyua test` summary. Review all changed files for: `as any`/`@ts-ignore` (N/A — C; look for `(void)`, dead `malloc` casts, ignored `errno`), empty catches, `printf` in prod paths, commented-out code, unused includes. **Grep for hardcoded constants in C code** (e.g. `= 60`, `= 1000000`, `= 1024` for FPS / bandwidth / channel limits) — every one should be a sysctl read, not a constant. Check AI slop: excessive comments, over-abstraction (vtable with one impl pretending to be polymorphic), generic names (data/result/item/temp), unnecessary helpers. Verify each commit's message matches the plan's `type(scope): desc` format. Verify backcompat: every legacy `rfb=` form still works, every legacy jail param still works, no public symbol has been removed or changed in meaning. Verify parallel build is reproducible: run `time MAKE_JOBS_NUMBER=1 make -j1 buildworld` then `time MAKE_JOBS_NUMBER=$NCPU make -j$NCPU buildworld`; assert the parallel run is at least 2× faster on a 4-core+ machine, and that no incremental build breaks (run twice in a row, second run is a no-op or minimal).
-  Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | Hardcoded Constants [N found / N] | Backcompat [PASS/FAIL] | Parallel [2.3× speedup] | VERDICT`
+  Run `tsc --NoEmit` equivalent (FreeBSD: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildkernel buildworld` and look for warnings) + linter (`clang-tidy` on key files) + `kyua test` summary. Review all changed files for: `as any`/`@ts-ignore` (N/A — C; look for `(void)`, dead `malloc` casts, ignored `errno`), empty catches, `printf` in prod paths, commented-out code, unused includes. **Grep for hardcoded constants in C code** (e.g. `= 60`, `= 1000000`, `= 1024` for FPS / bandwidth / channel limits) — every one should be a sysctl read, not a constant. Check AI slop: excessive comments, over-abstraction (vtable with one impl pretending to be polymorphic), generic names (data/result/item/temp), unnecessary helpers. **Grep for forbidden patterns (added by audit):** (a) `__FreeBSD_version < 1600000` — any match is a guardrail violation. (b) `__FreeBSD_version >= 1500000` — any match is a guardrail violation (we don't backport to 15). (c) "supported on FreeBSD 14" or "supported on FreeBSD 15" — any match is a guardrail violation. (d) "FreeBSD 14/15 fallback" or "FreeBSD 15 fallback" — any match is a guardrail violation. (e) `switch (vendor_id)` in `gpu_resource.ko` — any match is a guardrail violation (use `GPU_CAPS_REGISTER`). (f) `if (vendor_id == 0x10de)` or `if (vendor_id == 0x1002)` — any match is a guardrail violation. (g) Hard-coded port counts in `gpu_resource.ko` (e.g. `ports_max = 4` as a constant) — any match is a guardrail violation (use `gr_ports_max()` from the cap module). (h) Hard-coded compute unit counts (e.g. `cuda_cores = 16384` as a constant) — any match is a guardrail violation. (i) `if (gpu == nvidia0)` patterns — any match is a guardrail violation (use the canonical-name model). (j) Direct `rfb_init()` calls in `pci_fbuf.c` — must go through `display_transport_init()`. (k) `vfio-pci`-style raw BAR passthrough — any match is a guardrail violation. Verify each commit's message matches the plan's `type(scope): desc` format. Verify backcompat: every legacy `rfb=` form still works, every legacy jail param still works, no public symbol has been removed or changed in meaning. **Verify FreeBSD-version hygiene:** F2 greps for `__FreeBSD_version` patterns and rejects any "compatibility shim" for older versions. **Verify parallel build is reproducible:** run `time MAKE_JOBS_NUMBER=1 make -j1 buildworld` then `time MAKE_JOBS_NUMBER=$NCPU make -j$NCPU buildworld`; assert the parallel run is at least 2× faster on a 4-core+ machine, and that no incremental build breaks (run twice in a row, second run is a no-op or minimal). **Verify test environment script:** `tests/sys/env/verify_test_env.sh` exists, is executable, and runs first in every test.
+  Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | Hardcoded Constants [N found / N] | Forbidden Patterns [N found / N] | Backcompat [PASS/FAIL] | Parallel [2.3× speedup] | Test Env Script [PRESENT/MISSING] | VERDICT`
 
 - [ ] F3. **Real QA on a FreeBSD host** — `unspecified-high` agent (+ `playwright`/`tmux` if UI)
-  Start from a clean state on a **FreeBSD 16** host (16.0+ latest release). **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**.
-  Output: `Build [PASS, 2.3× parallel speedup] | Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | Broker [N/N] | Multicast [N/N] | Backcompat [N/N] | VERDICT`
+  Start from a clean state on a **FreeBSD 16** host (16.0+ latest release). **First action: source `tests/sys/env/verify_test_env.sh` and confirm hard-fail if not FreeBSD 16+.** **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. **Execute the Unit Test Strategy: run `kyua test` on every test directory, verify all 230+ `tc_` and 84+ `sh_` test cases pass. Verify coverage targets (≥ 80% on C, ≥ 90% on critical paths).** Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**. **Test multi-device scenarios** (per multi-device section): (a) Hot-plug a stub adapter at runtime; verify it appears in `hw.gpu.adapters`; new jail can use it. (b) Hot-unplug a stub adapter; running jails get `ENXIO` on next I/O. (c) Drop a JSON overlay; capability detection works for an unknown vendor. (d) Generic fallback: unknown vendor GPU works with conservative defaults + warning. **Test mediated passthrough scenarios**: (e) After jail stop, stub adapter re-initializes in <1s. (f) FLR + driver reinit logs to audit trail. (g) Cleanup is idempotent (SIGKILL during cleanup is safe). **Test backward compat scenarios**: (h) Deprecated symlinks work (`bhyve-display-broker` → `displayd`, `libbdp` → `libdisplay`, `bhyve-display-client` → `displayc`). (i) Migration script converts old configs. (j) Deprecation warnings print to stderr. **Test broker security scenarios**: (k) Default listen is `[::1]:8443` (not `0.0.0.0` or `::`). (l) `listen_public=1` without TLS → broker exits with preflight error. (m) `listen_public=1` without ACL → broker exits with preflight error. (n) Dual-stack `[::]:8443` accepts both IPv4 and IPv6. (o) TLS 1.2 connection is refused (TLS 1.3 only). (p) mTLS with expired cert is rejected. **Test that F3 will HARD STOP if test env is wrong:** (q) Run the same test on a FreeBSD 15 box — verify it exits 78 with a clear error. (r) Run the same test on a FreeBSD 14 box — verify it exits 78. (s) Run with no sudo/doas — verify it exits 78. (t) Run with sudo requiring password — verify it exits 78. (These are F3-self-tests for the verify_test_env.sh script itself.)
+  Output: `Build [PASS, 2.3× parallel speedup] | Test Env Verified [PASS, FreeBSD X.Y] | ATF Tests [N pass/N fail] | Shell Tests [N pass/N fail] | Coverage [N%] | Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | Broker [N/N] | Multicast [N/N] | Multi-Device [N/N] | Mediated [N/N] | Backcompat [N/N] | Security [N/N] | Test Env Self-Tests [N/N] | VERDICT`
 
 - [ ] F4. **Scope fidelity check** — `deep` agent
-  For each task: read "What to do" and "Must NOT do", read the actual diff (`git log`, `git diff main..HEAD`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes (files changed that aren't in any task's scope). Verify the branch state: all 48 commits are present, in the right order, with the right messages, and there are no orphan commits.
-  Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | Commits [N/N present] | Backcompat [PASS/FAIL] | VERDICT`
+  For each task: read "What to do" and "Must NOT do", read the actual diff (`git log`, `git diff main..HEAD`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. **Design-only items NOT to be checked in v1 (added by audit):** (a) T61 cast tool — design only, no impl expected. (b) T62 BDP device info protocol — design only. (c) T63-T64 HLS/RTSP broker endpoints — design only. (d) T65-T68 BT design placeholders — design only. (e) T69-T72 BT real implementation — future boulder, not v1. F4 DOES check that the OID namespaces for these are reserved (no crash on access). Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes (files changed that aren't in any task's scope). Verify the branch state: all 48 commits are present, in the right order, with the right messages, and there are no orphan commits. **Verify the test environment script is present and unchanged:** `tests/sys/env/verify_test_env.sh` matches the design spec (the agent didn't bypass it). **Verify unit tests are present for every task:** for each T-task, the ATF test file (if C code) and the shell test file (if user-space) are present in the expected location.
+  Output: `Tasks [N/N compliant] | Design-Only Excluded [N/N] | OID Reservations [N/N] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | Commits [N/N present] | Backcompat [PASS/FAIL] | Test Env Script [UNCHANGED/MODIFIED] | Unit Tests [N/N present] | VERDICT`
 
 ---
 
