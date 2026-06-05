@@ -197,7 +197,6 @@ parse_reference(const char *ref, char **registry, char **repo,
 	const char *p = ref;
 	const char *slash, *colon, *at;
 	const char *repo_start;
-	char *r;
 
 	*registry = NULL;
 	*repo = NULL;
@@ -418,7 +417,7 @@ cleanup:
 /*
  * Check registry API version
  */
-int
+static int
 registry_check_api(struct registry *reg)
 {
 	CURL *curl;
@@ -465,10 +464,8 @@ authenticate(struct registry *reg, const char *scope)
 {
 	char *url;
 	char *response = NULL;
-	size_t response_len;
 	char *auth_header = NULL;
-	char *bearer_token = NULL;
-	char realm[256], service[64], scope_str[256];
+	char realm[256];
 	char *p, *end;
 	int ret = -1;
 
@@ -569,8 +566,6 @@ fetch_manifest(struct registry *reg, const char *repo, const char *tag,
 {
 	char *url;
 	char *path;
-	char *data = NULL;
-	size_t data_len;
 	int ret = -1;
 
 	/* Build manifest path */
@@ -627,7 +622,6 @@ parse_manifest_json(json_object *obj, struct oci_manifest **manifest)
 {
 	struct oci_manifest *m;
 	json_object *schema_obj, *media_obj, *layers_obj, *config_obj;
-	json_object *layers_arr, *config_desc;
 	int nlayers, i;
 
 	m = calloc(1, sizeof(*m));
@@ -649,7 +643,7 @@ parse_manifest_json(json_object *obj, struct oci_manifest **manifest)
 	if (json_object_object_get_ex(obj, "config", &config_obj)) {
 		m->config = calloc(1, sizeof(struct oci_config));
 		if (m->config) {
-			json_object *digest, *size, *mtype;
+			json_object *digest, *mtype;
 			if (json_object_object_get_ex(config_obj, "digest", &digest))
 				m->config->config = strdup(
 				    json_object_get_string(digest));

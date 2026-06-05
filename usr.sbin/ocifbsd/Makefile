@@ -64,12 +64,7 @@ SUBDIR+=	clustering
 SUBDIR+=	convert
 SUBDIR+=	export
 SUBDIR+=	gc
-# image: many AI-slop issues across pull.c, unpack.c, push.c.
-# zfs_store.c is clean (libmd + stdarg + unused-var fixes done).
-# pull.c has fopen(arg count), missing curl callbacks, missing json-c
-# include, dozens of unused vars, missing fields. Needs full refactor.
-# Deferred to follow-up PR.
-#SUBDIR+=	image
+SUBDIR+=	image
 SUBDIR+=	logd
 SUBDIR+=	metrics
 SUBDIR+=	namespace

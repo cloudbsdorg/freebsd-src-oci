@@ -38,6 +38,7 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fts.h>
@@ -47,6 +48,37 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+static int mkdirp_local(const char *path, mode_t mode);
+static int
+mkdirp_local(const char *path, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *p;
+	size_t len;
+
+	if (path == NULL || *path == '\0')
+		return (-1);
+
+	len = strlcpy(buf, path, sizeof(buf));
+	if (len >= sizeof(buf))
+		return (-1);
+
+	for (p = buf + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, mode) != 0 && errno != EEXIST)
+			return (-1);
+		*p = '/';
+	}
+
+	if (mkdir(buf, mode) != 0 && errno != EEXIST)
+		return (-1);
+	return (0);
+}
+
+#define	mkdirp(path, mode)	mkdirp_local((path), (mode))
 #include <zlib.h>
 
 #include "unpack.h"
@@ -69,7 +101,7 @@ static struct unpack_options default_opts = {
 /*
  * Get default options
  */
-struct unpack_options *
+static struct unpack_options *
 unpack_default_options(void)
 {
 	return (&default_opts);
@@ -191,7 +223,6 @@ delete_whiteout_files(const char *dir, const char *wh_prefix)
 	FTSENT *ent;
 	char *paths[2];
 	char target[PATH_MAX];
-	char *p;
 	int ret = 0;
 
 	paths[0] = (char *)dir;
@@ -322,7 +353,6 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 {
 	const char *pathname;
 	char path[PATH_MAX];
-	struct stat st;
 	int fd;
 	int ret = 0;
 
@@ -337,10 +367,10 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 	/* Build destination path */
 	snprintf(path, sizeof(path), "%s/%s", dest, pathname);
 
-	archive_entry_stat(entry, &st);
+	archive_entry_stat(entry);
 
 	switch (archive_entry_filetype(entry)) {
-	case AE_IFREG:
+	case AE_IFREG: {
 		/* Create parent directory */
 		char *parent = dirname(path);
 		if (mkdirp(parent, 0755) != 0 && errno != EEXIST) {
@@ -357,6 +387,7 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 		}
 
 		/* Copy data */
+		{
 		char buf[8192];
 		ssize_t n;
 		while ((n = archive_read_data(ar, buf, sizeof(buf))) > 0) {
@@ -366,6 +397,7 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 				ret = -1;
 			}
 		}
+		}
 
 		close(fd);
 
@@ -374,6 +406,7 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 			chmod(path, archive_entry_mode(entry));
 			chown(path, archive_entry_uid(entry),
 			    archive_entry_gid(entry));
+		}
 		}
 		break;
 
@@ -424,11 +457,10 @@ int
 unpack_layer(const char *tarball, const char *dest,
     struct unpack_options *opts)
 {
-	struct archive *a, *ext;
+	struct archive *a;
 	struct archive_entry *entry;
 	compression_type_t comp;
 	int ret = 0;
-	int flags;
 
 	if (opts == NULL)
 		opts = &default_opts;
@@ -462,7 +494,6 @@ unpack_layer(const char *tarball, const char *dest,
 	}
 
 	archive_read_support_format_tar(a);
-	archive_read_support_format_tar_grzip(a);
 
 	if (archive_read_open_filename(a, tarball, 10240) != ARCHIVE_OK) {
 		fprintf(stderr, "error: cannot open archive: %s\n",
@@ -533,7 +564,6 @@ int
 unpack_image(const char *imagedir, const char *dest,
     struct unpack_options *opts)
 {
-	char manifest_path[PATH_MAX];
 	char layers_dir[PATH_MAX];
 	char **tarballs = NULL;
 	int ntarballs = 0;

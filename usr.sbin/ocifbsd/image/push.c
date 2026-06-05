@@ -39,28 +39,41 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <curl/curl.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fts.h>
+#include <json-c/json.h>
 #include <netdb.h>
 #include <sha256.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <zlib.h>
 
 #include "push.h"
 #include "pull.h"
 
-/*
- * Default push options
- */
-static struct push_options default_push_opts = {
-	.force = false,
-	.verify = true,
-	.quiet = false
-};
+static size_t
+header_callback(char *buffer, size_t size, size_t nitems, void *userdata)
+{
+	size_t len = size * nitems;
+	char *location = (char *)userdata;
+
+	if (len >= 10 && strncasecmp(buffer, "Location:", 9) == 0) {
+		char *value = buffer + 9;
+		while (*value == ' ' || *value == '\t')
+			value++;
+		char *end = buffer + len;
+		while (end > value && (end[-1] == '\n' || end[-1] == '\r'))
+			*--end = '\0';
+		strlcpy(location, value, 1024);
+	}
+
+	return (len);
+}
 
 /*
  * Upload session management
@@ -69,8 +82,7 @@ struct upload_session *
 upload_start(struct registry *reg, const char *repo)
 {
 	struct upload_session *sess;
-	char *url;
-	char *response = NULL;
+	char *url = NULL;
 	long response_code;
 	int ret = -1;
 
@@ -124,7 +136,6 @@ upload_chunk(struct upload_session *sess, const char *data, size_t len)
 	CURL *curl;
 	CURLcode res;
 	long response_code;
-	char *location = NULL;
 	int ret = -1;
 
 	if (sess->location == NULL)
@@ -158,7 +169,6 @@ upload_chunk(struct upload_session *sess, const char *data, size_t len)
 int
 upload_complete(struct upload_session *sess, const char *digest)
 {
-	char *url;
 	char *location_with_digest;
 	CURL *curl;
 	CURLcode res;
@@ -315,7 +325,6 @@ create_tar_from_directory(const char *srcdir, const char *destfile)
 	FTSENT *ent;
 	char *paths[2];
 	char path[PATH_MAX];
-	struct stat st;
 	int ret = 0;
 
 	a = archive_write_new();
