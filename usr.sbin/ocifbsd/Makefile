@@ -80,7 +80,16 @@ SUBDIR+=	namespace
 # Same approach as image/: deferred to follow-up refactor PR
 # that converts the subdir to a LIB or adds a stub main().
 #SUBDIR+=	network
-SUBDIR+=	orchestration
+# orchestration: similar to network. All 7 .c files compile
+# clean after extensive fixes (json-c port path, pthread.h,
+# mkdirp extern, ~5 static additions, ~10 unused-var removals,
+# get_physmem/rolling_update_progress forward decls, bad
+# spec.namespace ref). Link phase fails: no main() function
+# AND pod.c calls ocifbsd_create_container/start/stop/delete/
+# get_container_state/logs which are internal to the main
+# ocifbsd binary, not exported. Subdir is a library, not a
+# program. Deferred to follow-up PR.
+#SUBDIR+=	orchestration
 # pam: same AI-stub issue. Deferred.
 #SUBDIR+=	pam
 SUBDIR+=	security
