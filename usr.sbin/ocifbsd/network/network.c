@@ -524,7 +524,6 @@ network_delete(const char *network_id)
 {
 	char state_file[PATH_MAX];
 	char bridge_name[64];
-	char *output = NULL;
 
 	snprintf(state_file, sizeof(state_file), "%s/%s.json",
 	    OCIFBSD_NETWORK_STATE_DIR, network_id);
@@ -609,7 +608,15 @@ network_connect(const char *network_id, const char *container_id,
 	if (endpoint == NULL)
 		return (-1);
 
-	endpoint->id = strdup(uuidgen());
+	uuid_t uuid;
+	uint32_t status;
+	char *uuid_str = NULL;
+
+	uuid_create(&uuid, &status);
+	if (status == uuid_s_ok) {
+		uuid_to_string(&uuid, &uuid_str, &status);
+	}
+	endpoint->id = uuid_str;
 	endpoint->network_id = strdup(network_id);
 	endpoint->container_id = strdup(container_id);
 	endpoint->interface_name = strdup("eth0");
