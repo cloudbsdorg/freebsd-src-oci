@@ -37,6 +37,7 @@
 #include <sys/resource.h>
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,18 +62,6 @@ static const char *rctl_resource_names[] = {
 	[RCTL_RESOURCE_FSIZE]		= "filesize",
 	[RCTL_RESOURCE_SOCKBUF]	= "socketbuffer",
 	[RCTL_RESOURCE_NOFILE]		= "nofiles",
-};
-
-static const int rctl_resource_sysctls[] = {
-	[RCTL_RESOURCE_NPROC]		= CTL_KERN, KERN_PROC, KERN_PROC_NTHREADS,
-	[RCTL_RESOURCE_MEMORYUSE]	= -1,  /* jail_get */
-	[RCTL_RESOURCE_VMEM]		= -1,
-	[RCTL_RESOURCE_OPENFILES]	= -1,
-	[RCTL_RESOURCE_NOFILE]		= RLIMIT_NOFILE,
-	[RCTL_RESOURCE_NPROC]		= RLIMIT_NPROC,
-	[RCTL_RESOURCE_FSIZE]		= RLIMIT_FSIZE,
-	[RCTL_RESOURCE_STACK]		= RLIMIT_STACK,
-	[RCTL_RESOURCE_CORE]		= RLIMIT_CORE,
 };
 
 /*
@@ -168,7 +157,10 @@ rctl_format_size(uint64_t size)
 const char *
 rctl_resource_name(rctl_resource_t resource)
 {
-	if (resource < 0 || resource >= sizeof(rctl_resource_names) / sizeof(rctl_resource_names[0]))
+	const size_t nnames = sizeof(rctl_resource_names) /
+	    sizeof(rctl_resource_names[0]);
+
+	if (resource < 0 || (size_t)resource >= nnames)
 		return ("unknown");
 
 	return (rctl_resource_names[resource]);
@@ -180,9 +172,11 @@ rctl_resource_name(rctl_resource_t resource)
 rctl_resource_t
 rctl_parse_resource(const char *name)
 {
-	int i;
+	size_t i;
+	const size_t nnames = sizeof(rctl_resource_names) /
+	    sizeof(rctl_resource_names[0]);
 
-	for (i = 0; i < sizeof(rctl_resource_names) / sizeof(rctl_resource_names[0]); i++) {
+	for (i = 0; i < nnames; i++) {
 		if (rctl_resource_names[i] && strcmp(rctl_resource_names[i], name) == 0)
 			return ((rctl_resource_t)i);
 	}

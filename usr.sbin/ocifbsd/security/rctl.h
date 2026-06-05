@@ -42,7 +42,7 @@
  */
 typedef enum {
 	RCTL_RESOURCE_NPROC = 0,	/* max processes */
-	RCTL_RESOURCE_OPENFILES,		/* max files open */
+	RCTL_RESOURCE_OPENFILES,	/* max files open */
 	RCTL_RESOURCE_VMEM,		/* virtual memory */
 	RCTL_RESOURCE_STACK,		/* stack size */
 	RCTL_RESOURCE_CORE,		/* core dump size */
@@ -54,7 +54,6 @@ typedef enum {
 	RCTL_RESOURCE_FSIZE,		/* file size */
 	RCTL_RESOURCE_SOCKBUF,		/* socket buffer */
 	RCTL_RESOURCE_NOFILE,		/* number of files */
-	RCTL_RESOURCE_NPROC,		/* number of processes */
 } rctl_resource_t;
 
 /*
@@ -151,10 +150,12 @@ const char *rctl_format_size(uint64_t size);
  * Resource monitoring
  */
 struct rctl_usage {
-	rctl_resource_t	resource;
-	uint64_t	used;
-	uint64_t	limit;
-	double		percentage;
+	char		*jail_name;	/* jail the rule applies to */
+	rctl_resource_t	resource;	/* resource type */
+	char		*resource_name;	/* string form of resource */
+	uint64_t	usage;		/* current usage (maxuse from rctl) */
+	uint64_t	limit;		/* configured limit */
+	bool		exceeded;	/* usage > limit */
 };
 
 int	 rctl_get_all_usage(const char *jail_name, struct rctl_usage **usage,

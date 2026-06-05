@@ -5,9 +5,10 @@
 
 SRCS=		rctl.c mac.c
 
-PROG=		ocifbsd_security
-MAN=
+LIB=		ocifbsd_security
+SHLIB_NAME=	ocifbsd_security.so.1
+MAN=		ocifbsd_security.3
 
 WARNS?=		3
 
-.include <bsd.prog.mk>
+.include <bsd.lib.mk>

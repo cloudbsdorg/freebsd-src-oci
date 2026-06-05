@@ -122,26 +122,29 @@ mac_list_policies(char ***policies, int *npolicies)
 {
 	char **list = NULL;
 	int count = 0;
-	char *output = NULL;
+	char buf[256];
+	FILE *fp;
 
 	/* Get list of loaded MAC policies */
-	FILE *fp = popen("sysctl security.mac", "r");
+	fp = popen("sysctl security.mac", "r");
 	if (fp == NULL)
 		return (-1);
 
-	char buf[256];
 	while (fgets(buf, sizeof(buf), fp) != NULL) {
 		if (strstr(buf, "policy") && strstr(buf, "loaded")) {
 			/* Extract policy name */
 			char *p = strchr(buf, '=');
 			if (p) {
+				char *end;
+				char **new_list;
 				p++;
-				char *end = p + strlen(p) - 1;
+				end = p + strlen(p) - 1;
 				while (end > p && (*end == '\n' || *end == ' '))
 					*end-- = '\0';
 
-				list = realloc(list, (count + 1) * sizeof(char *));
-				if (list == NULL) continue;
+				new_list = realloc(list, (count + 1) * sizeof(char *));
+				if (new_list == NULL) continue;
+				list = new_list;
 				list[count++] = strdup(p);
 			}
 		}
@@ -215,7 +218,6 @@ int
 mac_get_label(const char *jail_name, struct mac_label **label)
 {
 	char cmd[256];
-	char *output = NULL;
 	struct mac_label *l;
 
 	*label = NULL;
@@ -463,8 +465,12 @@ mac_label_compare(struct mac_label *a, struct mac_label *b)
 
 	switch (a->type) {
 	case MAC_TYPE_BIBA:
+		if (a->biba_effective == NULL || b->biba_effective == NULL)
+			return (false);
 		return (strcmp(a->biba_effective, b->biba_effective) == 0);
 	case MAC_TYPE_MLS:
+		if (a->mls_level == NULL || b->mls_level == NULL)
+			return (false);
 		return (strcmp(a->mls_level, b->mls_level) == 0);
 	default:
 		return (true);

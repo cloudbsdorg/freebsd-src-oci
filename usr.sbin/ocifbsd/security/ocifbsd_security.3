@@ -1,0 +1,127 @@
+.\"-
+.\" Copyright (c) 2024 The FreeBSD Foundation
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" This software was developed by Klara, Inc. under sponsorship
+.\" from the FreeBSD Foundation.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+.\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+.\" IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+.\" INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+.\" BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+.\" LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+.\" AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+.\" OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+.\" USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+.\" DAMAGE.
+.\"
+.Dd June 5, 2026
+.Dt OCIFBSD_SECURITY 3
+.Os
+.Sh NAME
+.Nm ocifbsd_security
+.Nd ocifbsd security policy and resource-limit library
+.Sh SYNOPSIS
+.In ocifbsd/security/rctl.h
+.In ocifbsd/security/mac.h
+.Sh DESCRIPTION
+The
+.Nm
+library implements the security policy and resource-limit
+primitives used by
+.Xr ocifbsd 8
+to constrain and label containers and jails.
+It is not a standalone program; it is linked into
+the main
+.Xr ocifbsd 8
+binary and any external tooling that needs to
+manage RCTL rules, MAC labels, or seccomp-equivalent
+sandboxing on FreeBSD jails.
+.Pp
+The library provides three functional areas:
+.Bl -bullet
+.It
+Resource limits
+.Pq rctl.c
+drives the
+.Xr rctl 8
+command to apply, query, and remove per-jail resource
+caps (memoryuse, openfiles, nproc, cputime, etc.)
+and translates the OCI
+.Sy Linux.resources
+JSON block into the equivalent FreeBSD RCTL rules.
+.It
+MAC framework
+.Pq mac.c
+manages the
+.Xr mac 4
+labels that ocifbsd applies to jails, including
+Biba integrity labels, MLS sensitivity labels,
+and partition visibility labels. It can list,
+load, and unload MAC policy modules and parse
+the
+.Sq Cm jail -j Ar jail Cm label= Ns ...
+syntax.
+.It
+Seccomp shims
+.Pq mac.c,
+.Fn seccomp_load_profile ,
+.Fn seccomp_create_jail_filter ,
+.Fn seccomp_remove_filter ,
+.Fn seccomp_get_syscall_list
+.Pq currently stubs.
+The real implementation will translate OCI seccomp
+profiles into
+.Xr capsicum 4
+capability rights; see
+.Pa /usr/local/share/doc/ocifbsd/MIGRATION.md
+in the source tree for the full translation plan.
+.El
+.Pp
+The public API is declared across
+.In ocifbsd/security/rctl.h
+and
+.In ocifbsd/security/mac.h ;
+see those headers for the full list of functions and
+data structures.
+.Sh FILES
+.Bl -tag -width /etc/ocifbsd/security.conf -compact
+.It Pa /etc/ocifbsd/security.conf
+Security defaults (default MAC policy, default RCTL action).
+.It Pa /var/run/ocifbsd/rctl/
+Per-jail RCTL rule snapshots (human-readable,
+the format produced by
+.Xr rctl 8
+.Fl j Ar jail ) .
+.El
+.Sh SEE ALSO
+.Xr ocifbsd 8 ,
+.Xr rctl 8 ,
+.Xr mac 4 ,
+.Xr capsicum 4 ,
+.Xr jail 8 ,
+.Xr biba 4 ,
+.Xr mls 4
+.Sh HISTORY
+The
+.Nm
+library first appeared in
+.Fx 16.0 .
+.Sh AUTHORS
+The
+.Nm
+library was developed by
+.An Klara, Inc.
+under sponsorship from
+.The FreeBSD Foundation .
