@@ -116,7 +116,6 @@ run_cmd_output(char **output, int argc, ...)
 	va_list ap;
 	char **argv;
 	FILE *fp;
-	pid_t pid;
 	int status;
 	char buf[1024];
 	char *result = NULL;

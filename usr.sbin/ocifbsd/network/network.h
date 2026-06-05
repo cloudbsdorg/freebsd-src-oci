@@ -37,7 +37,6 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <netinet/in.h>
-#include <netinet6/in6.h>
 
 /*
  * Network types
