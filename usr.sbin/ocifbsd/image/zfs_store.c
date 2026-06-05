@@ -54,7 +54,7 @@
 
 #include <stdarg.h>
 
-extern int mkdirp(const char *path);
+extern int mkdirp(const char *path, mode_t mode);
 extern int copy_file(const char *from, const char *to, int mode);
 
 /*
@@ -369,7 +369,6 @@ int
 zfs_destroy_dataset(const char *dataset, bool recursive)
 {
 	int argc = 4;
-	int actual_argc = 3;
 	int ret;
 	char *argv[6];
 
@@ -691,8 +690,6 @@ zfs_store_clone_layer(const char *src_digest, const char *dst_digest)
 {
 	char src_dataset[PATH_MAX];
 	char dst_dataset[PATH_MAX];
-	char dst_mp[PATH_MAX];
-	char *mp;
 	int ret;
 
 	make_dataset_name(zfs_get_layers_dataset(), src_digest, src_dataset,
