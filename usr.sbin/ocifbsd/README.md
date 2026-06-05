@@ -26,10 +26,17 @@ cd usr.sbin/ocifbsd            # if you have a standalone clone
 make
 ```
 
-That's it. The default `make` target builds `ocifbsd` and all 15 subdir
-modules. No environment variables required, no cross-toolchain, no
-sysroot. This is the build path that produces the binary that actually
-runs on FreeBSD.
+That's it. The default `make` target builds the main `ocifbsd`
+binary plus all 6 active SUBDIRs. No environment variables
+required, no cross-toolchain, no sysroot. This is the build
+path that produces the binary that actually runs on FreeBSD.
+
+**Note**: 9 of the 15 SUBDIRs (cert, export, gc, image, logd,
+network, orchestration, pam, security) are currently commented
+out in the Makefile as deferred AI-slop refactor work. They
+build clean, link, and run only after their respective
+refactor PRs land. See `OCI-STATUS.md` §5 for per-SUBDIR
+status.
 
 **Note**: On FreeBSD, `/usr/bin/make` IS bmake (BSD make has been the
 base `make` on FreeBSD since FreeBSD 9). You do not need to install
@@ -91,22 +98,25 @@ ocifbsd-convert docker-compose.yml --format native > output.yaml
 ```
 ocifbsd
 ├── src/               # Core runtime (container lifecycle, hooks, OCI translation)
-├── image/             # Image management (pull, push, unpack, ZFS storage)
-├── network/           # Networking (bridge, VNET, CNI)
-├── security/          # Security (RCTL, MAC labels)
-├── orchestration/     # Orchestration (pods, stacks, services, health checks)
-├── convert/           # Config conversion (K8s, Docker Compose)
-├── clustering/        # Clustering (gossip, Raft, service discovery)
-├── namespace/         # Namespace isolation
-├── metrics/           # Metrics collection
-├── security-daemon/   # Security daemon (RBAC, secrets, TLS)
-├── tpm/               # TPM support (optional)
-├── pam/               # PAM authentication
-├── api/               # REST API server
-├── gc/                # Garbage collection
-├── cert/              # Certificate management
-├── logd/              # Logging daemon
-└── export/            # Cloud export (AWS, GCP, Azure)
+├── api/               # REST API server        [active, builds clean]
+├── clustering/        # Clustering (gossip, Raft)  [active, builds clean]
+├── convert/           # Config conversion (K8s, Compose)  [active, builds clean]
+├── metrics/           # Metrics collection     [active, builds clean]
+├── namespace/         # Namespace isolation    [active, builds clean]
+├── security-daemon/   # Security daemon (RBAC, secrets, TLS)  [active, builds clean]
+├── tpm/               # TPM support (optional) [active, builds clean]
+│
+# 9 SUBDIRs below are commented out in the Makefile — deferred
+# AI-slop refactor work. See OCI-STATUS.md §5 for details.
+# ├── cert/              # Certificate management
+# ├── export/            # Cloud export (AWS, GCP, Azure)
+# ├── gc/                # Garbage collection
+# ├── image/             # Image management (pull, push, unpack, ZFS storage)
+# ├── logd/              # Logging daemon
+# ├── network/           # Networking (bridge, VNET, CNI)
+# ├── orchestration/     # Orchestration (pods, stacks, services, health checks)
+# ├── pam/               # PAM authentication
+# └── security/          # Security (RCTL, MAC labels)
 ```
 
 ## Configuration

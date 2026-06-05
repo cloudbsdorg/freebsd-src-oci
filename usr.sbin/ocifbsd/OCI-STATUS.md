@@ -4,7 +4,7 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-05 03:02 UTC (22:02 CDT) — live status
+> **Last updated**: 2026-06-05 08:45 UTC (03:45 CDT) — live status
 
 ## 🎉 **BOOTSTRAP COMPLETE — `make` SUCCEEDS END-TO-END!**
 
@@ -22,9 +22,58 @@ succeeds cleanly on FreeBSD 16.0-CURRENT.
   network + orchestration (library-vs-program misconfiguration);
   security (made-up rctl_usage struct fields).
 
-The commented-out subdirs are tracked in §"Subdir status" with
+The commented-out subdirs are tracked in §5 "Subdir status" with
 per-subdir explanation of the AI-slop issue and the refactor
 work needed. None of them block the bootstrap.
+
+**Re-verified clean at 2026-06-05 07:42 UTC**: `rm -rf obj *.o .depend*
+ocifbsd && make` succeeds end-to-end on the VM. All 6 active
+SUBDIRs build clean. Binary is 50,712 bytes, links against
+libc/libjail/libutil/libzfs/libm/libpthread/libcrypto/libmd
+(per `make` `.depend` output).
+
+**Working tree**: clean as of 2026-06-05 08:45 UTC (pending commit
+of the doc refresh and the new unit-test work — see below).
+
+## 🧪 **Unit test suite landed (2026-06-05 08:42 UTC)**
+
+42/42 tests pass on the VM via `kyua test -k Kyuafile`. New files:
+
+- `tests/usr.sbin/ocifbsd/parser_test.c` — 22 tests for
+  `convert/parser.c` (yaml_escape, json_escape, native_format_*,
+  parse_yaml/json stubs).
+- `tests/usr.sbin/ocifbsd/k8s_test.c` — 20 tests for
+  `convert/k8s.c` (k8s_detect_kind for all 13 kinds, plus
+  k8s_convert_deployment and k8s_convert_multi).
+- `tests/usr.sbin/ocifbsd/Makefile` — switched to
+  `ATF_TESTS_C=parser_test k8s_test` (the correct modern variable;
+  `ATF_TESTS` is the deprecated form), `WARNS=3` (matches the
+  convert/ Makefile level), and the right `-I` paths so
+  `#include "convert/parser.c"` and `convert.h` resolve.
+- `tests/usr.sbin/ocifbsd/ocifbsd_test.c.disabled` — the original
+  test, renamed because it referenced 13+ functions
+  (ocifbsd_generate_cid, ocifbsd_validate_name, etc.) that
+  never landed in the source. Preserved for review; can be
+  revived once those functions are implemented.
+
+**Two pre-existing source bugs discovered and pinned** (not fixed
+— per CLAUDE.md "mention it - don't delete it"):
+
+1. `yaml_escape(NULL)` / `json_escape(NULL)` return `strdup("")`
+   (an empty string), not the quoted empty string `""`. The
+   `yaml_escape_null` / `json_escape_null` tests pin this.
+2. `k8s_convert_multi()` silently drops the **last** YAML document
+   in a multi-doc stream (it only processes docs that are followed
+   by another `---` separator). The `k8s_convert_multi_two_docs`
+   test pins this with a `KNOWN BUG` comment.
+
+**Build/run on the VM**:
+
+```sh
+cd ~/ocifbsd-build/tests/usr.sbin/ocifbsd
+make                            # builds parser_test + k8s_test
+kyua test -k ./Kyuafile         # runs all 42 tests
+```
 > **Branch**: `feature/oci-bootstrap`
 > **Owner**: REVYTECH, Inc.
 > **Target**: FreeBSD 16.0-CURRENT (native, tier-1)
@@ -275,9 +324,9 @@ of exactly what changed. SSH is fine for things git can't carry
 
 ## 5. Current Status
 
-### Branch: `feature/oci-bootstrap` @ `9cf85eec07e` (rebased onto main)
+### Branch: `feature/oci-bootstrap` @ `affa222bb93`
 
-**30+ commits since last status update** (2026-06-04). Major work:
+**74+ commits since session start**. Major work:
 - Makefile refactored: native is default, cross-build is opt-in.
 - README updated: leads with FreeBSD native, cross-build in §6.
 - All 78 OCI source files compile clean under FreeBSD's strict
@@ -313,8 +362,10 @@ of exactly what changed. SSH is fine for things git can't carry
   `kern.powercycle_on_panic=1`) so a CI kernel panic doesn't
   permanently halt the VM.
 
-**65+ commits** ahead of `origin/main`, working tree clean, all pushed
-to `origin/feature/oci-bootstrap`.
+**150+ commits** ahead of `origin/main`, working tree clean (modulo
+the `static static` regression fix from 2026-06-05 07:42 UTC that
+hasn't been committed yet), all pushed to
+`origin/feature/oci-bootstrap`.
 
 ### Code statistics
 
@@ -426,7 +477,7 @@ this session's fixes:
 Linker: added `md` to LIBADD for FreeBSD 16's moved-out
 SHA256_Data symbol (was in libc, now in libmd).
 
-### Subdir status: 9 of 16 SUBDIRs are broken (AI-generated stubs)
+### Subdir status: 9 of 15 SUBDIRs are commented out (deferred AI-slop work)
 
 After the main binary links, build moves to the SUBDIR phase
 (15 module executables: ocifbsd-cert, ocifbsd-export, etc.). The
@@ -522,7 +573,7 @@ updated so that:
 | `make -C usr.sbin/ocifbsd help`           | ✅ Working |
 | `make -C usr.sbin/ocifbsd audit`          | ✅ Working |
 | `make -C usr.sbin/ocifbsd info`           | ✅ Working |
-| `make -C usr.sbin/ocifbsd` (native build) | 🔄 **IN PROGRESS** — ocifbsd.c, container.c, oci2jail.c, state.c all compile clean under FreeBSD strict `-Werror`. **hooks.c**: 8 const-qual errors from my over-constification (fix in progress). Link step pending after hooks.c compiles. |
+| `make -C usr.sbin/ocifbsd` (native build) | ✅ **DONE** — verified clean at 2026-06-05 07:42 UTC. Main `ocifbsd` binary (50K) builds/links/runs. All 6 active SUBDIRs (api, clustering, convert, metrics, namespace, security-daemon, tpm) build clean. 9 SUBDIRs (cert, export, gc, image, logd, network, orchestration, pam, security) remain commented out as deferred refactor work. |
 | `make -C usr.sbin/ocifbsd install`        | ⏳ Pending native build |
 | `bmake -C usr.sbin/ocifbsd cross-build` (cross-build host) | ✅ Code in place, untested on macOS host |
 
@@ -799,6 +850,7 @@ branch, and the full `.omo/drafts/` documentation tree.
 
 | Timestamp (UTC)      | Author    | Change                                                              |
 | -------------------- | --------- | ------------------------------------------------------------------- |
+| 2026-06-05 08:45:00 | mlapointe | **Unit test suite landed**: 42/42 tests pass on VM via `kyua test`. Added `parser_test.c` (22 tests for convert/parser.c) and `k8s_test.c` (20 tests for convert/k8s.c). Renamed broken `ocifbsd_test.c` → `ocifbsd_test.c.disabled`. Switched Makefile to `ATF_TESTS_C=parser_test k8s_test` + `WARNS=3` + correct -I paths. Pinned 2 pre-existing source bugs (escape NULL returns empty string, k8s_convert_multi drops last doc). Updated this doc + README + CHANGELOG + ai-slop-backlog for BOOTSTRAP COMPLETE state. | (working tree, pending commit) |
 | 2026-06-05 03:02:00 | mlapointe | **🎉 BOOTSTRAP COMPLETE!** `make` succeeds end-to-end on FreeBSD 16. ocifbsd (50K) builds, links, runs, and shows all 8 commands (create, start, kill, delete, state, list, inspect, run). All 6 active SUBDIRs build clean: api, clustering, convert, metrics, namespace, security-daemon, tpm. 9 SUBDIRs remain commented out as deferred AI-slop refactor work. | 82bca532405
 | 2026-06-05 02:53:12 | mlapointe | Commented out orchestration/ SUBDIR. All 7 .c files (pod/stack/scheduler/health/rolling_update/orch_cli/orch_init) compile clean after ~15 fixes (json-c port path, <pthread.h> in 2 files, mkdirp extern in 3 files, ~5 static additions, ~10 unused-var removals, get_physmem+rolling_update_progress forward decls, bad spec.namespace ref). Link phase fails: no main() AND pod.c calls internal main-binary symbols (ocifbsd_create_container etc.). Same AI-slop approach as image/network/: deferred to follow-up refactor PR. | 47122a8c9dc
 | 2026-06-05 01:58:00 | mlapointe | Commented out network/ SUBDIR. All 4 .c files (network/bridge/vnet/cni) compile clean after ~30 fixes (uuidgen→uuid_create, mkdirp extern, stdarg+sys/stat+dirent includes, 10+8+5+2+5+2 static additions, unused-var removals, popen argv->string, <netinet6/in6.h> removal, json-c port path, duplicate-static cleanup). Link phase fails: no main() in any of the files, Makefile wrongly declares PROG. Same AI-slop approach as image/: deferred to follow-up refactor PR. | a907cb67f68
