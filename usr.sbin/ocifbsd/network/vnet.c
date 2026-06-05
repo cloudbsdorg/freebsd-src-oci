@@ -83,7 +83,7 @@ vnet_is_available(void)
 /*
  * Get VNET status for a jail
  */
-int
+static int
 vnet_get_jail_status(const char *jail_name, bool *has_vnet, char ***interfaces, int *ninterfaces)
 {
 	char **ifaces = NULL;
