@@ -101,6 +101,14 @@ header_callback(void *ptr, size_t size, size_t nmemb, void *stream)
 	return (size * nmemb);
 }
 
+static size_t
+header_only(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	(void)ptr;
+	(void)userdata;
+	return (size * nmemb);
+}
+
 /*
  * Initialize registry structure from reference
  */
