@@ -46,8 +46,6 @@
 
 extern int mkdirp(const char *path, mode_t mode);
 
-static int rolling_update_progress(struct rolling_update_info *info);
-
 #define MAX_ROLLING_UPDATES 256
 
 /*
@@ -84,6 +82,8 @@ struct rolling_update_info {
 static struct rolling_update_info *rolling_updates[MAX_ROLLING_UPDATES];
 static int rolling_update_count = 0;
 static pthread_mutex_t rolling_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int rolling_update_progress(struct rolling_update_info *info);
 
 /*
  * Save rolling update state to disk
@@ -128,8 +128,7 @@ int
 rolling_update_init(struct service *service, struct service_spec *new_spec)
 {
 	struct rolling_update_info *info;
-	struct service_spec *current_spec;
-	
+
 	if (service == NULL || new_spec == NULL)
 		return (-1);
 	
