@@ -40,6 +40,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <time.h>
 
 /* Log severity levels */
@@ -151,6 +152,7 @@ struct alert_rule {
     RB_ENTRY(alert_rule) entry;
 };
 RB_HEAD(alert_rule_tree, alert_rule);
+RB_PROTOTYPE(alert_rule_tree, alert_rule, entry, alert_compare);
 
 /* Log query parameters */
 struct log_query {
@@ -235,6 +237,7 @@ struct event_entry {
     RB_ENTRY(event_entry) entry;
 };
 RB_HEAD(event_tree, event_entry);
+RB_PROTOTYPE(event_tree, event_entry, entry, event_compare);
 
 /* Function declarations */
 

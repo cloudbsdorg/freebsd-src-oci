@@ -37,11 +37,13 @@
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/mount.h>
-#include <sys/json.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <fts.h>
 #include <ifaddrs.h>
 #include <libutil.h>
@@ -63,6 +65,63 @@
 #include "logd.h"
 #include "../include/ocifbsd.h"
 
+static int	safe_shell_exec(const char *command);
+static void	*rotation_worker(void *arg);
+static void	*forward_worker(void *arg);
+static void	*alert_worker(void *arg);
+static int	log_write_internal(int severity, int source,
+    const char *source_name, const char *fields_json, const char *message);
+static int	log_write_entry(struct log_entry *entry);
+static int	event_compare(struct event_entry *a, struct event_entry *b);
+static int	alert_compare(struct alert_rule *a, struct alert_rule *b);
+static void	event_trigger_webhooks(struct event_entry *event);
+static struct log_forwarder *forwarder_find(const char *name);
+static int	forwarder_send_udp(struct log_forwarder *fw, const char *line);
+static int	forwarder_send_fluentd(struct log_forwarder *fw,
+    struct log_entry *entry);
+static int	forwarder_send_elastic(struct log_forwarder *fw,
+    struct log_entry *entry);
+static int	forwarder_send_splunk(struct log_forwarder *fw,
+    struct log_entry *entry);
+static int	forwarder_send_custom(struct log_forwarder *fw, const char *line);
+static int	webhook_deliver(struct webhook_delivery *wh);
+static void	sig_handler(int sig);
+static void	event_loop(void);
+
+/*
+ * Recursive mkdir(2). FreeBSD 16's <libutil.h> does not export mkdirp
+ * in any public header. We provide a local copy.
+ */
+static int
+mkdirp_local(const char *path, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *p;
+	size_t len;
+
+	if (path == NULL || *path == '\0')
+		return (-1);
+
+	len = strlcpy(buf, path, sizeof(buf));
+	if (len >= sizeof(buf))
+		return (-1);
+
+	for (p = buf + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, mode) != 0 && errno != EEXIST)
+			return (-1);
+		*p = '/';
+	}
+
+	if (mkdir(buf, mode) != 0 && errno != EEXIST)
+		return (-1);
+	return (0);
+}
+
+#define	mkdirp(path, mode)	mkdirp_local((path), (mode))
+
 /* Global state */
 static struct log_ringbuf *main_ringbuf = NULL;
 static struct forwarder_list forwarders;
@@ -70,7 +129,7 @@ static struct alert_rule_tree alert_rules;
 static struct event_tree events;
 static struct webhook_queue webhooks;
 static struct logd_config config;
-static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t logd_state_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t rotate_thread;
 static pthread_t forward_thread;
 static pthread_t alert_thread;
@@ -276,7 +335,6 @@ log_write_internal(int severity, int source, const char *source_name,
     const char *fields_json, const char *message)
 {
     struct log_entry entry;
-    uint64_t id;
 
     memset(&entry, 0, sizeof(entry));
 
@@ -295,7 +353,7 @@ log_write_internal(int severity, int source, const char *source_name,
     strlcpy(entry.hostname, hostname, sizeof(entry.hostname));
 
     entry.pid = getpid();
-    entry.tid = pthread_self();
+    entry.tid = (uint32_t)(uintptr_t)pthread_self();
 
     /* Get username if available */
     struct passwd *pw = getpwuid(getuid());
@@ -642,10 +700,8 @@ int
 log_retention_apply(void)
 {
     char cmd[PATH_MAX];
-    time_t cutoff;
 
     /* Delete hot logs older than retention_hot days */
-    cutoff = time(NULL) - (config.retention_hot * 86400);
     snprintf(cmd, sizeof(cmd),
         "find %s -name 'ocifbsd.*.log' -mtime +%d -delete",
         config.storage_path, config.retention_hot);
@@ -678,13 +734,14 @@ logd_reload_config(const char *config_path)
 }
 
 /* Event tree comparison */
-int
+static int
 event_compare(struct event_entry *a, struct event_entry *b)
 {
     if (a->id < b->id) return (-1);
     if (a->id > b->id) return (1);
     return (0);
 }
+RB_GENERATE(event_tree, event_entry, entry, event_compare);
 
 /*
  * Publish an event
@@ -782,11 +839,12 @@ event_trigger_webhooks(struct event_entry *event)
 /*
  * Alert rule comparison
  */
-int
+static int
 alert_compare(struct alert_rule *a, struct alert_rule *b)
 {
     return (strcmp(a->name, b->name));
 }
+RB_GENERATE(alert_rule_tree, alert_rule, entry, alert_compare);
 
 /*
  * Add alert rule
@@ -797,18 +855,18 @@ alert_rule_add(struct alert_rule *rule)
     if (rule == NULL || rule->name[0] == '\0')
         return (-1);
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     struct alert_rule *existing;
     existing = RB_FIND(alert_rule_tree, &alert_rules, rule);
     if (existing != NULL) {
-        pthread_mutex_unlock(&state_lock);
+        pthread_mutex_unlock(&logd_state_lock);
         return (-1);  /* Already exists */
     }
 
     RB_INSERT(alert_rule_tree, &alert_rules, rule);
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (0);
 }
@@ -824,7 +882,7 @@ alert_rule_remove(const char *name)
     if (name == NULL)
         return (-1);
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     strlcpy(key.name, name, sizeof(key.name));
     rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
@@ -833,7 +891,7 @@ alert_rule_remove(const char *name)
         free(rule);
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (rule ? 0 : -1);
 }
@@ -851,20 +909,20 @@ alert_rule_list(int *count)
     if (count == NULL)
         return (NULL);
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
         REALLOC_SAFE(rules, (n + 1) * sizeof(*rules), realloc_fail);
         rules[n++] = rule;
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     *count = n;
     return (rules);
 
 realloc_fail:
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
     free(rules);
     *count = 0;
     return (NULL);
@@ -882,7 +940,7 @@ alert_process_entry(struct log_entry *entry)
     if (entry == NULL)
         return (0);
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
         if (!rule->enabled || rule->silenced)
@@ -930,7 +988,7 @@ alert_process_entry(struct log_entry *entry)
         }
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (0);
 }
@@ -981,7 +1039,7 @@ alert_silence(const char *name, time_t until)
 {
     struct alert_rule key, *rule;
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     strlcpy(key.name, name, sizeof(key.name));
     rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
@@ -990,7 +1048,7 @@ alert_silence(const char *name, time_t until)
         /* Store silence duration for later */
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (rule ? 0 : -1);
 }
@@ -1013,14 +1071,14 @@ alert_is_silenced(const char *name)
     struct alert_rule key, *rule;
     bool silenced = false;
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     strlcpy(key.name, name, sizeof(key.name));
     rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
     if (rule)
         silenced = rule->silenced;
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (silenced);
 }
@@ -1048,16 +1106,16 @@ forwarder_add(struct log_forwarder *fw)
     if (fw == NULL || fw->name[0] == '\0')
         return (-1);
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     if (forwarder_find(fw->name) != NULL) {
-        pthread_mutex_unlock(&state_lock);
+        pthread_mutex_unlock(&logd_state_lock);
         return (-1);
     }
 
     LIST_INSERT_HEAD(&forwarders, fw, next);
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (0);
 }
@@ -1070,7 +1128,7 @@ forwarder_remove(const char *name)
 {
     struct log_forwarder *fw;
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     fw = forwarder_find(name);
     if (fw) {
@@ -1078,7 +1136,7 @@ forwarder_remove(const char *name)
         free(fw);
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (fw ? 0 : -1);
 }
@@ -1096,20 +1154,20 @@ forwarder_list(int *count)
     if (count == NULL)
         return (NULL);
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     LIST_FOREACH(fw, &forwarders, next) {
         REALLOC_SAFE(list, (n + 1) * sizeof(*list), realloc_fail);
         list[n++] = fw;
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     *count = n;
     return (list);
 
 realloc_fail:
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
     free(list);
     *count = 0;
     return (NULL);
@@ -1124,7 +1182,7 @@ forwarder_enable(const char *name)
     struct log_forwarder *fw;
     int ret = -1;
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     fw = forwarder_find(name);
     if (fw) {
@@ -1132,7 +1190,7 @@ forwarder_enable(const char *name)
         ret = 0;
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (ret);
 }
@@ -1143,7 +1201,7 @@ forwarder_disable(const char *name)
     struct log_forwarder *fw;
     int ret = -1;
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     fw = forwarder_find(name);
     if (fw) {
@@ -1151,7 +1209,7 @@ forwarder_disable(const char *name)
         ret = 0;
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (ret);
 }
@@ -1170,7 +1228,7 @@ forwarder_send(struct log_entry *entry)
 
     line = log_format_entry(entry, LOG_FORMAT_JSON);
 
-    pthread_mutex_lock(&state_lock);
+    pthread_mutex_lock(&logd_state_lock);
 
     LIST_FOREACH(fw, &forwarders, next) {
         if (!fw->enabled)
@@ -1197,7 +1255,7 @@ forwarder_send(struct log_entry *entry)
         }
     }
 
-    pthread_mutex_unlock(&state_lock);
+    pthread_mutex_unlock(&logd_state_lock);
 
     return (0);
 }
@@ -1224,7 +1282,7 @@ forwarder_flush(void)
         count++;
 
         /* Batch limit */
-        if (count >= config.forward_batch_size)
+        if (count >= (uint64_t)config.forward_batch_size)
             break;
     }
 
@@ -1366,7 +1424,6 @@ static int
 webhook_deliver(struct webhook_delivery *wh)
 {
     int sock;
-    struct http_request req;
     (void)wh;
 
     sock = socket(AF_INET, SOCK_STREAM, 0);

@@ -1,0 +1,140 @@
+.\"-
+.\" Copyright (c) 2024 The FreeBSD Foundation
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" This software was developed by Klara, Inc. under sponsorship
+.\" from the FreeBSD Foundation.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+.\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+.\" IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+.\" INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+.\" BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+.\" LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+.\" AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+.\" OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+.\" USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+.\" DAMAGE.
+.\"
+.Dd June 5, 2026
+.Dt OCIFBSD-LOGD 8
+.Os
+.Sh NAME
+.Nm ocifbsd-logd
+.Nd ocifbsd log aggregation and forwarding daemon
+.Sh SYNOPSIS
+.Nm
+.Op Fl f
+.Op Fl c Ar config_file
+.Op Fl l Ar log_level
+.Sh DESCRIPTION
+The
+.Nm
+daemon aggregates, stores, forwards, and alerts on log entries
+produced by the
+.Xr ocifbsd 8
+OCI runtime and the jails it manages.
+It keeps the most recent entries in a bounded in-memory ring
+buffer, rotates them to disk on a schedule, forwards copies to
+configured external endpoints, and evaluates alert rules that
+may invoke webhooks, send email, or run an administrator-defined
+command.
+.Pp
+The options are:
+.Bl -tag -width indent
+.It Fl f
+Run in the foreground.
+The default is to daemonize via
+.Xr daemon 3 .
+.It Fl c Ar config_file
+Load
+.Ar config_file
+instead of the default
+.Pa /etc/ocifbsd/ocifbsd.conf .
+The configuration controls ring-buffer size, retention
+windows, forwarder destinations, and alert rules.
+.It Fl l Ar log_level
+Set the minimum severity captured by the daemon.
+Valid levels are
+.Dq emerg , alert , crit , err , warning , notice , info , debug ,
+and
+.Dq trace .
+.El
+.Pp
+The daemon handles
+.Dv SIGTERM
+and
+.Dv SIGINT
+for graceful shutdown and
+.Dv SIGHUP
+to reload the configuration file.
+.Ss Subsystems
+.Bl -bullet
+.It
+An in-memory ring buffer
+.Pq ringbuf.c
+backs the query API and is the source of truth for recent
+entries.
+.It
+A background rotation worker
+.Pq rotation_worker
+writes the current ring contents to timestamped files under
+.Pa /var/log/ocifbsd
+and applies the configured retention policy.
+.It
+A forward worker
+.Pq forward_worker
+periodically delivers new entries to every enabled
+forwarder (syslog over UDP/TCP, fluentd, Elasticsearch,
+Splunk, or a custom HTTP webhook) using
+.Xr libcurl 3 .
+.It
+An alert worker
+.Pq alert_worker
+evaluates incoming entries against the alert rule tree and
+fires actions when a rule's count threshold is reached
+within its time window.
+.It
+An event stream
+.Pq event_publish , event_query
+records lifecycle events for pods, containers, nodes, and
+cluster members and dispatches them to registered webhooks.
+.El
+.Sh FILES
+.Bl -tag -width /var/log/ocifbsd -compact
+.It Pa /etc/ocifbsd/ocifbsd.conf
+Default configuration file.
+.It Pa /var/log/ocifbsd
+Default storage path for rotated log files
+.Pq Dq config.storage_path .
+.It Pa /var/log/ocifbsd/ocifbsd.YYYYMMDD-HHMMSS.log
+Rotated log file produced by
+.Cm log_rotate .
+.El
+.Sh SEE ALSO
+.Xr ocifbsd 8 ,
+.Xr daemon 3 ,
+.Xr curl 3 ,
+.Xr syslog 3
+.Sh HISTORY
+The
+.Nm
+command first appeared in
+.Fx 16.0 .
+.Sh AUTHORS
+The
+.Nm
+utility was developed by
+.An Klara, Inc.
+under sponsorship from
+.The FreeBSD Foundation .

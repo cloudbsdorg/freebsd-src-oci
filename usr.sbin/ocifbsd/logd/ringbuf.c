@@ -148,8 +148,6 @@ ringbuf_write(struct log_ringbuf *rb, struct log_entry *entry)
 struct log_entry *
 ringbuf_read(struct log_ringbuf *rb, uint64_t id)
 {
-    uint64_t pos;
-
     if (rb == NULL)
         return (NULL);
 

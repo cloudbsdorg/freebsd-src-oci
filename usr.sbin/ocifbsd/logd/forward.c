@@ -34,7 +34,6 @@
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/json.h>
 #include <sys/queue.h>
 
 #include <errno.h>
