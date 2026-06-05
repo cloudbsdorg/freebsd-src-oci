@@ -51,7 +51,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sysexits.h>
-#include <ossp/uuid.h>
+
+extern int mkdirp(const char *path, mode_t mode);
 
 #include "network.h"
 
@@ -566,7 +567,6 @@ network_connect(const char *network_id, const char *container_id,
 {
 	struct endpoint *endpoint = NULL;
 	char state_file[PATH_MAX];
-	char *output = NULL;
 	char bridge_name[64] = "";
 	char *side_a = NULL, *side_b = NULL;
 
@@ -742,7 +742,6 @@ network_list(struct network_config ***networks, int *nnetworks)
 int
 vnet_create_jail(const char *jail_name, struct vnet_config *config)
 {
-	char cmd[256];
 	int ret;
 
 	/* Check if vnet is supported */
