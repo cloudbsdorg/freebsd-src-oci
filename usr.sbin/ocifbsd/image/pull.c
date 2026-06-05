@@ -690,7 +690,6 @@ parse_manifest_json(json_object *obj, struct oci_manifest **manifest)
 int
 parse_manifest(const char *json, size_t len, struct oci_manifest **manifest)
 {
-	struct oci_manifest *m;
 	json_tokener *tok;
 	enum json_tokener_error err;
 	json_object *obj;
@@ -755,8 +754,6 @@ fetch_config(struct registry *reg, const char *repo, const char *digest,
 {
 	char *url;
 	char *path;
-	char *data = NULL;
-	size_t data_len;
 	int ret = -1;
 
 	if (asprintf(&path, "/v2/%s/blobs/%s", repo, digest) == -1)
@@ -834,7 +831,7 @@ parse_config(const char *json, size_t len, struct oci_config **config)
 
 	/* Parse config section */
 	if (json_object_object_get_ex(obj, "config", &config_obj)) {
-		json_object *env;
+		json_object *env, *workingDir, *user;
 
 		if (json_object_object_get_ex(config_obj, "Env", &env)) {
 			int i, n = json_object_array_length(env);
