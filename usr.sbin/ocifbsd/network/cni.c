@@ -98,7 +98,6 @@ cni_parse_config(const char *path, struct cni_config **config)
 
 	/* Read JSON config */
 	char *json = NULL;
-	size_t json_len;
 	int fd = open(path, O_RDONLY);
 	if (fd < 0)
 		return (-1);
