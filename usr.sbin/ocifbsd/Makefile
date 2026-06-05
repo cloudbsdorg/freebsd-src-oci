@@ -26,6 +26,12 @@ SRCS=	\
 	src/hooks.c \
 	src/utils.c
 
+# ocifbsd has no tests/ subdir yet (the test suite lives at
+# ../../tests/usr.sbin/ocifbsd/ via the 'make test' target).
+# Disable MK_TESTS so bmake doesn't try to descend into a
+# nonexistent tests/ directory.
+MK_TESTS=	no
+
 # === Include src.opts.mk BEFORE any SUBDIR.${MK_FOO} usage ===
 # BSD make processes the Makefile top-to-bottom. The SUBDIR.${MK_TESTS}
 # conditional below requires MK_TESTS to be defined (via src.opts.mk).
