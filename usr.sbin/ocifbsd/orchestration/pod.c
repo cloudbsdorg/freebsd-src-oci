@@ -39,6 +39,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <libutil.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -269,8 +270,7 @@ pod_start(struct pod *pod)
 {
 	int i;
 	int ret = 0;
-	char *container_ids;
-	
+
 	if (pod == NULL)
 		return (-1);
 	
