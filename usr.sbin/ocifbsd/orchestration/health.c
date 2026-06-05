@@ -144,7 +144,6 @@ health_check_http(const char *url, int *status_code)
 	char *p;
 	int sock;
 	struct sockaddr_in addr;
-	char request[1024];
 	char response[1024];
 	FILE *fp;
 	
