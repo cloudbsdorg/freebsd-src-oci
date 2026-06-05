@@ -12,7 +12,7 @@
 > - `usr.sbin/bhyve/rdp.c` — skeleton for a future RDP transport
 > - `usr.sbin/bhyve/pci_fbuf.c` — wired through `display_transport_init` (no more direct `rfb_init`); supports both `rfb=` (legacy) and `transport=rfb,...` (new)
 > - `sys/sys/jail.h` + `sys/kern/kern_jail.c` — new params: `allow.fbuf`, `fbuf.nokbd`, `fbuf.nomouse`
-> - `sys/modules/fbuf_jail/` — new kernel module: per-jail framebuffer + kbd + mouse devices
+> - `sys/modules/displayd/` — new kernel module: per-jail framebuffer + kbd + mouse devices
 > - `share/man/man5/jail.conf.5` — documents the new params
 > - `usr.sbin/bhyve/display-abstraction.md` — architecture doc
 >
@@ -45,7 +45,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 | §1 | TL;DR | Quick summary, critical path, frame size, frame rate sysctls | 3 |
 | §2 | Plan Navigation Index | This section (agent context management) | 33 |
 | §3 | Visual Overview | 9 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram, multi-display, audio sources/sinks) | 260 |
-| §4 | Context | 21 design sections (§4.1-§4.21, all physically inside this section) | 652 |
+| §4 | Context | 23 design sections (§4.1-§4.23, all physically inside this section) | 652 |
 | §5 | Tunables Reference | 80+ sysctls in 13 sub-sections | 5067 |
 | §6 | Work Objectives | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5306 |
 | §7 | Verification Strategy | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5642 |
@@ -60,31 +60,33 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 | §16 | Commit Strategy | Per-task commits | 12175 |
 | §17 | Success Criteria | Verification commands + checklist | 12179 |
 
-### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition; all 21 sections physically located inside §4 after the structural reorg)
+### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition; all 23 sections physically located inside §4 after the structural reorg)
 
 | § | Design section | Purpose | First line |
 |---|---|---|---|
 | §4.1 | Original Request | What the user asked for | 654 |
-| §4.2 | Investigation Summary | What we found (3 layers) | 658 |
-| §4.3 | GPU Resource Governance (T19-T21 framework) | GPU mediation rules | 675 |
-| §4.4 | Preflight check framework | 20 preflight checks | 701 |
-| §4.5 | Transport security (VNC hardening) | TLS 1.3, certbot, etc. | 736 |
-| §4.6 | Backward compatibility | Upgrade-must-not-break promise | 785 |
-| §4.7 | Architecture support (jails run everywhere) | Big/little endian, multi-arch | 1000 |
-| §4.8 | Console broker / multiplexer | Broker architecture | 1085 |
-| §4.9 | Localhost by default (security principle) | All new endpoints default to localhost | 1257 |
-| §4.10 | IPv6 / dual-stack support | IPv6 default | 1332 |
-| §4.11 | Instrumentation, statistics, diagnostics | T49-T52 design | 1450 |
-| §4.12 | Multi-display support | Walls, ports, mixed resolutions | 1630 |
-| §4.13 | GPU ports model | Per-port resource allocation, port policy, gpu-port-info tool | 1845 |
-| §4.14 | Audio support | AC97/HDA, BDP audio messages | 2012 |
-| §4.15 | Cast tool design considerations | Cast (design only) | 2303 |
-| §4.16 | Combining cast methods | Multi-protocol cast | 2498 |
-| §4.17 | Bluetooth considerations (future) | BT (design only) | 2611 |
-| §4.18 | Mediated passthrough (architectural principle) | Control plane retained | 3642 |
-| §4.19 | Multi-device / heterogeneous hardware | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 3922 |
-| §4.20 | Workload-driven GPU selection + dynamic capability discovery | Plug-in capability registry | 4353 |
-| §4.21 | FreeBSD 16 target platform | Version pin | 4992 |
+| §4.2 | Additive KBD/Mouse model | Default-on kbd+mouse with fbuf, opt-out via fbuf.nokbd/fbuf.nomouse | 658 |
+| §4.3 | Investigation Summary | What we found (3 layers) | 716 |
+| §4.4 | GPU Resource Governance (T19-T21 framework) | GPU mediation rules | 733 |
+| §4.5 | Preflight check framework | 20 preflight checks | 759 |
+| §4.6 | Transport security (VNC hardening) | TLS 1.3, certbot, etc. | 794 |
+| §4.7 | Backward compatibility | Upgrade-must-not-break promise | 843 |
+| §4.8 | Architecture support (jails run everywhere) | Big/little endian, multi-arch | 1058 |
+| §4.9 | Console broker / multiplexer | Broker architecture | 1143 |
+| §4.10 | Localhost by default (security principle) | All new endpoints default to localhost | 1315 |
+| §4.11 | IPv6 / dual-stack support | IPv6 default | 1390 |
+| §4.12 | Instrumentation, statistics, diagnostics | T49-T52 design | 1508 |
+| §4.13 | Multi-display support | Walls, ports, mixed resolutions | 1688 |
+| §4.14 | GPU ports model | Per-port resource allocation, port policy, gpu-port-info tool | 1903 |
+| §4.15 | Audio support | AC97/HDA, BDP audio messages | 2070 |
+| §4.16 | Cast tool design considerations | Cast (design only) | 2361 |
+| §4.17 | Combining cast methods | Multi-protocol cast | 2556 |
+| §4.18 | Bluetooth considerations (future) | BT (design only) | 2669 |
+| §4.19 | Mediated passthrough (architectural principle) | Control plane retained | 3700 |
+| §4.20 | Multi-device / heterogeneous hardware | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 3980 |
+| §4.21 | Workload-driven GPU selection + dynamic capability discovery | Plug-in capability registry | 4411 |
+| §4.22 | FreeBSD 16 target platform | Version pin | 5050 |
+| §4.23 | Auto-load / zero-friction (no operator config changes) | kld_list, rc.conf, devd, cert auto-gen, hot-plug | ~5200 (after §4.22) |
 
 (Line numbers are approximate; use `grep -n "^## " file.md` for the live numbers.)
 
@@ -100,7 +102,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 
 ### Agent Context Management (the "how to not run out of context" section)
 
-The plan is **9,607 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
+The plan is **12,638 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
 
 **The solution: structured context management per task.**
 
@@ -206,8 +208,8 @@ When the agent reads the plan, it should:
 - Use `grep -A 50 "T8\." plan.md` to get a task body
 
 The plan uses consistent syntax for cross-references:
-- `§4.17` is the Bluetooth design section
-- `[T12]` is the fbuf_jail task
+- `§4.18` is the Bluetooth design section
+- `[T12]` is the displayd task
 - `T12.UNIT-3` is the 3rd ATF C test in T12
 - `T12.QA-1` is the 1st QA scenario in T12
 
@@ -286,7 +288,7 @@ graph TB
         J1[jail: web1<br/>allow.fbuf]
         J2[jail: db1<br/>allow.fbuf]
         VM1[bhyve: app1<br/>pci_fbuf]
-        FBUF_MOD[fbuf_jail module<br/>kernel]
+        FBUF_MOD[displayd module<br/>kernel]
         GPU_RES[gpu_resource<br/>kernel framework]
         HOST_QUOTA[host_gpu_quota<br/>hw.gpu.0.share]
         PHYSICAL_GPU[Single Physical GPU<br/>nvidia / AMD / Intel]
@@ -509,7 +511,7 @@ gantt
 
     section Wave 3: Wire-up
     T11 rfb wrap               :t11, after t7 t8, 5d
-    T12 fbuf_jail module       :t12, after t5 t8 t9 t10 t22, 7d
+    T12 displayd module       :t12, after t5 t8 t9 t10 t22, 7d
     T13 pci_fbuf wire          :t13, after t7 t11 t27, 4d
     T14 rdp stub               :t14, after t7 t27, 2d
     T15 jail example           :t15, after t12, 3d
@@ -540,7 +542,7 @@ gantt
     T41 resource discovery     :t41, after t9 t12 t40, 4d
     T42 transport bridge       :t42, after t7 t11 t12, 5d
     T43 audit                  :t43, after t25 t26 t35 t40-t42, 3d
-    T44 libbdp                 :t44, after t39, 4d
+    T44 libdisplay                 :t44, after t39, 4d
     T45 sample client          :t45, after t44, 3d
     T46 e2e broker test        :t46, after t38-t45, 2d
     T47 broker docs            :t47, after t34 t36 t38 t40 t44, 3d
@@ -598,7 +600,7 @@ classDiagram
         -vm_mmap_memseg
     }
 
-    class fbuf_jail_backend {
+    class displayd_backend {
         -shm: void*
     }
 
@@ -638,7 +640,7 @@ classDiagram
     display_transport <|.. bdp_transport
     display_transport <|.. bdp_multicast_transport
     display_backend <|.. pci_fbuf_backend
-    display_backend <|.. fbuf_jail_backend
+    display_backend <|.. displayd_backend
     display_backend <|.. gpu_resource
     display_broker --> display_transport
     display_broker --> preflight
@@ -654,6 +656,64 @@ classDiagram
 ### Original Request
 > "look for the framebuffer that is used with the VMM and bhyve, and try and understand it a bit here. I want to abstract it so that other things like jails can use it. right now VNC connections are supported, i want to abstract that so we can use other remote desktop tooling and protocols."
 > "for the jails, I want a switch in the jail options to add in the framebuffer and the keyboard and mouse, adding in the framebuffer should bring in the keyboard and mouse automatically, but can be disabled if specified"
+
+### Additive KBD/Mouse model (the "opt-out via fbuf.nokbd / fbuf.nomouse" rule)
+
+The user said: *"i want the keybard and mouse additive, so fbuf.nokbd, fbuf.nomouse are the opposite of that"*. The model is:
+
+**Additive** = the keyboard and mouse are **included by default** when the framebuffer is enabled. The user does not have to specify them separately. The opt-out flags (`fbuf.nokbd` and `fbuf.nomouse`) are the **opposite** — they disable the additive behavior. This is a deliberate inversion of the usual "opt-in" pattern because the user's original request was *"adding in the framebuffer should bering in the keyboard and mouse automatically, but can be disabled if specified"* — i.e., the convenience of "just works" beats the explicitness of "you must opt in".
+
+**Four states (bhyve side, single fbuf):**
+
+| Config | `/dev/fb0` | `/dev/kbd0` | `/dev/ums0` | Notes |
+|---|---|---|---|---|
+| `bhyve -s 0,fbuf,...` (no opt-out) | ✓ | ✓ | ✓ | **DEFAULT** — additive on |
+| `bhyve -s 0,fbuf,...,nokbd` | ✓ | ✗ | ✓ | keyboard disabled |
+| `bhyve -s 0,fbuf,...,nomouse` | ✓ | ✓ | ✗ | mouse disabled |
+| `bhyve -s 0,fbuf,...,nokbd,nomouse` | ✓ | ✗ | ✗ | only framebuffer |
+
+**Four states (jail side, single fbuf):**
+
+| Config | `/dev/fb0` | `/dev/kbd0` | `/dev/ums0` | Notes |
+|---|---|---|---|---|
+| `allow.fbuf;` (no opt-out) | ✓ | ✓ | ✓ | **DEFAULT** — additive on |
+| `allow.fbuf; fbuf.nokbd;` | ✓ | ✗ | ✓ | keyboard disabled |
+| `allow.fbuf; fbuf.nomouse;` | ✓ | ✓ | ✗ | mouse disabled |
+| `allow.fbuf; fbuf.nokbd; fbuf.nomouse;` | ✓ | ✗ | ✗ | only framebuffer |
+
+**Multi-display (T53):** the same per-display model applies. `fbuf.0.nokbd` disables kbd on display 0, `fbuf.1.nomouse` disables mouse on display 1, etc. By default ALL displays get the additive kbd+mouse. **The shared kbd/ptr focus** (T53) works across displays of the same VM: even if display 0 is on the left and display 1 is on the right, the user types into the currently-focused display and the mouse moves between them.
+
+**Why "additive" (default-on) is the right call:**
+- The user's original request explicitly said "automatically" and "disabled if specified" — the additive model satisfies both
+- Zero-friction: a jail with just `allow.fbuf;` gets a fully functional display+input out of the box
+- Backward compat: a bhyve `-s 0,fbuf,...` with no opt-out gets the same behavior as before the plan (kbd+mouse + framebuffer all come in)
+- The opt-out flags are spelled clearly (`fbuf.nokbd`, `fbuf.nomouse`) — no ambiguity for operators who want to disable
+- Default = "more functional", opt-out = "less functional" — the safer direction (operators who want full control can opt out; operators who don't care get everything)
+
+**Why NOT "opt-in" (e.g., `fbuf.addkbd`, `fbuf.addmouse`):**
+- Operators who don't read the docs would get a working display with NO input — they'd type and nothing would happen, then file a bug
+- "Default-off" for input would be a security regression in some use cases (e.g., a kiosk where you want kbd to be available out of the box)
+- The original user request was explicit: "automatically"
+
+**Implementation rule (T9, T12, T13 must enforce):**
+- `allow.fbuf` (or `-s N,fbuf,...`) → create `/dev/fb0` AND `/dev/kbd0` AND `/dev/ums0` by default
+- The default-on behavior is the **only** behavior the docstring / man page / help text describes
+- `fbuf.nokbd` and `fbuf.nomouse` are documented in the SAME man page section, right after the default, with the warning: "set these only if you have a specific reason to disable kbd/mouse"
+
+**Test requirements (added to T12, T18, T53):**
+- ATF C test `tc_fbuf_default_kbd_mouse_additive` — verify a jail with `allow.fbuf;` (no opt-out) gets all 3 devices (`/dev/fb0`, `/dev/kbd0`, `/dev/ums0`)
+- ATF C test `tc_fbuf_nokbd_disables_kbd` — verify `allow.fbuf; fbuf.nokbd;` produces `/dev/fb0` + `/dev/ums0` but NO `/dev/kbd0`
+- ATF C test `tc_fbuf_nomouse_disables_mouse` — verify `allow.fbuf; fbuf.nomouse;` produces `/dev/fb0` + `/dev/kbd0` but NO `/dev/ums0`
+- ATF C test `tc_fbuf_both_optout_only_fb` — verify `allow.fbuf; fbuf.nokbd; fbuf.nomouse;` produces ONLY `/dev/fb0`
+- Shell test `sh_fbuf_bhyve_legacy_default_additive` — verify `bhyve -s 0,fbuf,...` (no opt-out) gets all 3 PCI emulated devices
+- Shell test `sh_fbuf_bhyve_nokbd_nomouse` — verify `bhyve -s 0,fbuf,...,nokbd,nomouse` gets only the framebuffer
+- Multi-display variant (T53): `tc_fbuf_multi_display_per_display_optout` — verify `fbuf.0.nokbd` disables kbd on display 0 only, `fbuf.1.nomouse` disables mouse on display 1 only, displays 2+ still get both
+
+**Must NOT do (added to T9, T12, T13, T53):**
+- Do NOT make `fbuf.nokbd` and `fbuf.nomouse` default to ON. They are explicit opt-out flags.
+- Do NOT add an opt-in variant like `fbuf.addkbd` / `fbuf.addmouse` — the additive model is "default-on", not "opt-in".
+- Do NOT change the default behavior in a future version without a deprecation cycle — operators depend on the additive default.
+- Do NOT omit `/dev/kbd0` or `/dev/ums0` "for security" — the additive model is the explicit design choice.
 
 ### Investigation Summary
 
@@ -798,12 +858,12 @@ The user said: "make sure that current tooling and configurations are not impact
    - `host.*`, `path.*`, `exec.*`, `mount.*`, `vnet.*`, `ip4.*`, `ip6.*` — unchanged.
    - `jail_set(2)`, `jail_get(2)`, `jail_create(3)`, `jail_remove(3)` — the libjail ABI is unchanged. New params are additions.
    - `jail(8)`, `jls(8)`, `jexec(8)` — the CLI surface is unchanged. New flags are additions.
-3. **VMM / VMMAPI** — `sys/amd64/vmm/`, `lib/libvmmapi/`, `/dev/vmm/*` — **not touched by this plan**. The kernel VMM module and its userspace API are out of scope. New framebuffer work is in userspace (`usr.sbin/bhyve/`) and in the new `sys/modules/fbuf_jail/` kernel module (additive, opt-in).
+3. **VMM / VMMAPI** — `sys/amd64/vmm/`, `lib/libvmmapi/`, `/dev/vmm/*` — **not touched by this plan**. The kernel VMM module and its userspace API are out of scope. New framebuffer work is in userspace (`usr.sbin/bhyve/`) and in the new `sys/modules/displayd/` kernel module (additive, opt-in).
 4. **VNC clients** — every existing RFB 3.x client (including plaintext-only ones like TightVNC 1.3) continues to work, **as long as the operator hasn't explicitly set `transport.tls.mode=required`**. The default for legacy `rfb=` configs is `tls=optional`, which accepts both plaintext and TLS connections. To force TLS-only, the operator must opt in.
 5. **TLS / cert ecosystem** — existing certbot-managed certs at `/etc/letsencrypt/live/...` are discovered automatically by the cert discovery policy (T30). No certbot reconfig needed. Existing self-signed certs are loaded as-is. No regression.
 6. **bhyve_config(5) / jail.conf(5) syntax** — the file format is unchanged. Old files parse byte-for-byte. New keys are additions.
 7. **Config-file migration** — handled silently by T13 (bhyve side) and T21 (jail side). No manual migration step required. The user never has to edit their config to keep working. They get a one-line deprecation warning and that's it.
-8. **Kernel modules** — all new modules (`sys/modules/fbuf_jail/`, `sys/modules/preflight/`) are **additive**. They do not change behavior of any existing module. If not loaded, the system behaves exactly as it does today.
+8. **Kernel modules** — all new modules (`sys/modules/displayd/`, `sys/modules/preflight/`) are **additive**. They do not change behavior of any existing module. If not loaded, the system behaves exactly as it does today.
 9. **sysctls / tunables** — all new sysctls are additions under new OIDs (`hw.gpu.*`, `security.transport.*`, `security.jail.preflight.*`). No existing sysctl changes meaning. `kern.jail.*` param set is purely additive.
 10. **ABI / SONAME** — `libvmmapi.so`, `libjail.so` are not bumped. New symbols are additions, not replacements.
 
@@ -834,6 +894,22 @@ The user said: "make sure that current tooling and configurations are not impact
 - T25 (VeNCrypt) — TLS is opt-in. Plaintext is reachable via the old `rfb=` config or via explicit `transport.tls.mode=optional|disabled`.
 - T27 (display_transport security) — `NULL` security falls back to legacy plaintext defaults, not to TLS-required. Operators must opt in to TLS.
 - T30 (cert loader + self-signed) — auto-gen only fires when no cert is found anywhere. If the operator has configured any cert path, the auto-gen does not interfere.
+
+**No "old product" to deprecate — `fbuf_jail` was never a shipped module:**
+
+The project is **`displayd`** from day one. There is no `fbuf_jail.ko` to deprecate (no product was ever made). The kernel module, broker daemon, library, man pages, and config paths all use the `displayd` name on first commit. No deprecation aliases, no symlinks-to-old-name, no "previously known as" framing. Operators upgrading to FreeBSD 16+ get the new names; nothing to migrate.
+
+**Jail param namespace preserved (real backcompat, not a deprecation):**
+
+The `fbuf.*` jail param namespace is a **real existing API** in the FreeBSD source tree (jail params `allow.fbuf`, plus the existing framebuffer-related parameters). The new `displayd.ko` kernel module **implements** this namespace — it doesn't replace it. The names `allow.fbuf`, `fbuf.nokbd`, `fbuf.nomouse`, `fbuf.N.*` are the user-facing API for jail framebuffer config. Operators using any of these get the new `displayd` module transparently when they upgrade FreeBSD. No config change required. No deprecation warning (these names are current, not old).
+
+Similarly, bhyve's `fbuf=host:port` and `tcp=host:port` config keys are existing API (in `usr.sbin/bhyve/pci_fbuf.c`); the new `displayd` code path is a strict superset. Old `rfb=` / `tcp=` config still works byte-for-byte; the new `transport=rfb,...` form is the recommended way going forward. This is bhyve's own backcompat, not a `displayd` deprecation alias.
+
+**Tests for the `fbuf.*` jail param namespace (added to T9, T10, T12, T15):**
+- `sh_displayd_jail_allow_fbuf_unchanged` — `jail -c name=fbtest allow.fbuf=1 persist` succeeds; `jls -j fbtest -v allow.fbuf` shows 1; the param works with the new `displayd.ko` module.
+- `sh_displayd_jail_fbuf_nokbd_unchanged` — `jail -c name=fbtest allow.fbuf=1 fbuf.nokbd=1 persist` succeeds; `jls -j fbtest -v fbuf.nokbd` shows 1.
+- `sh_displayd_jail_fbuf_nomouse_unchanged` — `jail -c name=fbtest allow.fbuf=1 fbuf.nomouse=1 persist` succeeds; `jls -j fbtest -v fbuf.nomouse` shows 1.
+- `sh_displayd_bhyve_rfb_legacy_unchanged` — `bhyve -s 0,fbuf,rfb=127.0.0.1:5900 ...` boots; VNC client connects; no `displayd` deprecation warning (the warning is bhyve's, not `displayd`'s).
 
 **Cert sourcing and format support (T30–T33):**
 
@@ -999,11 +1075,11 @@ And shows what breaks (legacy `rfb=` configs that haven't migrated) vs what work
 
 ### Architecture support (jails run everywhere)
 
-Jails run on every FreeBSD-supported architecture. The plan's modules (`fbuf_jail`, `preflight`, `gpu_resource`) and userspace tools (`bhyve`, `display_transport*`, `rfb`, `rdp`, `cert_loader`) must work on all of them. **bhyve itself is amd64-only** (it requires VT-x/AMD-V), so the bhyve-side code (T7, T8, T11, T13, T14, T17, T18, T25, T26, T30, T31, T32, T33, T36) is amd64-only by design — but the **jail-side code** (T9, T10, T12, T15, T19, T20, T21, T22, T23, T24, T27, T28, T29, T34, T35) must build and run on every arch.
+Jails run on every FreeBSD-supported architecture. The plan's modules (`displayd`, `preflight`, `gpu_resource`) and userspace tools (`bhyve`, `display_transport*`, `rfb`, `rdp`, `cert_loader`) must work on all of them. **bhyve itself is amd64-only** (it requires VT-x/AMD-V), so the bhyve-side code (T7, T8, T11, T13, T14, T17, T18, T25, T26, T30, T31, T32, T33, T36) is amd64-only by design — but the **jail-side code** (T9, T10, T12, T15, T19, T20, T21, T22, T23, T24, T27, T28, T29, T34, T35) must build and run on every arch.
 
 **Supported architectures and per-arch concerns:**
 
-| Arch | Endianness | Pointer | Page | Unaligned | fbuf_jail | gpu_resource | Notes |
+| Arch | Endianness | Pointer | Page | Unaligned | displayd | gpu_resource | Notes |
 |---|---|---|---|---|---|---|---|
 | **amd64** | LE | 64-bit | 4KB | OK (penalty) | ✓ | ✓ | Primary target. bhyve host. |
 | **i386** | LE | 32-bit | 4KB | OK (penalty) | ✓ | ✓ | 32-bit jail on 64-bit host supported; 4GB address space limit for framebuffer; `uint64_t` required for VRAM > 4GB. |
@@ -1034,7 +1110,7 @@ Jails run on every FreeBSD-supported architecture. The plan's modules (`fbuf_jai
 
 **Page-size concerns:**
 
-- Framebuffer allocation respects the kernel's `PAGE_SIZE` (from `<sys/param.h>`). On arm64, this can be 4KB, 16KB, or 64KB depending on the kernel config. The `fbuf_jail` module uses `contigmalloc` with `M_PAGEABLE` and the page size derived from the architecture.
+- Framebuffer allocation respects the kernel's `PAGE_SIZE` (from `<sys/param.h>`). On arm64, this can be 4KB, 16KB, or 64KB depending on the kernel config. The `displayd` module uses `contigmalloc` with `M_PAGEABLE` and the page size derived from the architecture.
 - `mmap` offsets in the userland `display_transport` must be page-aligned.
 - The bhyve side (`pci_fbuf_baraddr` in `pci_fbuf.c:218`) already uses `vm_mmap_memseg` which is page-aware — no change needed.
 
@@ -1047,13 +1123,13 @@ Jails run on every FreeBSD-supported architecture. The plan's modules (`fbuf_jai
 **Atomic operations:**
 
 - Existing `rfb.c` uses `atomic_bool` (C11) and `atomic_exchange` — portable. The new code must do the same. Don't use GCC `__atomic_*` builtins directly.
-- Kernel-side code in `fbuf_jail`, `preflight`, `gpu_resource` uses FreeBSD's `atomic_*` API (`<sys/atomic.h>`) — portable across arches.
+- Kernel-side code in `displayd`, `preflight`, `gpu_resource` uses FreeBSD's `atomic_*` API (`<sys/atomic.h>`) — portable across arches.
 - The `host_gpu_quota` counters use atomic operations to be lock-free on the read path.
 
 **Jail ABI compat (32-bit jail on 64-bit host):**
 
 - FreeBSD supports 32-bit jails on 64-bit hosts (via `compat.linux32` etc., or pure 32-bit userland via `linux_base-c6` or native `i386`).
-- The `fbuf_jail` kernel module is a 64-bit module; the userland consumer is a 64-bit process. The 32-bit jail interacts through standard POSIX APIs (mmap, ioctl) which are arch-agnostic. So a 32-bit jail CAN use a framebuffer on a 64-bit host — but only via the host-side `display_transport` (which is 64-bit). The jail's software (32-bit) never sees the framebuffer directly; it just runs inside the VM-like abstraction.
+- The `displayd` kernel module is a 64-bit module; the userland consumer is a 64-bit process. The 32-bit jail interacts through standard POSIX APIs (mmap, ioctl) which are arch-agnostic. So a 32-bit jail CAN use a framebuffer on a 64-bit host — but only via the host-side `display_transport` (which is 64-bit). The jail's software (32-bit) never sees the framebuffer directly; it just runs inside the VM-like abstraction.
 - The `gpu_resource` similarly: 32-bit jail on 64-bit host works because the kernel-side resource is arch-agnostic.
 
 **Concrete code rules (must-have, added to relevant tasks):**
@@ -1061,7 +1137,7 @@ Jails run on every FreeBSD-supported architecture. The plan's modules (`fbuf_jai
 - T21 (gpu_resource): struct uses `uint64_t` for VRAM and compute units, not `unsigned long`. Percentage parser returns `int` for the percentage (0-100) and `uint64_t` for the absolute resolved value.
 - T30 (cert loader): OpenSSL APIs are endian-clean. No byte-swap needed.
 - T22 (preflight): `atomic_*` from FreeBSD kernel API. No GCC builtins.
-- T12 (fbuf_jail): allocation uses `PAGE_SIZE`; mmap offset is page-aligned.
+- T12 (displayd): allocation uses `PAGE_SIZE`; mmap offset is page-aligned.
 - T11 (rfb wrap): honor `SetPixelFormat` — the existing `rfb.c` does. New wrapper must not break it.
 - T25 (VeNCrypt): TLS is endian-clean. Cert parsing is endian-clean. RFB protocol field parsing must use byte-by-byte access (existing pattern) on big-endian arches.
 
@@ -1075,7 +1151,7 @@ Jails run on every FreeBSD-supported architecture. The plan's modules (`fbuf_jai
 
 **Per-arch loose ends to verify during implementation:**
 
-- A `make -C sys/modules/fbuf_jail build` on arm64, i386, riscv64, sparc64, powerpc64 — must succeed.
+- A `make -C sys/modules/displayd build` on arm64, i386, riscv64, sparc64, powerpc64 — must succeed.
 - An ATF test running on a big-endian arch (sparc64 or powerpc64) for `gpu_resource` and the preflight framework — catches endianness bugs.
 - A live jail test on i386 (32-bit) for fbuf — catches pointer-size bugs.
 - An ATF test on arm64 with 16KB pages for fbuf allocation — catches page-size bugs.
@@ -1089,7 +1165,7 @@ The user said: *"we also need to think about who is allowed to view the framebuf
 This is a **second, parallel workstream** that builds on top of the abstraction (T1–T36). It introduces:
 
 1. A new **Bhyve Display Protocol (BDP)** — a binary, length-prefixed, TLS 1.3 protocol designed for one-connection-multi-fb use. Better than VNC/RDP for the multi-tenant case (centralized auth, ACL, audit, resource discovery). Supports both **unicast TCP** and **multicast UDP** (T48) for the TV / advertising use case.
-2. A new **console broker daemon** (`bhyve-display-broker`, aka `displayd`) — a userspace service that authenticates clients, reports available framebuffers, and bridges BDP sessions to the existing `display_transport` instances.
+2. A new **console broker daemon** (`displayd`, aka `displayd`) — a userspace service that authenticates clients, reports available framebuffers, and bridges BDP sessions to the existing `display_transport` instances.
 3. A new **authorization model** — per-jail/per-VM ACLs (`display.acl=alice,@admins`), default-deny, root implicit-allow (configurable bypass), group membership honored. ACL falls back to a file (`/etc/bhyve/display.acl`, `/etc/jail/display.acl`).
 4. A new **resource discovery model** — broker scans the jail/VM subsystem on startup and on kqueue events; reports a list of `{id, name, type, status, perms}` for fbs the user can see. New sysctl `security.display.broker.scan_interval=30`.
 5. **VNC/RDP interop** — VNC is still the **legacy direct path** (one client, one fb, plaintext-by-default, opt-in TLS). The broker can **bridge** to VNC/RDP fbs so a BDP client can attach to an RFB-served fb; existing VNC clients still work unchanged.
@@ -1313,8 +1389,8 @@ The audit record includes: who made the change, before/after values, all related
 
 Every relevant man page adds a "Security defaults" section:
 - `bhyve(8)`: "By default, the broker binds to localhost (`[::1]`, IPv6 dual-stack). To expose publicly, see `security.display.broker.listen_public`."
-- `bhyve-display-broker(8)`: "Default listen is `[::1]:8443` (IPv6). Public exposure requires `listen_public=1` + TLS + ACL."
-- `bhyve-display-client(1)`: "Connects to whatever the operator configured."
+- `displayd(8)`: "Default listen is `[::1]:8443` (IPv6). Public exposure requires `listen_public=1` + TLS + ACL."
+- `displayc(1)`: "Connects to whatever the operator configured."
 - `policy-quickstart(7)`: "Do NOT enable public exposure without first configuring TLS and ACL."
 
 **Relation to host policy (T35):**
@@ -1430,8 +1506,8 @@ For T18, T46, T52: add `tests/sys/display/broker_listen_ipv6_only.test`, `tests/
 **Documentation (T17, T29, T34, T47):**
 
 Every relevant man page adds an "IPv6 / dual-stack" section:
-- `bhyve-display-broker(8)`: "Default listen is `tcp://[::1]:8443` (IPv6 dual-stack, accepts IPv4-mapped). For IPv4-only, use `tcp4://0.0.0.0:8443`. For IPv6-only, use `tcp6://[::]:8443`."
-- `bhyve(8)`: "If you previously had a bhyve VM on IPv4 only, the new default is IPv6 dual-stack. See `bhyve-display-broker(8) § IPV6`."
+- `displayd(8)`: "Default listen is `tcp://[::1]:8443` (IPv6 dual-stack, accepts IPv4-mapped). For IPv4-only, use `tcp4://0.0.0.0:8443`. For IPv6-only, use `tcp6://[::]:8443`."
+- `bhyve(8)`: "If you previously had a bhyve VM on IPv4 only, the new default is IPv6 dual-stack. See `displayd(8) § IPV6`."
 - `policy-quickstart(7)`: "If your network is IPv6-only, the broker works out of the box (default listen is `[::1]`). For IPv4, add `tcp4://0.0.0.0:8443` to the listen string."
 
 **Edge cases handled:**
@@ -1494,7 +1570,7 @@ The plan includes **four orthogonal layers** for observability, each tunable, ea
 | Stats file | `/var/run/display-broker.stats` | Every `stats.interval` (default 60s) | `cat`, parse, prometheus scraper | World-readable (no secrets) |
 | BDP STATS message | JSON or key=value | On request (BDP `0x19` / `0x1A`) | Any BDP client | Per-user (filtered) |
 | HTTP admin endpoint | Prometheus + JSON | On request | `curl http://[::1]:9090/stats` | Root-only (mTLS or localhost) |
-| CLI | Text table or JSON | On request | `bhyve-display-broker --stats` | Root for `--stats --live` |
+| CLI | Text table or JSON | On request | `displayd --stats` | Root for `--stats --live` |
 | BDP HEALTH message | JSON | Every 30s + on request | Any BDP client | Per-user (filtered) |
 | Periodic syslog | key=value | Every `stats.interval` | `grep stats /var/log/messages` | Root for sensitive fields |
 
@@ -1505,7 +1581,7 @@ The plan includes **four orthogonal layers** for observability, each tunable, ea
 - `security.display.broker.stats.format` (default `json`, options: `json`/`prometheus`/`kv`)
 - `security.display.broker.stats.rotate` (default 1) — rename previous to .1, .2, etc.
 - `security.display.broker.stats.rotate_keep` (default 5)
-- `kern.fbuf_jail.stats` (default 0) — kernel module stats
+- `kern.displayd.stats` (default 0) — kernel module stats
 - `kern.gpu_resource.stats` (default 0)
 - `kern.preflight.stats` (default 0)
 
@@ -1533,30 +1609,30 @@ The plan includes **four orthogonal layers** for observability, each tunable, ea
 - `preflight:check-start`, `preflight:check-end`, `preflight:check-fail`
 
 **CLI trace tools:**
-- `bhyve-display-broker --trace all` — enable trace for all sessions
-- `bhyve-display-broker --trace session_id=X` — enable for one session
-- `bhyve-display-broker --dump-trace` — dump current trace buffer
-- `bhyve-display-broker --profile` — enable CPU profiling (gprof-style)
+- `displayd --trace all` — enable trace for all sessions
+- `displayd --trace session_id=X` — enable for one session
+- `displayd --dump-trace` — dump current trace buffer
+- `displayd --profile` — enable CPU profiling (gprof-style)
 - `dtrace -n 'display-broker:frame-send { trace(arg0); }'` — DTrace one-liner
 
 **Diagnostic tools (T50):**
 
 | Tool | Purpose | Usage |
 |---|---|---|
-| `bhyve-display-broker --check-config` | Validate config + sysctls + certs, exit 0/1 | CI gate, smoke test |
-| `bhyve-display-broker --dry-run` | Same as check-config but also exercises preflight | Pre-deploy check |
-| `bhyve-display-broker --validate-cert path` | Parse cert, check key match, expiry, chain | TLS troubleshooting |
-| `bhyve-display-broker --test-acl user resource` | Test ACL resolution | ACL debugging |
-| `bhyve-display-broker --list-tunables` | Show all sysctls and their effective values | Audit what's in effect |
-| `bhyve-display-broker --list-resources` | List all detected fbs (root-only) | Admin tool |
-| `bhyve-display-broker --list-sessions` | List all active sessions | Admin tool |
-| `bhyve-display-broker --kick session_id` | Force-disconnect a session | Abuse response |
-| `bhyve-display-broker --rotate-audit` | Rotate audit log now (also on SIGUSR1) | Log management |
-| `bhyve-display-broker --dump` | Dump broker state to file | Postmortem |
-| `bhyve-display-broker --stats --format json` | Print stats once and exit | Scripting |
-| `bhyve-display-broker --stats --format prometheus` | Print Prometheus exposition | Scraping |
-| `bhyve-display-broker --version` | Print version + build info | |
-| `bhyve-display-broker --help` | Full help | |
+| `displayd --check-config` | Validate config + sysctls + certs, exit 0/1 | CI gate, smoke test |
+| `displayd --dry-run` | Same as check-config but also exercises preflight | Pre-deploy check |
+| `displayd --validate-cert path` | Parse cert, check key match, expiry, chain | TLS troubleshooting |
+| `displayd --test-acl user resource` | Test ACL resolution | ACL debugging |
+| `displayd --list-tunables` | Show all sysctls and their effective values | Audit what's in effect |
+| `displayd --list-resources` | List all detected fbs (root-only) | Admin tool |
+| `displayd --list-sessions` | List all active sessions | Admin tool |
+| `displayd --kick session_id` | Force-disconnect a session | Abuse response |
+| `displayd --rotate-audit` | Rotate audit log now (also on SIGUSR1) | Log management |
+| `displayd --dump` | Dump broker state to file | Postmortem |
+| `displayd --stats --format json` | Print stats once and exit | Scripting |
+| `displayd --stats --format prometheus` | Print Prometheus exposition | Scraping |
+| `displayd --version` | Print version + build info | |
+| `displayd --help` | Full help | |
 
 **New BDP message types (T51 — T39 expansion):**
 - `0x19 STATS_REQ` (C→S) — request stats (filter: transport, channel, user, resource)
@@ -1601,7 +1677,7 @@ The plan includes **four orthogonal layers** for observability, each tunable, ea
 | `/debug/pprof` | GET (root-only) | pprof-style profile | Performance |
 
 **Health "ready" criteria:**
-- All required modules loaded (`fbuf_jail`, `gpu_resource`, `preflight`)
+- All required modules loaded (`displayd`, `gpu_resource`, `preflight`)
 - All required sysctls in valid state
 - TLS cert loaded and not expired (or self-signed auto-gen ready)
 - ACL resolver initialized
@@ -1631,7 +1707,7 @@ The plan includes **four orthogonal layers** for observability, each tunable, ea
 
 The user asked: *"have we thought of multiple displays attached to a vm / jail/container?"*
 
-**Current state of the plan (the gap):** Each VM/jail has ONE framebuffer. The `pci_fbuf` is a single PCI device. The `fbuf_jail` module provides one framebuffer per jail. The console is single-instance per VM (T8 makes it multi-VM, but still one per VM). The `console_kbd_register` / `console_ptr_register` only support one consumer. This is a **significant limitation** for many real-world use cases — the plan needs a multi-display extension.
+**Current state of the plan (the gap):** Each VM/jail has ONE framebuffer. The `pci_fbuf` is a single PCI device. The `displayd` module provides one framebuffer per jail. The console is single-instance per VM (T8 makes it multi-VM, but still one per VM). The `console_kbd_register` / `console_ptr_register` only support one consumer. This is a **significant limitation** for many real-world use cases — the plan needs a multi-display extension.
 
 **Use cases for multiple displays:**
 
@@ -1738,7 +1814,7 @@ The user asked: *"have we thought of multiple displays attached to a vm / jail/c
 | `security.display.broker.max_displays_per_resource` | 8 | Max displays per VM/jail |
 | `security.display.broker.max_wall_size` | 16 | Max displays in a wall |
 | `security.display.broker.max_bandwidth_per_resource` | 1000000 | Kbps; sum of all displays of a resource |
-| `kern.fbuf_jail.max_displays_per_jail` | 4 | Kernel limit per jail |
+| `kern.displayd.max_displays_per_jail` | 4 | Kernel limit per jail |
 | `kern.bhyve.max_fbuf_devices` | 4 | Kernel limit per bhyve VM |
 | `security.display.acl_per_display` | 1 | Master switch for per-display ACL |
 
@@ -2024,7 +2100,7 @@ The user said: *"i have an idea of tapping into the framebuffer and using an ext
 
 | Layer | Video (existing) | Audio (new) |
 |---|---|---|
-| Source | bhyve `pci_fbuf` / jail `fbuf_jail` / `gpu_resource` | bhyve AC97/HDA / jail `/dev/dsp` / `audio_resource` (new) |
+| Source | bhyve `pci_fbuf` / jail `displayd` / `gpu_resource` | bhyve AC97/HDA / jail `/dev/dsp` / `audio_resource` (new) |
 | Wire protocol | BDP PIXEL (`0x0B`) | BDP AUDIO_FRAME (`0x32`) |
 | Transport | RFB / BDP / multicast | BDP / RTP / Opus / multicast |
 | Sink | VNC client / BDP client / TV (multicast) | VNC client (audio forward) / BDP client / chromecast / TV (multicast) |
@@ -2034,7 +2110,7 @@ The user said: *"i have an idea of tapping into the framebuffer and using an ext
 **Audio sources (T58):**
 
 1. **bhyve VMs** — emulated audio device (AC97, HDA, USB audio) is in the guest. Host captures via VMM ioctl or new kernel module. New bhyve audio module (`bhyve_audio.ko` or extension to `gpu_resource`) exposes the stream.
-2. **Jails** — `/dev/dsp` is not propagated by default. New jail param `allow.audio` enables audio. New kernel module `audio_resource.ko` mediates access (mirrors `fbuf_jail.ko`).
+2. **Jails** — `/dev/dsp` is not propagated by default. New jail param `allow.audio` enables audio. New kernel module `audio_resource.ko` mediates access (mirrors `displayd.ko`).
 3. **Direct streams** — A process (e.g., media player) publishes audio to the broker directly. Broker just relays.
 
 **Audio kernel module — `audio_resource.ko` (T58, mirrors `gpu_resource.ko`):**
@@ -2544,7 +2620,7 @@ Each v2 cast tool is a thin (~2000-5000 LoC) adapter. They all share:
 
 3. **HTTP live image endpoint** (T63-design): for Roku and Fire TV (which poll a still-image URL), broker exposes `http://localhost:8088/fbuf/web1/frame.jpg` returning the latest frame as JPEG.
 
-4. **mDNS advertiser** (T65-design, future BT-coupled): the broker advertises our *display surfaces* as `_bhyve-display._tcp.local` (or `_freebsd-display._tcp.local` post-rename) so:
+  4. **mDNS advertiser** (T65-design, future BT-coupled): the broker advertises our *display surfaces* as `_display._tcp.local` (the canonical service type; this is the name from the start) so:
    - The cast tool can find them without out-of-band config
    - Apple TV's "Screen Mirroring" picker lists our VMs/jails (when we ship an AirPlay *receiver* in v3+)
    - Smart TVs in the room can be discovered by hostname instead of IP
@@ -2641,7 +2717,7 @@ The "10% of an antenna" mistake was applying the GPU's percent model to BT. The 
 | **Resource model** | `gpu.share_percent=25` (divisible: cores/mem/ports) | **`bt.max_slaves_classic=3` of 7** (slot), **`bt.max_le=10` of 255** (slot), **`bt.max_bandwidth_bps=100000`** (budget), **`bt.role=slave`** (role), **`bt.peer_whitelist="aa:bb:..."`** (peer) |
 | **Override escape hatch** | `gpu.allow_no_gpu=1` (T20) | `bt.allow_no_adapter=1` (planned) |
 | **No device nodes in jail** | "don't create the nodes in dev" (T20) | "no `/dev/bluetooth*` in jails" (planned) |
-| **Resource mediation kernel module** | `fbuf_jail.ko` (T12), `gpu_resource.ko` (T21) | `bt_resource.ko` (T69, future) |
+| **Resource mediation kernel module** | `displayd.ko` (T12), `gpu_resource.ko` (T21) | `bt_resource.ko` (T69, future) |
 | **Audio mediation module** | `audio_resource.ko` (T58) | (same module also covers A2DP) |
 | **Host policy sysctls** | `security.policy.fbuf.deny_default=1`, `security.policy.gpu.deny_default=1` | `security.policy.bt.deny_default=1` (planned) |
 | **Host share cap** | `hw.gpu.0.share.percent_max=50` (divisible) | **`hw.bt.0.limits.max_slaves_classic=7`** (hard spec limit), **`hw.bt.0.limits.max_le=255`**, **`hw.bt.0.limits.max_bandwidth_bps=3000000`**, **`hw.bt.0.limits.max_inquiry_per_min=6`**, **`hw.bt.0.limits.max_pair_per_hour=10`**, **`hw.bt.0.limits.max_advertising_sets=8`**, **`hw.bt.0.limits.max_acl_entries=64`** (per-jail peer whitelist size) |
@@ -2652,7 +2728,7 @@ The "10% of an antenna" mistake was applying the GPU's percent model to BT. The 
 | **Audit log** | T43, "alice attached to fb web1" | T43, future "alice paired BT device to jail web1" |
 | **DTrace probes** | 25+ probes (T50) | Mirrored: `bt-resource:pair-start`, etc. (planned) |
 | **Stats** | T49, per-fb per-transport | T49, future per-bt-adapter (slots used, bandwidth, peers connected, pairs/day) |
-| **Backwards compat** | Old names work, deprecated symlinks | Same convention (planned) |
+| **Backwards compat** | Existing bhyve / FreeBSD API works unchanged | Same convention (real backcompat for `rfb=`, `tcp=`, `allow.fbuf`, `console_init`, `rfb_init`, `libvmmapi.so`, `libjail.so`) |
 
 **What the user gets in v1 even though we don't ship BT:**
 
@@ -3218,7 +3294,7 @@ The "10% of an antenna" mistake was applying the GPU's percent model to BT. The 
    };
    ```
 
-   **Cleanup is invoked by a `prison_cleanup` callback chain in `kern_jail.c`** (same mechanism as `fbuf_jail.ko` cleanup in T12 and `gpu_resource.ko` cleanup in T21). The chain runs in this order:
+   **Cleanup is invoked by a `prison_cleanup` callback chain in `kern_jail.c`** (same mechanism as `displayd.ko` cleanup in T12 and `gpu_resource.ko` cleanup in T21). The chain runs in this order:
 
    1. **Jail enters `PRISON_STATE_DYING`** (set by `kern_jail.c` when last process exits or `jail -r`/`jail -rk` is called)
    2. **`bt_resource_prison_cleanup(prison)` is called** as part of the cleanup chain
@@ -3744,7 +3820,7 @@ For every device we mediate, the host MUST be able to:
 | **GPU (T21)** | PCI FLR (Function-Level Reset) via PCIe capability | `nvidia_attach()` / `amdgpu_attach()` / `i915_attach()` re-runs | `gpu-resource:device-reset` |
 | **Audio (T58)** | HDA `RESET` codec command (verb 0x7FF) | `hdac_attach()` re-runs; PCM streams re-initialized | `audio-resource:device-reset` |
 | **BT (T65/T69)** | HCI Reset command (`0x0C03`) | `ng_bluetooth` re-attaches to `ubt0`; `hcsecd(8)` and `sdpd(8)` resume | `bt-resource:device-reset` |
-| **Framebuffer (T12)** | `vt_destroy()` + cdev revoke | `fbuf_jail_attach()` re-runs on next jail | `fbuf-jail:device-reset` |
+| **Framebuffer (T12)** | `vt_destroy()` + cdev revoke | `displayd_attach()` re-runs on next jail | `displayd:device-reset` |
 | **Storage (future, not in v1)** | NVMe Controller Reset (CC.EN 1→0→1) or AHCI HBA Reset | `nvme_attach()` / `ahci_attach()` re-runs | `storage-resource:device-reset` (future) |
 | **Network (future, not in v1)** | `if_reset()` for NIC, PHY reset for copper | `if_attach()` re-runs | `net-resource:device-reset` (future) |
 
@@ -5062,6 +5138,84 @@ The user clarified: *"we will be building on FreeBSD 16"*. This pins the target 
 
 > - **Target platform is FreeBSD 16** (16.0+ latest release). The plan does NOT support older FreeBSD versions (14, 15). Build commands, test framework, kernel APIs, and userspace APIs are all v16-specific. A PR that breaks FreeBSD 16 compatibility is a guardrail violation. (We do not backport to 14/15; the user has a clean v16 build environment.)
 
+### Auto-load / zero-friction (no operator config changes required)
+
+The user said: *"now we should have things auto load, being backwards compat and having people no modify their current configs and sliding into the new work and tooling without modifying their environment(s)"*. The default install must "just work" — no `kldload`, no `sysrc`, no `service` commands, no `/etc/rc.conf` edits, no `/boot/loader.conf` edits, no `/etc/devfs.rules` edits. The upgrade path is **zero-friction**: existing operators keep their existing config and get new features without doing anything.
+
+**The four auto-load surfaces:**
+
+1. **Kernel modules auto-load on demand** (`kld_list` + devd + `autoload`)
+   - The package install script appends to `kld_list` in `/boot/loader.conf` (idempotent — never replaces operator's existing value):
+     ```
+     kld_list="${kld_list} displayd gpu_resource audio_resource preflight"
+     ```
+   - On a running system, the install can also do `sysctl kern.kld_list=+displayd` (adds to runtime list)
+   - Modules self-register via `DECLARE_MODULE`; the kernel's `linker` subsystem auto-loads a module when its symbol is referenced (e.g., when `allow.fbuf=1` is set on a jail, the jail subsystem resolves `displayd` and kldloads it)
+   - `autoload` (FreeBSD's `/boot/kernel/autoload/` mechanism) loads modules referenced by other modules
+   - `devd` triggers `kldload` on hot-plug events (e.g., USB BT dongle later, USB GPU)
+
+2. **Broker auto-starts** (`rc.conf` / `rc.d`)
+   - The package installs `/etc/rc.d/displayd` (and the equivalent in `/usr/local/etc/rc.d/` for pkg-managed)
+   - The install script appends to `/etc/rc.conf` (idempotent — only adds if `displayd_enable=` is not already set):
+     ```
+     displayd_enable="YES"
+     ```
+   - `service displayd start` brings up the broker; on next boot, `rc.d` starts it automatically
+   - Default config at `/etc/display/display-broker.conf` is shipped; if absent, the broker starts with built-in defaults (no operator action needed)
+   - `displayd_enable="NO"` is the operator's opt-out (rare — for embedded or read-only systems)
+
+3. **devfs rules auto-apply** (`devd` + `dev_clone`)
+   - The install script installs `/etc/devfs.rules.d/display.rules` and registers it in `/etc/devfs.rules` (idempotent — only adds include if missing)
+   - `devd` triggers rule re-application on device attach
+   - For `/dev/console*`, `/dev/input/*` (kbd/mouse), `/dev/dsp*` (audio), and `/dev/fb*` (framebuffer) inside jails, the rules make the right nodes visible per jail — based on `allow.fbuf`, `allow.audio`, etc.
+   - `dev_clone` creates pseudo-device nodes on first open (e.g., `/dev/dsp0` on first audio use) — no manual `mknod` required
+
+4. **Cert discovery + self-signed auto-gen** (T30)
+   - On startup, the broker scans the standard cert locations: `/etc/letsencrypt/live/`, `/etc/ssl/certs/`, `/etc/display/certs/`, `/usr/local/etc/ssl/`
+   - If no cert is found anywhere, the broker auto-generates a self-signed cert (persistent across restarts) at `/etc/display/certs/displayd-selfsigned.{pem,key}` (mode 0600, owned by `displayd:_displayd`)
+   - No operator action required; the cert is renewed before expiry (certbot hook) or every 90 days (self-signed cron)
+
+**The zero-friction promise (test scenarios):**
+
+| Scenario | Operator action | Result |
+|---|---|---|
+| Fresh install (no GPU, no cert) | `pkg install displayd` | Broker auto-starts; self-signed cert auto-gen; jail with `allow.fbuf=1` works without further config |
+| Fresh install (with GPU) | `pkg install displayd` | `gpu_resource.ko` auto-loads; jail with `allow.gpu=1` works |
+| Add displayd to a bhyve host | `pkg install displayd` | Broker auto-starts; bhyve's existing `rfb=host:port` config still works byte-for-byte (bhyve's own backcompat); new `transport=rfb,tls=required` available as opt-in |
+| Cert renewal (certbot) | `certbot renew` (operator's existing cron) | Broker detects `kqueue` `NOTE_ATTRIB`; reloads cert; no restart |
+| Self-signed renewal | (none) | Broker regenerates cert 30 days before expiry; logs the event |
+| Hot-plug GPU | (plug in GPU) | devd detects; `gpu_resource.ko` (already loaded) picks up the new adapter; pools updated; running jails unaffected |
+| Hot-unplug GPU | (unplug GPU) | devd detects; mediator runs `prison_cleanup`; jails see `ENXIO` on next I/O; can be reassigned via pool policy |
+
+**Backcompat for auto-load (operator can override, but never has to):**
+
+- `kld_list` is the canonical mechanism. If an operator has a custom `kld_list`, the install script appends (does not replace). The operator can pin specific versions via `/boot/loader.conf` if they want.
+- `displayd_enable="YES"` in `rc.conf` is the canonical mechanism. The install script only adds the line if missing. Operators can set `displayd_enable="NO"` to opt out (rare).
+- `/etc/display/display-broker.conf` is the canonical config file (path shipped by the package). Operators on FreeBSD 16+ get this from `pkg install`; no manual creation needed.
+- The broker's `--no-auto-start` flag (for embedded use) disables auto-start; default is auto-start.
+- The install script NEVER overwrites operator-edited config. It only adds lines that aren't already present. If a line is present with a different value, the install leaves it alone and logs a notice.
+
+**Tests for auto-load (added across T12, T15, T38, T47):**
+
+- `sh_displayd_modules_autoload_via_kld_list` — `kld_list` includes `displayd gpu_resource audio_resource preflight`; on `jail -c name=t allow.fbuf=1 persist`, the `displayd` module loads; `kldstat | grep displayd` shows it; no manual `kldload` was issued.
+- `sh_displayd_broker_autostart` — `displayd_enable="YES"` in rc.conf; after `service displayd start`, the broker listens on `[::1]:8443`; `sockstat -l | grep displayd` confirms.
+- `sh_displayd_broker_autostart_on_boot` — reboot the host; broker is up after boot; no manual start required.
+- `sh_displayd_devfs_rules_applied` — jail with `allow.fbuf=1` has `/dev/console*` and `/dev/input/*` visible; without the install, they would be missing.
+- `sh_displayd_cert_discovery_letsencrypt` — operator has `/etc/letsencrypt/live/example.com/`; broker auto-discovers; no `transport.tls.cert=` config required.
+- `sh_displayd_selfsigned_autogen` — fresh install with no cert; broker auto-generates `/etc/display/certs/displayd-selfsigned.pem` + `.key`; TLS works.
+- `sh_displayd_kld_list_preserves_existing` — operator has `kld_list="nvidia amdgpu"`; after install, `kld_list` is `"nvidia amdgpu ... displayd ..."`; existing entries preserved.
+- `sh_displayd_hotplug_gpu` — plug in a USB GPU; `kldstat | grep gpu_resource` still loaded; pool updated; running jails unaffected.
+- `sh_displayd_hotunplug_gpu` — unplug GPU; jails see `ENXIO`; cleanup runs; no panic.
+- `sh_displayd_install_idempotent` — run the install script twice; second run is a no-op (no duplicate lines in rc.conf, no duplicate kld_list entries).
+- `sh_displayd_install_preserves_operator_config` — operator has `displayd_enable="NO"` in rc.conf (opt-out); install leaves it alone; broker doesn't auto-start.
+
+**The "zero-friction" Must Have (adds to Work Objectives):**
+
+> - **Zero operator config changes required for the default install.** A fresh `pkg install displayd` brings up the broker, loads all required kernel modules, auto-generates a self-signed cert (if none configured), and makes the jail framebuffer / GPU / audio / cert discovery work — without any operator editing of `/etc/rc.conf`, `/boot/loader.conf`, `/etc/sysctl.conf`, `/etc/devfs.rules`, or any other config file. The broker, the kernel modules, and the devfs rules auto-load via `kld_list`, `rc.conf`, and `devd`. The install script is idempotent and never overwrites operator-edited config.
+> - **The upgrade path is zero-friction.** Operators with existing `bhyve` configs (using `rfb=host:port` or `tcp=host:port`) keep their existing config — bhyve's own backcompat keeps these working byte-for-byte. The new `displayd` features (TLS, GPU, audio, cert auto-gen) are opt-in. No operator action is required for the upgrade.
+> - **The cert discovery + self-signed auto-gen (T30) is the canonical default.** No operator action needed to enable TLS — the broker scans the standard cert locations and falls back to a persistent self-signed cert.
+> - **Hot-plug / hot-unplug works without operator action.** devd triggers kmod attach/detach; mediator's `prison_cleanup` runs; no panic; running jails see graceful `ENXIO` and can recover via pool re-selection.
+
 ---
 
 ## Tunables Reference
@@ -5078,12 +5232,12 @@ FreeBSD kernel tunables use `TUNABLE_INT`, `TUNABLE_STR`, `TUNABLE_ULONG`, etc. 
 | `hw.gpu.N.stub_vram_mb` | INT | 16384 | `gpu_resource.ko` | Stub backend VRAM in MB |
 | `hw.gpu.N.stub_max_resolution_w` | INT | 7680 | `gpu_resource.ko` | Stub backend max width (8K) |
 | `hw.gpu.N.stub_max_resolution_h` | INT | 4320 | `gpu_resource.ko` | Stub backend max height (8K) |
-| `kern.fbuf_jail.max_fbs` | INT | 64 | `fbuf_jail.ko` | System-wide max simultaneous jail framebuffers |
-| `kern.fbuf_jail.max_width` | INT | 7680 | `fbuf_jail.ko` | Max width per jail fb (8K) |
-| `kern.fbuf_jail.max_height` | INT | 4320 | `fbuf_jail.ko` | Max height per jail fb (8K) |
-| `kern.fbuf_jail.default_width` | INT | 1024 | `fbuf_jail.ko` | Default fb width if `fbuf.width` unset |
-| `kern.fbuf_jail.default_height` | INT | 768 | `fbuf_jail.ko` | Default fb height if `fbuf.height` unset |
-| `kern.fbuf_jail.default_refresh_fps` | INT | 30 | `fbuf_jail.ko` | Default fb refresh rate |
+| `kern.displayd.max_fbs` | INT | 64 | `displayd.ko` | System-wide max simultaneous jail framebuffers |
+| `kern.displayd.max_width` | INT | 7680 | `displayd.ko` | Max width per jail fb (8K) |
+| `kern.displayd.max_height` | INT | 4320 | `displayd.ko` | Max height per jail fb (8K) |
+| `kern.displayd.default_width` | INT | 1024 | `displayd.ko` | Default fb width if `fbuf.width` unset |
+| `kern.displayd.default_height` | INT | 768 | `displayd.ko` | Default fb height if `fbuf.height` unset |
+| `kern.displayd.default_refresh_fps` | INT | 30 | `displayd.ko` | Default fb refresh rate |
 | `kern.gpu_resource.max_consumers` | INT | 64 | `gpu_resource.ko` | Max simultaneous GPU consumers (jails + bhyve) |
 | `kern.preflight.timeout_ms` | INT | 5000 | `preflight.ko` | Per-check timeout |
 | `kern.preflight.max_checks` | INT | 64 | `preflight.ko` | Max registered checks (registry size) |
@@ -5228,7 +5382,7 @@ Set at boot, take effect before kernel modules load.
 
 ```
 # Autoload
-fbuf_jail_load="YES"
+displayd_load="YES"
 gpu_resource_load="YES"
 preflight_load="YES"
 
@@ -5319,7 +5473,7 @@ pid_file=/var/run/display-broker.pid
 - Build wiring in `usr.sbin/bhyve/Makefile`
 - Architecture doc: `usr.sbin/bhyve/display-abstraction.md`
 
-**Generic broker (T38, replaces `bhyve-display-broker`):**
+**Generic broker (T38, canonical home):**
 - `usr.sbin/displayd/displayd.c` (broker daemon, ~3000 LoC)
 - `usr.sbin/displayd/displayd.conf` (config loader)
 - `usr.sbin/displayd/auth.c` (PAM + mTLS + NSS + OAuth)
@@ -5328,7 +5482,7 @@ pid_file=/var/run/display-broker.pid
 - `usr.sbin/displayd/stats.c` (statistics collector, T49)
 - `usr.sbin/displayd/dtrace.c` (DTrace USDT provider, T50)
 - `usr.sbin/displayd/admin_http.c` (HTTP health endpoint, T52)
-- Deprecated symlink: `usr.sbin/bhyve/bhyve-display-broker` → `displayd` (backward compat)
+- Deprecated symlink: `usr.sbin/bhyve/displayd` → `displayd` (backward compat)
 - Migration script: `usr.sbin/bhyve/migrate-display-broker-conf.sh` (T34)
 
 **BDP protocol + library (T39, T44):**
@@ -5350,19 +5504,19 @@ pid_file=/var/run/display-broker.pid
 - `lib/libdisplay/gpu_caps/gpu_caps_intel.c` (Intel capability discoverer)
 - `lib/libdisplay/gpu_caps/gpu_caps_generic.c` (always-linked fallback)
 - `lib/libdisplay/gpu_caps/gpu_caps_overlay.c` (JSON overlay loader)
-- Deprecated symlink: `lib/libbdp/` → `lib/libdisplay/` (backward compat)
+- Deprecated symlink: `lib/libdisplay/` → `lib/libdisplay/` (backward compat)
 
 **Sample client (T45):**
 - `usr.sbin/displayc/displayc.c` (sample BDP client)
 - `usr.sbin/displayc/displayc.1` (man page)
-- Deprecated symlink: `usr.sbin/bhyve-display-client` → `displayc` (backward compat)
+- Deprecated symlink: `usr.sbin/displayc` → `displayc` (backward compat)
 
 **Streaming tool (T60):**
 - `usr.sbin/bdp-stream/bdp-stream.c` (pipe-friendly external tool)
 - `usr.sbin/bdp-stream/bdp-stream.1` (man page)
 
 **Kernel modules (4 new):**
-- `sys/modules/fbuf_jail/` (T12) — kernel-backed framebuffer for jails
+- `sys/modules/displayd/` (T12) — kernel-backed framebuffer for jails
 - `sys/modules/preflight/` (T22) — preflight check framework (loadable shim, built-in core in `sys/kern/subr_preflight.c`)
 - `sys/modules/gpu_resource/` (T21) — GPU mediation, with `gpu_stub` test backend mandatory
 - `sys/modules/audio_resource/` (T58) — audio mediation
@@ -5416,7 +5570,7 @@ pid_file=/var/run/display-broker.pid
 - Updated: `jail.conf(5)` — new params
 - Updated: `bhyve(8)` — `-s 0,fbuf,transport=...` syntax
 - Updated: `sysctl(8)` — new OID subtrees
-- Deprecated stubs: `bhyve-display-broker.8`, `libbdp.3` (point to canonical names)
+- Canonical man pages: `displayd.8`, `displayc.1`, `display-enduser.7`, `display-transport-security.7`, `displayd-policy-quickstart.7` (no deprecation stubs — nothing to deprecate)
 
 **Examples directory (T36):**
 - `share/examples/display/policy-quickstart/` — quickstart config
@@ -5428,10 +5582,10 @@ pid_file=/var/run/display-broker.pid
 - `share/examples/display/pools-multi-gpu-mixed/`
 - `share/examples/display/certbot/`
 - `share/examples/display/multicast-tv/`
-- `share/examples/display/migration-from-bhyve-display-broker/`
+- `share/examples/display/migration-from-displayd/`
 
 **Tests (see Unit Test Strategy section for full breakdown):**
-- `tests/sys/modules/fbuf_jail/` (T12)
+- `tests/sys/modules/displayd/` (T12)
 - `tests/sys/modules/gpu_resource/` (T21)
 - `tests/sys/modules/audio_resource/` (T58)
 - `tests/sys/modules/preflight/` (T22)
@@ -5486,7 +5640,7 @@ pid_file=/var/run/display-broker.pid
 - [ ] `console.{c,h}` supports concurrent instances (concurrent bhyve + jails)
 - [ ] `pci_fbuf` legacy `rfb=` and `tcp=` config keys still work
 - [ ] Migration script (T34) converts `/etc/bhyve/display-broker.conf` to `/etc/display/display-broker.conf`
-- [ ] Deprecated symlinks work: `bhyve-display-broker` → `displayd`, `lib/libbdp/` → `lib/libdisplay/`, `bhyve-display-client` → `displayc`
+- [ ] Deprecated symlinks work: `displayd` → `displayd`, `lib/libdisplay/` → `lib/libdisplay/`, `displayc` → `displayc`
 
 **GPU mediation (T19-T21):**
 - [ ] `gpu_stub` backend registers as the default; `hw.gpu.0.stub_capacity=10496` (default)
@@ -5551,7 +5705,7 @@ pid_file=/var/run/display-broker.pid
 
 **Backward compatibility (the v1 promise):**
 - [ ] Existing bhyve + VNC flow works unchanged
-- [ ] All legacy config keys (`rfb=`, `tcp=`, `bhyve-display-broker` symlink, `lib/libbdp` symlink) work
+- [ ] All legacy config keys (`rfb=`, `tcp=`, `displayd` symlink, `lib/libdisplay` symlink) work
 - [ ] Deprecation warnings print to stderr but don't block
 - [ ] No public symbol has been removed or changed in meaning
 
@@ -5568,7 +5722,7 @@ pid_file=/var/run/display-broker.pid
 - Multi-instance `console` module (concurrent bhyve + jails)
 - The `allow.fbuf` jail option must imply kbd + mouse on by default
 - The `display_transport` vtable must be small (≤ 6 ops) and self-contained
-- Generic naming: `displayd`, `libdisplay`, `displayc`, `/etc/display/`; deprecated symlinks for old names
+- Generic naming: `displayd`, `libdisplay`, `displayc`, `/etc/display/` (the canonical names; no "old product" to deprecate — `fbuf_jail`, `displayd`, `displayc`, `libdisplay.so` were never shipped; see §4.7 for the real backcompat items)
 - `gpu_stub` test backend is mandatory in T21; CI runs on commodity hardware without a GPU
 - `/etc/sysctl.conf` integration with example showing `vfs.zfs.vdev.min_auto_ashift=12, debug.debugger_on_panic=0, kern.sync_on_panic=0, kern.powercycle_on_panic=1`
 - `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel` (parallel); installworld/installkernel serial
@@ -5583,7 +5737,7 @@ pid_file=/var/run/display-broker.pid
 - **TLS 1.3 only by default.** OpenSSL 1.1.1 LTS minimum, 3.0+ recommended.
 - **Self-signed cert auto-gen when none configured** (persistent across restarts).
 - **Host policy sysctls ALWAYS WIN** (stricter-wins precedence).
-- **Backward compatibility** — old names work as deprecated symlinks, fallback paths exist, deprecation stub man pages print warnings.
+- **Backward compatibility** — existing bhyve API (`rfb=`, `tcp=`, `console_init`, `rfb_init`), existing jail params (`allow.fbuf`), existing libraries (`libvmmapi.so`, `libjail.so`), and existing man pages (`bhyve(8)`, `bhyve/config(5)`, `jail.conf(5)`) all work byte-for-byte unchanged. The new `displayd` code is purely additive; nothing is renamed because nothing was ever shipped under the old names. The only real deprecation in the project is bhyve's own `rfb=` / `tcp=` legacy form, which bhyve itself logs a deprecation warning for (T13 in `pci_fbuf.c`).
 - **Default policy is "just works" / zero friction** for new users.
 
 **Resource mediation rules (from multi-device, BT, GPU sections):**
@@ -5617,11 +5771,18 @@ pid_file=/var/run/display-broker.pid
 - Rate limit: 10/min, 100/hr default; 5-min lockout after 3 failed authz
 - Audit log records all 3 layers' decisions
 
+**Build / cross-machine file transfer (development environment):**
+- For **non-secret** cross-machine file transfer (source code, configs, test data, build artifacts, documentation, kernel module binaries, test fixtures): use **git** (clone, pull, push, archive, bundle) — atomic, hash-verified, no missing files, no partial transfers
+- For **secret** cross-machine file transfer (TLS private keys, ACME account keys, database passwords, API tokens, SSH host keys, broker admin credentials, displayd keystore): use **sftp/ssh-based** transfer — git is NOT the right tool for secrets
+- TLS public certificates may be committed to git; TLS private keys, ACME account keys, and credentials MUST NOT be committed to git
+- `/etc/display/secrets/` is the canonical runtime location for secret material (mode 0700, owned by `displayd:_displayd`); secrets are staged there via sftp/ssh, not git
+- Build scripts and CI MUST use git for non-secret transfer and sftp/ssh for secret transfer; a build-system check (in T0 template validation + a dedicated test) verifies this
+
 ### Must NOT Have (Guardrails)
 - No new ioctls in `sys/amd64/vmm/` — the kernel has no framebuffer concept and we must not introduce one
 - No replacement of `bhyvegc` — it stays; we just make it optional
 - No breaking change to `bhyve_config(5)` — `rfb=` keeps working
-- No kernel dependency on `usr.sbin/bhyve/` symbols (the kernel side of `fbuf_jail` must be self-contained)
+- No kernel dependency on `usr.sbin/bhyve/` symbols (the kernel side of `displayd` must be self-contained)
 - No removal of `rfb_init` — wrapped, not deleted (other callers may exist)
 - No file at `docs/` or `plan/` or `plans/` — all outputs under `.sisyphus/` and the source tree only
 - No AI slop: no over-abstraction (vtable with one impl is OK as a seam, not a vtable with one impl pretending to be polymorphic), no commented-out code, no "TODO" without a real follow-up task
@@ -5636,6 +5797,13 @@ pid_file=/var/run/display-broker.pid
 - No `/dev/bluetooth*` or `/dev/dri` or `/dev/gpu*` nodes in jails
 - No cast protocol code in v1 (T61 is design only; v2 implementation)
 - No BT implementation in v1 (T65-T72 are design only; v2/future boulder)
+
+**Build / cross-machine file transfer (development environment):**
+- For non-secret cross-machine file transfer: **no rsync, sftp, scp, ssh** — these have caused files to go missing and partial transfers in prior builds; git gives atomicity and hash verification
+- For secret cross-machine file transfer: **no git** — committed secrets are vulnerable (history is hard to purge, no encryption-at-rest); sftp/ssh is the appropriate secure channel for secrets
+- **No committing secrets to any git repository** — no `.key`, no `id_rsa`, no `*.env`, no `secrets.yaml`, no ACME account keys, no database passwords, no broker admin credentials, no displayd keystore material
+- `/etc/display/secrets/`, `/etc/ssl/private/`, `~/.ssh/`, and any file matching `*.key`, `*-key.pem`, `id_*`, `secrets.*` MUST be in `.gitignore`; any tracked file with secret content is a build-system violation
+- No `curl ... | bash` style secret bootstrapping (no piping secrets into a shell); secrets are transferred via sftp and consumed by the daemon with explicit file mode + ownership checks
 
 ---
 
@@ -5654,7 +5822,7 @@ pid_file=/var/run/display-broker.pid
 **All three are mandatory. A task without unit tests + integration tests + QA scenarios is INCOMPLETE.**
 
 - **No unit-test infra** in this tree (`tests/sys/vmm/utils.subr` is shell-only). All verification is by **build + scripted smoke test + diff review**.
-- **Pre-merge gate**: every task ends with `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -C sys/modules/fbuf_jail build` (kernel module) and `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -C usr.sbin/bhyve` (userspace). No code change ships that doesn't compile on a FreeBSD host. The `MAKE_JOBS_NUMBER` env var is the standard FreeBSD knob for parallel build — bsdmake and bmake both honor it. The agent detects the core count via `sysctl -n hw.ncpu` (works on both AMD64 and ARM64) and threads all cores. For CI runners with constrained resources, the agent can override with `MAKE_JOBS_NUMBER=4` (or similar) in the test harness.
+- **Pre-merge gate**: every task ends with `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -C sys/modules/displayd build` (kernel module) and `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -C usr.sbin/bhyve` (userspace). No code change ships that doesn't compile on a FreeBSD host. The `MAKE_JOBS_NUMBER` env var is the standard FreeBSD knob for parallel build — bsdmake and bmake both honor it. The agent detects the core count via `sysctl -n hw.ncpu` (works on both AMD64 and ARM64) and threads all cores. For CI runners with constrained resources, the agent can override with `MAKE_JOBS_NUMBER=4` (or similar) in the test harness.
 - **Smoke test harness**: `tests/sys/jail/fbuf/` — a new shell test that boots a FreeBSD jail with `allow.fbuf`, runs `ls /dev/fb0` and `kldstat` inside, and asserts presence.
 - **Bhyve regression**: `tests/sys/vmm/fbuf_legacy.sh` — runs a pre-built VM with the legacy `rfb=` config and confirms VNC handshake via `nc` (or `vncdo` if available).
 - **Bhyve new syntax**: `tests/sys/vmm/fbuf_transport.sh` — same VM with `transport=rfb,...`.
@@ -5677,9 +5845,9 @@ pid_file=/var/run/display-broker.pid
 tests/
 ├── sys/
 │   ├── modules/
-│   │   ├── fbuf_jail/           # T12
-│   │   │   ├── fbuf_jail_test.c
-│   │   │   ├── fbuf_jail_atf.c
+│   │   ├── displayd/           # T12
+│   │   │   ├── displayd_test.c
+│   │   │   ├── displayd_atf.c
 │   │   │   ├── Kyuafile
 │   │   │   └── Makefile
 │   │   ├── gpu_resource/        # T21
@@ -5732,7 +5900,7 @@ tests/
 
 | Category | Purpose | Example | Speed |
 |---|---|---|---|
-| **Unit** (ATF C) | Exercise one function in isolation | `fbuf_jail_alloc_framebuf()` returns non-NULL | <10s |
+| **Unit** (ATF C) | Exercise one function in isolation | `displayd_alloc_framebuf()` returns non-NULL | <10s |
 | **Integration** (ATF shell) | Exercise kernel+userspace end-to-end | Boot jail with `allow.fbuf`, verify `/dev/fb0` | <60s |
 | **Regression** (ATF shell) | Lock in working behavior so it doesn't break | Legacy `rfb=` syntax still works | <60s |
 | **Stress** (ATF C) | Push the limits | 1000 concurrent framebuffer clients | <120s |
@@ -5741,7 +5909,7 @@ tests/
 
 **Test naming convention:**
 
-- `tc_<module>_<function>_<scenario>` — e.g. `tc_fbuf_jail_alloc_succeeds`, `tc_fbuf_jail_alloc_exhausted_returns_null`
+- `tc_<module>_<function>_<scenario>` — e.g. `tc_displayd_alloc_succeeds`, `tc_displayd_alloc_exhausted_returns_null`
 - `sh_<area>_<workflow>_<scenario>` — e.g. `sh_jail_fbuf_basic_attach`, `sh_jail_fbuf_attach_with_no_kbd`
 
 **Per-design-element test requirements:**
@@ -5761,7 +5929,7 @@ tests/
 | **Each tunable precedence rule** (loader > sysctl > config > default) | 1 rule, all 4 levels | Integration | T35 |
 | **Each host-policy rule** (deny_default, override_deny, etc.) | 1 enabled + 1 disabled + 1 override | Integration | T35 |
 | **Each mediator reset mechanism** (PCI FLR, HDA RESET, HCI Reset) | 1 reset + 1 reinit + 1 audit | Integration | Mediated passthrough |
-| **Each backward-compat shim** (symlink, fallback path, deprecation stub) | Old name still works, warning prints | Regression | T34, T47 |
+| **Each preserved existing API** (`rfb=`, `tcp=`, `allow.fbuf`, `console_init`, `rfb_init`, `libvmmapi.so`, `libjail.so`) | Old API still works byte-for-byte | Regression | T13, T8, T9, T10, T11 |
 | **Each cleanup failure mode** (timeout, ng_reattach fail, fd-revoke fail) | 1 forced + 1 graceful + 1 partial | Integration | T65 item 7 |
 | **Each authz layer** (CLI, broker, kernel) | 1 allow + 1 deny + 1 defense-in-depth | Integration | T65 item 8 |
 | **Each CoD dispatch** (headphones, keyboard, mouse, touch, network) | 1 CoD → 1 devfs export | Integration | T65 item 6 |
@@ -5785,7 +5953,7 @@ For tests that would otherwise need a real GPU, real BT adapter, real HDA codec,
 
 **Coverage targets:**
 
-- **C code** (`gpu_resource.ko`, `fbuf_jail.ko`, `audio_resource.ko`, `displayd`, `libdisplay`): ≥ 80% line coverage (`gcov` + `lcov`); ≥ 90% branch coverage on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence)
+- **C code** (`gpu_resource.ko`, `displayd.ko`, `audio_resource.ko`, `displayd`, `libdisplay`): ≥ 80% line coverage (`gcov` + `lcov`); ≥ 90% branch coverage on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence)
 - **Shell tests**: ≥ 70% line coverage of the test surface (measured by mutation testing: introduce a fault, verify a test catches it)
 - **Backward compat**: 100% — every legacy path has at least one regression test
 
@@ -5794,7 +5962,7 @@ For tests that would otherwise need a real GPU, real BT adapter, real HDA codec,
 ```bash
 # Per-commit CI (Phase 1 VM)
 MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel
-kyua test -r /usr/tests tests/sys/modules/fbuf_jail/ tests/sys/jail/fbuf/ tests/sys/policy/ tests/sys/preflight/ tests/sys/transport/ tests/sys/vmm/
+kyua test -r /usr/tests tests/sys/modules/displayd/ tests/sys/jail/fbuf/ tests/sys/policy/ tests/sys/preflight/ tests/sys/transport/ tests/sys/vmm/
 
 # Per-nightly (Phase 1 VM, full suite)
 kyua test -r /usr/tests
@@ -5838,7 +6006,7 @@ The TODO section for each task includes a "Unit Tests" subsection with:
 **Examples (see TODO section for each task's test list):**
 
 - T8 (console refactor): `tests/sys/vmm/console_multi_instance.c` with cases `tc_console_create_succeeds`, `tc_console_create_10_concurrent_succeeds`, `tc_console_destroy_idempotent`, `tc_console_input_fanout_to_all`, `tc_console_input_fanout_to_none`
-- T12 (fbuf_jail): `tests/sys/modules/fbuf_jail/fbuf_jail_test.c` with cases `tc_fbuf_jail_alloc_returns_nonnull`, `tc_fbuf_jail_alloc_exhausted_returns_null`, `tc_fbuf_jail_attach_succeeds`, `tc_fbuf_jail_detach_succeeds`, `tc_fbuf_jail_attach_twice_fails`, `tc_fbuf_jail_reset_in_software`
+- T12 (displayd): `tests/sys/modules/displayd/displayd_test.c` with cases `tc_displayd_alloc_returns_nonnull`, `tc_displayd_alloc_exhausted_returns_null`, `tc_displayd_attach_succeeds`, `tc_displayd_detach_succeeds`, `tc_displayd_attach_twice_fails`, `tc_displayd_reset_in_software`
 - T21 (gpu_resource): `tests/sys/modules/gpu_resource/gpu_resource_test.c` with cases `tc_gpu_resource_stub_register_succeeds`, `tc_gpu_resource_stub_alloc_within_quota_succeeds`, `tc_gpu_resource_stub_alloc_exceeds_quota_returns_eagain`, `tc_gpu_resource_share_percent_25_normalized_correctly`, `tc_gpu_resource_multi_adapter_distinct_caps`
 - T35 (tunables): `tests/sys/policy/host_policy.c` with cases `tc_sysctl_read_write_roundtrip`, `tc_sysctl_readonly_rejects_write`, `tc_audit_event_emitted_on_sysctl_change`, `tc_tunable_precedence_loader_beats_sysctl`, `tc_tunable_precedence_sysctl_beats_config`, `tc_tunable_precedence_config_beats_default`
 - T38 (broker): `tests/sys/broker/auth.sh` with cases `sh_broker_pam_auth_succeeds`, `sh_broker_pam_auth_wrong_password_fails`, `sh_broker_mtls_cert_required`, `sh_broker_mtls_expired_cert_rejected`, `sh_broker_mtls_self_signed_accepted_when_allowed`
@@ -5857,7 +6025,7 @@ The user has staged hardware availability for the testing effort:
 
 1. **Phase 1 — FreeBSD VM (no GPU)** — provided first. Sufficient for all non-GPU work AND for GPU work via `gpu_stub`:
    - Display transport registry + console multi-instance (T7, T8)
-   - fbuf_jail kernel module + jail params + PRISON_FLAG (T9, T10, T12, T15)
+   - displayd kernel module + jail params + PRISON_FLAG (T9, T10, T12, T15)
    - Preflight framework + 20 shipped checks (T22, T23, T28, T33)
    - Transport security: VeNCrypt + cert loader + hot-reload + SNI + rate-limit + audit (T25, T26, T30, T31, T32, T33, T28, T29)
    - pci_fbuf wire + rfb wrap + rdp stub (T11, T13, T14)
@@ -5870,7 +6038,7 @@ The user has staged hardware availability for the testing effort:
    - **HTTP health endpoint** (T52)
    - **Multi-device tests** (hot-plug, pool resolution, vendor caps) — use stub adapters
    - **Mediated passthrough tests** (FLR, reinit, cleanup lifecycle)
-   - **Backward compat tests** (deprecated symlinks, migration script)
+   - **Backward compat tests** (real backcompat: `rfb=`, `tcp=`, `allow.fbuf`, `console_init`, `rfb_init`, `libvmmapi.so`, `libjail.so` all work unchanged)
 2. **Phase 2 — FreeBSD box with nvidia GPU** — provided later. Used for:
    - Real vendor integration (out of scope for this plan; follow-on workstream)
    - Any GPU-specific real-hardware testing of the framework surface (T19, T20, T21, T35 GPU side)
@@ -5903,7 +6071,7 @@ The stub is enabled by default when no real backend registers; a `hw.gpu.0.stub=
 - T52 (HTTP health endpoint) — verified on VM by `tests/sys/broker/health.sh` which curls the endpoint and asserts the response.
 - **Multi-device tests** (`tests/sys/multi_gpu/`) — use `gpu_stub` adapters to simulate multiple GPUs, hot-plug via sysctl, and pool resolution.
 - **Mediated passthrough tests** (`tests/sys/jail/mediator/`) — boot a jail with a stub adapter, kill the jail, verify the adapter re-initializes in <1s.
-- **Backward compat tests** (`tests/sys/compat/`) — verify deprecated symlinks work, migration script converts old configs, deprecation warnings print to stderr.
+- **Backward compat tests** (`tests/sys/compat/`) — verify that existing bhyve configs (`rfb=`, `tcp=`, `unix:`, `vga=`, `password=`, `wait=`) and existing jail params (`allow.fbuf`, etc.) work unchanged with the new `displayd` code paths loaded. No deprecated symlinks, no migration scripts, no deprecation warnings from `displayd` itself (the only deprecation warning is bhyve's own for the `rfb=` legacy form, which is bhyve's responsibility, not `displayd`'s).
 - The follow-on workstream (out of scope for this plan) tests on the nvidia box: real CUDA core counts, real VRAM allocation, real `nvidia-smi` interop, real MIG partition setup.
 
 ### Test Environment Verification (stop-and-complain protocol)
@@ -6037,7 +6205,7 @@ for pkg in ${REQUIRED_PKGS}; do
 done
 
 # 6. Verify required kernel modules can be loaded
-for mod in fbuf_jail gpu_resource audio_resource preflight; do
+for mod in displayd gpu_resource audio_resource preflight; do
     if ! kldstat -q -m "$mod" >/dev/null 2>&1; then
         if [ -f "/boot/kernel/${mod}.ko" ]; then
             $SUDO kldload "$mod" || echo "WARN: could not kldload $mod (may be expected)"
@@ -6194,18 +6362,18 @@ TEST PROCEDURE
 1. PREREQUISITES
    - Test env: FreeBSD 16+ (verified by verify_test_env.sh)
    - Required packages: (listed per-test; auto-installed by verify_test_env.sh)
-   - Required kernel modules: fbuf_jail, gpu_resource, audio_resource, preflight
+   - Required kernel modules: displayd, gpu_resource, audio_resource, preflight
    - Required files: certs, configs, test data (per-test)
    - Required state: clean (no leftover jails, no leftover daemons, no leftover ports)
 
 2. SETUP
    - Exact commands to prepare the test state
-   - Example: kldload fbuf_jail && mkdir -p /tmp/test-fbuf-jail-$$ && \
+   - Example: kldload displayd && mkdir -p /tmp/test-displayd-$$ && \
               jtest-create-jail test-fbuf-$$ allow.fbuf=1
 
 3. EXECUTE
    - The exact test command(s)
-   - Example: kyua test tests/sys/modules/fbuf_jail/ 2>&1 | tee \
+   - Example: kyua test tests/sys/modules/displayd/ 2>&1 | tee \
               .sisyphus/evidence/task-12-stdout.txt
 
 4. VERIFY
@@ -6215,7 +6383,7 @@ TEST PROCEDURE
 
 5. TEARDOWN
    - How to clean up (regardless of pass/fail)
-   - Example: jtest-remove-jail test-fbuf-$$ && kldunload fbuf_jail
+   - Example: jtest-remove-jail test-fbuf-$$ && kldunload displayd
    - Teardown MUST be idempotent (safe to run twice)
    - Teardown MUST NOT leave artifacts (jails, ports, files) on the host
 
@@ -6237,7 +6405,7 @@ Every test result MUST be recorded in a structured format. The path convention i
 
 Where:
 - `N` is the T-task number (e.g., `12`)
-- `slug` is a kebab-case description of the test (e.g., `fbuf-jail-attach-3-concurrent`)
+- `slug` is a kebab-case description of the test (e.g., `displayd-attach-3-concurrent`)
 - `ext` is one of:
   - `.txt` — plain text human-readable output (default for shell tests)
   - `.log` — log file output (default for daemon tests)
@@ -6250,7 +6418,7 @@ Where:
 ```json
 {
   "task_id": "T12",
-  "test_id": "tc_fbuf_jail_module_load_unload",
+  "test_id": "tc_displayd_module_load_unload",
   "test_category": "unit",
   "test_type": "ATF_C",
   "result": "PASS" | "FAIL" | "SKIP" | "HARD_STOP" | "TIMEOUT",
@@ -6266,23 +6434,23 @@ Where:
   "prerequisites": {
     "freebsd_version_ok": true,
     "packages_installed": true,
-    "kernel_modules_loaded": ["fbuf_jail"],
+    "kernel_modules_loaded": ["displayd"],
     "free_disk_mb": 1024,
     "free_memory_mb": 4096
   },
-  "command": "kyua test tests/sys/modules/fbuf_jail/",
+  "command": "kyua test tests/sys/modules/displayd/",
   "stdout_summary": "5/5 passed",
   "stderr_summary": "",
   "assertions": [
     {
-      "assertion": "kldload fbuf_jail succeeded",
+      "assertion": "kldload displayd succeeded",
       "result": "PASS",
-      "observed": "Loaded fbuf_jail"
+      "observed": "Loaded displayd"
     },
     {
-      "assertion": "kldunload fbuf_jail succeeded",
+      "assertion": "kldunload displayd succeeded",
       "result": "PASS",
-      "observed": "Unloaded fbuf_jail"
+      "observed": "Unloaded displayd"
     }
   ],
   "follow_up": {
@@ -6326,7 +6494,7 @@ The manifest indexes all evidence files for the run:
   "tests_timeout": 0,
   "evidence_files": [
     "task-8-console-multi-instance.json",
-    "task-12-fbuf-jail-attach-3-concurrent.json",
+    "task-12-displayd-attach-3-concurrent.json",
     "task-21-gpu-resource-stub-default.json",
     "task-35-host-policy-tunable-precedence.json",
     "task-38-broker-default-listens-localhost.json",
@@ -6479,7 +6647,7 @@ Tests can be re-run safely only if:
 
 | Test type | Re-run safe? | Manual cleanup if not |
 |---|---|---|
-| ATF C kernel module test (e.g., `tc_fbuf_jail_module_load_unload`) | **YES** (idempotent) | None |
+| ATF C kernel module test (e.g., `tc_displayd_module_load_unload`) | **YES** (idempotent) | None |
 | Shell test that creates a jail | **YES** (if teardown uses `jail -r` and is robust) | None |
 | Shell test that creates a kldload | **YES** (if `kldstat -q -m` is checked) | None |
 | Shell test that creates a cert | **YES** (if cert path is `$$`-suffixed and `rm` is in teardown) | None |
@@ -6530,10 +6698,10 @@ kyua test -r /usr/tests --tags=nightly
 kyua test -r /usr/tests --tags=broker
 
 # Run a specific task's tests
-kyua test -r /usr/tests tests/sys/modules/fbuf_jail/
+kyua test -r /usr/tests tests/sys/modules/displayd/
 
 # Run a single test
-kyua test -r /usr/tests tests/sys/modules/fbuf_jail/atf_fbuf_jail:tc_fbuf_jail_module_load_unload
+kyua test -r /usr/tests tests/sys/modules/displayd/atf_displayd:tc_displayd_module_load_unload
 ```
 
 **8. Test Data Catalog (certs, jails, users, configs)**
@@ -7100,7 +7268,7 @@ Wave 2 (After Wave 1 — core abstraction, MAX PARALLEL):
 
 Wave 3 (After Wave 2 — wire-up, parallel where deps allow):
 ├── T11: Wrap rfb.c as a registered display_transport
-├── T12: Implement sys/modules/fbuf_jail/ kernel module
+├── T12: Implement sys/modules/displayd/ kernel module
 ├── T13: Wire pci_fbuf.c to display_transport_init (with legacy rfb= compat)
 ├── T14: Add rdp.c stub + register
 ├── T15: Add jail-side example + tests/sys/jail/fbuf/
@@ -7122,19 +7290,19 @@ Wave 4 (After Wave 3 — docs + smoke):
 ├── T29: Document transport security (display_transport_security(7))
 ├── T34: Migration guide (display-abstraction-migration.7)
 ├── T36: Create share/examples/security/policy-quickstart/ + man cross-references
-└── T37: End user guide (bhyve-display-enduser.7)
+└── T37: End user guide (display-enduser.7)
 
 Wave 5 (After Wave 4 — broker + multicast, the new workstream):
-├── T38: Console broker daemon (bhyve-display-broker) with frame rate + bandwidth tunables
+├── T38: Console broker daemon (displayd) with frame rate + bandwidth tunables
 ├── T39: BDP wire protocol with 16-64 MB frame support
 ├── T40: ACL system (jail/VM params, file fallback, default-deny)
 ├── T41: Resource discovery (kqueue watch, scan_interval)
 ├── T42: Transport bridge (BDP ↔ display_transport) with frame rate enforcement
 ├── T43: Audit (syslog, file, BDP stream) with rate limiting
-├── T44: Client library (libbdp.so) with unicast + multicast API
-├── T45: Sample client (bhyve-display-client) with TUI + PNG + multicast pub/sub
+├── T44: Client library (libdisplay.so) with unicast + multicast API
+├── T45: Sample client (displayc) with TUI + PNG + multicast pub/sub
 ├── T46: End-to-end broker test (2 jails + 1 VM + 3 users + multicast)
-├── T47: Broker docs (bhyve-display-broker(8), bdp(7), display-acl(5), display-broker-config(5), bhyve-display-client(1))
+├── T47: Broker docs (displayd(8), bdp(7), display-acl(5), display-broker-config(5), displayc(1))
 └── T48: BDP Multicast UDP (TV / advertising / video wall) with AES-256-GCM, per-channel ACL, sysctls for FPS/bandwidth/TTL/IGMP
 
 Wave F (After ALL tasks — 4 parallel reviews):
@@ -7230,7 +7398,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 - **Wave 2**: 8 tasks (T7-T10, T20, T22, T24, T27) → `unspecified-high` (core refactor + GPU design + preflight framework + security design + security wire)
 - **Wave 3**: 15 tasks (T11-T15, T21, T23, T25, T26, T28, T30-T33, T35) → `unspecified-high` (10) + `deep` (T12, T21, T25, T30: kernel + crypto) + `unspecified-low` (T14, T15)
 - **Wave 4**: 7 tasks (T16, T17, T18, T29, T34, T36, T37) → `unspecified-high` (T18 smoke test) + `unspecified-low` (T16, T17, T29, T34, T36, T37)
-- **Wave 5**: 11 tasks (T38-T48) → `unspecified-high` (T38 broker daemon, T39 BDP, T40 ACL, T41 registry, T42 bridge, T43 audit, T45 client, T46 e2e, T48 multicast) + `deep` (T38, T39, T48: crypto + protocol) + `writing` (T47 docs) + `unspecified-low` (T44 libbdp)
+- **Wave 5**: 11 tasks (T38-T48) → `unspecified-high` (T38 broker daemon, T39 BDP, T40 ACL, T41 registry, T42 bridge, T43 audit, T45 client, T46 e2e, T48 multicast) + `deep` (T38, T39, T48: crypto + protocol) + `writing` (T47 docs) + `unspecified-low` (T44 libdisplay)
 - **Wave F**: 4 parallel reviewers → `oracle` (F1) + `unspecified-high` (F2, F3) + `deep` (F4)
 
 ---
@@ -7370,8 +7538,8 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.7 Architecture support — for FreeBSD-specific shell + kernel patterns
-  - §4.21 FreeBSD 16 target — for version pin and HARD STOP protocol
+  - §4.8 Architecture support — for FreeBSD-specific shell + kernel patterns
+  - §4.22 FreeBSD 16 target — for version pin and HARD STOP protocol
   - This task body: ~10 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
 
@@ -7443,9 +7611,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.2 Investigation Summary — what we found in the 3-layer stack
-  - §4.7 Architecture support (§4.7) — for arch considerations in the recon
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.3 Investigation Summary — what we found in the 3-layer stack
+  - §4.8 Architecture support (§4.7) — for arch considerations in the recon
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -7489,7 +7657,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Parallelization**:
   - Can Run In Parallel: YES
   - Parallel Group: Wave 1
-  - Blocks: T11 (rfb wrap), T12 (fbuf_jail module — jail input needs to land somewhere)
+  - Blocks: T11 (rfb wrap), T12 (displayd module — jail input needs to land somewhere)
   - Blocked By: None
 
   **References**:
@@ -7521,9 +7689,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.2 Investigation Summary — the console_kbd_register/console_ptr_register pattern
-  - §4.8 Console broker / multiplexer — the broker-side kbd/ptr design
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.3 Investigation Summary — the console_kbd_register/console_ptr_register pattern
+  - §4.9 Console broker / multiplexer — the broker-side kbd/ptr design
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -7602,8 +7770,8 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
   - §4.1 Original Request — the jail params user wants
-  - §4.6 Backward compatibility — what must NOT break
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.7 Backward compatibility — what must NOT break
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -7672,9 +7840,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security (VNC hardening) — security config keys
-  - §4.6 Backward compatibility — rfb= legacy compat
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.6 Transport security (VNC hardening) — security config keys
+  - §4.7 Backward compatibility — rfb= legacy compat
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -7740,9 +7908,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — preflight integration
-  - §4.7 Architecture support — endianness, pointer size
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.5 Preflight check framework — preflight integration
+  - §4.8 Architecture support — endianness, pointer size
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -7819,8 +7987,8 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
   - §4.1 Original Request — jail params user wants
-  - §4.6 Backward compatibility — no breaking changes to existing jail params
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.7 Backward compatibility — no breaking changes to existing jail params
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -7894,9 +8062,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.3 GPU Resource Governance — gpu_resource design
-  - §4.20 Workload-driven GPU selection — GPU_CAPS_REGISTER mechanism
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.4 GPU Resource Governance — gpu_resource design
+  - §4.21 Workload-driven GPU selection — GPU_CAPS_REGISTER mechanism
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -7959,9 +8127,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — transport_registered preflight check
-  - §4.5 Transport security — security config keys
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.5 Preflight check framework — transport_registered preflight check
+  - §4.6 Transport security — security config keys
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8097,10 +8265,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.2 Investigation Summary — console.c:50-83 call sites
-  - §4.7 Architecture support — big/little endian for pixel data
+  - §4.3 Investigation Summary — console.c:50-83 call sites
+  - §4.8 Architecture support — big/little endian for pixel data
   - T1 verdict — bhyvegc coupling report
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8160,8 +8328,8 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
   - §4.1 Original Request — allow.fbuf + fbuf.* jail params
-  - §4.6 Backward compatibility — no breaking changes
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.7 Backward compatibility — no breaking changes
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8222,7 +8390,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
   - §4.1 Original Request — PRISON_FLAG_PRISON_FBUF semantics
   - T9 — jail param registration
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8278,10 +8446,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.3 GPU Resource Governance — gpu_resource struct + backend vtable
-  - §4.18 Mediated passthrough — mediator template
+  - §4.4 GPU Resource Governance — gpu_resource struct + backend vtable
+  - §4.19 Mediated passthrough — mediator template
   - T19 — GPU audit results
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8342,9 +8510,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — the 20 checks to ship
+  - §4.5 Preflight check framework — the 20 checks to ship
   - T21 — gpu_resource hooks
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8401,9 +8569,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security (VNC hardening) — all security config keys
-  - §4.6 Backward compatibility — tls_required default, legacy opt-in
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.6 Transport security (VNC hardening) — all security config keys
+  - §4.7 Backward compatibility — tls_required default, legacy opt-in
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8459,9 +8627,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — security struct in display_transport
-  - §4.4 Preflight check framework — preflight security checks
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.6 Transport security — security struct in display_transport
+  - §4.5 Preflight check framework — preflight security checks
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8504,9 +8672,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.2 Investigation Summary — rfb.c:899-909 kbd/ptr fan-out
-  - §4.5 Transport security — VeNCrypt integration
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.3 Investigation Summary — rfb.c:899-909 kbd/ptr fan-out
+  - §4.6 Transport security — VeNCrypt integration
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8528,9 +8696,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 12. Implement `sys/modules/fbuf_jail/` kernel module
+- [ ] 12. Implement `sys/modules/displayd/` kernel module
 
-  **What to do** (TDD first): write `tests/sys/jail/atf_fbuf_jail.c` — tests for: (a) creating a jail with `allow.fbuf` registers a `console` instance, (b) kbd/mouse auto-attached, (c) `fbuf.nokbd=1` skips kbd registration, (d) console is destroyed on jail_remove, (e) the fb is kernel-managed (not VMM). Run — fail. Implement `sys/modules/fbuf_jail/fbuf_jail.c` (~400 lines): module init, `jail_attach` hook, `console_create` call, kbd/ptr registration via `console_kbd_register` / `console_ptr_register`, fb allocation (kmalloc + zero), teardown on jail_remove. Run — pass.
+  **What to do** (TDD first): write `tests/sys/jail/atf_displayd.c` — tests for: (a) creating a jail with `allow.fbuf` registers a `console` instance, (b) kbd/mouse auto-attached, (c) `fbuf.nokbd=1` skips kbd registration, (d) console is destroyed on jail_remove, (e) the fb is kernel-managed (not VMM). Run — fail. Implement `sys/modules/displayd/displayd.c` (~400 lines): module init, `jail_attach` hook, `console_create` call, kbd/ptr registration via `console_kbd_register` / `console_ptr_register`, fb allocation (kmalloc + zero), teardown on jail_remove. Run — pass.
 
   **Must NOT do**: no `/dev/fb0`, no PCI device. Pure kernel API.
 
@@ -8540,68 +8708,68 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **References**: `usr.sbin/bhyve/console.h:34-51`, `sys/modules/<existing>/` (Makefile pattern), `sys/sys/jail.h`.
 
-  **Acceptance**: TDD pass; `make -C sys/modules/fbuf_jail build`; `buildkernel`; live: `jail -c name=fbt allow.fbuf persist` then `jls -v fbuf` shows state.
+  **Acceptance**: TDD pass; `make -C sys/modules/displayd build`; `buildkernel`; live: `jail -c name=fbt allow.fbuf persist` then `jls -v fbuf` shows state.
 
-  **QA**: `kyua test atf_fbuf_jail`; live: `jail -c name=fbtest allow.fbuf persist && jls -j fbtest -v fbuf && jail -r fbtest`.
+  **QA**: `kyua test atf_displayd`; live: `jail -c name=fbtest allow.fbuf persist && jls -j fbtest -v fbuf && jail -r fbtest`.
 
   **Unit Tests (ATF C + shell integration)** — T12 covers the kernel module. Coverage target: ≥ 85% (kernel module is critical, has high branching).
 
-  **ATF C test cases** (file: `tests/sys/modules/fbuf_jail/atf_fbuf_jail.c`):
+  **ATF C test cases** (file: `tests/sys/modules/displayd/atf_displayd.c`):
 
   | # | Test case | Scenario |
   |---|---|---|
-  | 1 | `tc_fbuf_jail_module_load_unload` | `kldload fbuf_jail` succeeds; `kldunload fbuf_jail` succeeds; idempotent |
-  | 2 | `tc_fbuf_jail_module_dependencies` | Module declares correct `DECLARE_MODULE` with `console`, `jail` deps |
-  | 3 | `tc_fbuf_jail_alloc_returns_nonnull` | `fbuf_jail_alloc(1920, 1080)` returns non-NULL with valid fb pointer |
-  | 4 | `tc_fbuf_jail_alloc_zero_dimensions_returns_null` | `fbuf_jail_alloc(0, 0)` returns NULL; `fbuf_jail_alloc(-1, ...)` returns NULL |
-  | 5 | `tc_fbuf_jail_alloc_exhausted_returns_null` | After N allocs (mock kmalloc failure), returns NULL |
-  | 6 | `tc_fbuf_jail_free_releases_memory` | After `fbuf_jail_free()`, the fb pointer is freed (kmalloc-tracking mock) |
-  | 7 | `tc_fbuf_jail_attach_succeeds` | `fbuf_jail_attach(pr, alloc)` registers a console instance for the prison |
-  | 8 | `tc_fbuf_jail_attach_twice_fails` | Second `fbuf_jail_attach()` on the same prison returns EBUSY |
-  | 9 | `tc_fbuf_jail_detach_succeeds` | `fbuf_jail_detach(pr)` tears down the console and frees the fb |
-  | 10 | `tc_fbuf_jail_detach_when_not_attached_returns_enxio` | `fbuf_jail_detach()` on a prison with no fb returns ENXIO |
-  | 11 | `tc_fbuf_jail_kbd_auto_attached` | When `fbuf.nokbd=0` (default), the module registers a kbd consumer with the console |
-  | 12 | `tc_fbuf_jail_kbd_not_attached_when_nokbd` | When `fbuf.nokbd=1`, no kbd consumer is registered |
-  | 13 | `tc_fbuf_jail_mouse_auto_attached` | When `fbuf.nomouse=0` (default), the module registers a ptr consumer with the console |
-  | 14 | `tc_fbuf_jail_mouse_not_attached_when_nomouse` | When `fbuf.nomouse=1`, no ptr consumer is registered |
-  | 15 | `tc_fbuf_jail_jail_remove_tears_down` | When the prison is removed (jail removed), the module detaches and frees |
-  | 16 | `tc_fbuf_jail_jail_remove_idempotent` | Double-removal of a prison is safe (no double-free) |
-  | 17 | `tc_fbuf_jail_fb_is_kernel_managed` | The fb pointer is a kernel allocation, NOT mapped from VMM (`!is_vmm_backed()`) |
-  | 18 | `tc_fbuf_jail_reset_in_software` | `fbuf_jail_reset(pr)` issues a software reset (no PCI FLR needed) and the fb is reusable |
-  | 19 | `tc_fbuf_jail_mediator_attach_detach_reinit_hooks` | The module implements `attach()` / `detach()` / `reset()` / `reinit()` (mediator pattern) |
-  | 20 | `tc_fbuf_jail_no_devfs_nodes` | After attach, no `/dev/fb*` or `/dev/dri*` are created in the jail's devfs (verified via `devfs_rule_get()`) |
-  | 21 | `tc_fbuf_jail_audit_event_on_attach` | On attach, an audit event is written (`fbuf-jail:attach`) |
-  | 22 | `tc_fbuf_jail_audit_event_on_detach` | On detach, an audit event is written (`fbuf-jail:detach`) |
-  | 23 | `tc_fbuf_jail_dtrace_probe_on_attach` | `fbuf-jail:attach` DTrace probe fires (verified via `dtrace -l`) |
-  | 24 | `tc_fbuf_jail_dtrace_probe_on_detach` | `fbuf-jail:detach` DTrace probe fires |
-  | 25 | `tc_fbuf_jail_sysctl_attach_count` | `security.fbuf_jail.attach_count` increments on each attach |
+  | 1 | `tc_displayd_module_load_unload` | `kldload displayd` succeeds; `kldunload displayd` succeeds; idempotent |
+  | 2 | `tc_displayd_module_dependencies` | Module declares correct `DECLARE_MODULE` with `console`, `jail` deps |
+  | 3 | `tc_displayd_alloc_returns_nonnull` | `displayd_alloc(1920, 1080)` returns non-NULL with valid fb pointer |
+  | 4 | `tc_displayd_alloc_zero_dimensions_returns_null` | `displayd_alloc(0, 0)` returns NULL; `displayd_alloc(-1, ...)` returns NULL |
+  | 5 | `tc_displayd_alloc_exhausted_returns_null` | After N allocs (mock kmalloc failure), returns NULL |
+  | 6 | `tc_displayd_free_releases_memory` | After `displayd_free()`, the fb pointer is freed (kmalloc-tracking mock) |
+  | 7 | `tc_displayd_attach_succeeds` | `displayd_attach(pr, alloc)` registers a console instance for the prison |
+  | 8 | `tc_displayd_attach_twice_fails` | Second `displayd_attach()` on the same prison returns EBUSY |
+  | 9 | `tc_displayd_detach_succeeds` | `displayd_detach(pr)` tears down the console and frees the fb |
+  | 10 | `tc_displayd_detach_when_not_attached_returns_enxio` | `displayd_detach()` on a prison with no fb returns ENXIO |
+  | 11 | `tc_displayd_kbd_auto_attached` | When `fbuf.nokbd=0` (default), the module registers a kbd consumer with the console |
+  | 12 | `tc_displayd_kbd_not_attached_when_nokbd` | When `fbuf.nokbd=1`, no kbd consumer is registered |
+  | 13 | `tc_displayd_mouse_auto_attached` | When `fbuf.nomouse=0` (default), the module registers a ptr consumer with the console |
+  | 14 | `tc_displayd_mouse_not_attached_when_nomouse` | When `fbuf.nomouse=1`, no ptr consumer is registered |
+  | 15 | `tc_displayd_jail_remove_tears_down` | When the prison is removed (jail removed), the module detaches and frees |
+  | 16 | `tc_displayd_jail_remove_idempotent` | Double-removal of a prison is safe (no double-free) |
+  | 17 | `tc_displayd_fb_is_kernel_managed` | The fb pointer is a kernel allocation, NOT mapped from VMM (`!is_vmm_backed()`) |
+  | 18 | `tc_displayd_reset_in_software` | `displayd_reset(pr)` issues a software reset (no PCI FLR needed) and the fb is reusable |
+  | 19 | `tc_displayd_mediator_attach_detach_reinit_hooks` | The module implements `attach()` / `detach()` / `reset()` / `reinit()` (mediator pattern) |
+  | 20 | `tc_displayd_no_devfs_nodes` | After attach, no `/dev/fb*` or `/dev/dri*` are created in the jail's devfs (verified via `devfs_rule_get()`) |
+  | 21 | `tc_displayd_audit_event_on_attach` | On attach, an audit event is written (`displayd:attach`) |
+  | 22 | `tc_displayd_audit_event_on_detach` | On detach, an audit event is written (`displayd:detach`) |
+  | 23 | `tc_displayd_dtrace_probe_on_attach` | `displayd:attach` DTrace probe fires (verified via `dtrace -l`) |
+  | 24 | `tc_displayd_dtrace_probe_on_detach` | `displayd:detach` DTrace probe fires |
+  | 25 | `tc_displayd_sysctl_attach_count` | `security.displayd.attach_count` increments on each attach |
 
   **Shell integration tests** (file: `tests/sys/jail/fbuf/load.sh`):
 
   | # | Test | Expected |
   |---|---|---|
-  | 1 | `sh_fbuf_jail_module_loads` | `kldload fbuf_jail` succeeds; `kldstat | grep fbuf_jail` shows it |
-  | 2 | `sh_fbuf_jail_jail_start_with_allow_fbuf` | `jail -c name=fbtest allow.fbuf=1 persist` succeeds |
-  | 3 | `sh_fbuf_jail_jail_state_in_jls` | `jls -j fbtest -v allow.fbuf` shows 1; `jls -j fbtest -v fbuf.nokbd` shows 0 (default) |
-  | 4 | `sh_fbuf_jail_nokbd_works` | `jail -c name=fbtest2 allow.fbuf=1 fbuf.nokbd=1 persist` succeeds; `fbuf.nokbd=1` in jls |
-  | 5 | `sh_fbuf_jail_nomouse_works` | `jail -c name=fbtest3 allow.fbuf=1 fbuf.nomouse=1 persist` succeeds; `fbuf.nomouse=1` in jls |
-  | 6 | `sh_fbuf_jail_no_devfs_nodes` | Inside jail, `ls /dev/fb* /dev/dri* /dev/gpu* 2>&1` returns empty (no nodes) |
-  | 7 | `sh_fbuf_jail_kbd_inject_via_ioctl` | A test program inside the jail can `ioctl` the kbd to inject a key (verified via console input event) |
-  | 8 | `sh_fbuf_jail_mouse_inject_via_ioctl` | A test program inside the jail can `ioctl` the ptr to inject a click |
-  | 9 | `sh_fbuf_jail_jail_remove_cleans_up` | `jail -r fbtest` succeeds; `kldstat | grep fbuf_jail` still shows module (no unload); no leaks |
-  | 10 | `sh_fbuf_jail_concurrent_jails` | Boot 5 jails with `allow.fbuf=1`; each gets its own console; concurrent attach succeeds |
-  | 11 | `sh_fbuf_jail_reboot_safe` | Reboot the host with the module loaded; module reloads; existing jails work |
-  | 12 | `sh_fbuf_jail_concurrent_with_bhyve` | A bhyve VM (with `-s 0,fbuf,rfb=...`) AND a jail with `allow.fbuf` run concurrently; both work |
+  | 1 | `sh_displayd_module_loads` | `kldload displayd` succeeds; `kldstat | grep displayd` shows it |
+  | 2 | `sh_displayd_jail_start_with_allow_fbuf` | `jail -c name=fbtest allow.fbuf=1 persist` succeeds |
+  | 3 | `sh_displayd_jail_state_in_jls` | `jls -j fbtest -v allow.fbuf` shows 1; `jls -j fbtest -v fbuf.nokbd` shows 0 (default) |
+  | 4 | `sh_displayd_nokbd_works` | `jail -c name=fbtest2 allow.fbuf=1 fbuf.nokbd=1 persist` succeeds; `fbuf.nokbd=1` in jls |
+  | 5 | `sh_displayd_nomouse_works` | `jail -c name=fbtest3 allow.fbuf=1 fbuf.nomouse=1 persist` succeeds; `fbuf.nomouse=1` in jls |
+  | 6 | `sh_displayd_no_devfs_nodes` | Inside jail, `ls /dev/fb* /dev/dri* /dev/gpu* 2>&1` returns empty (no nodes) |
+  | 7 | `sh_displayd_kbd_inject_via_ioctl` | A test program inside the jail can `ioctl` the kbd to inject a key (verified via console input event) |
+  | 8 | `sh_displayd_mouse_inject_via_ioctl` | A test program inside the jail can `ioctl` the ptr to inject a click |
+  | 9 | `sh_displayd_jail_remove_cleans_up` | `jail -r fbtest` succeeds; `kldstat | grep displayd` still shows module (no unload); no leaks |
+  | 10 | `sh_displayd_concurrent_jails` | Boot 5 jails with `allow.fbuf=1`; each gets its own console; concurrent attach succeeds |
+  | 11 | `sh_displayd_reboot_safe` | Reboot the host with the module loaded; module reloads; existing jails work |
+  | 12 | `sh_displayd_concurrent_with_bhyve` | A bhyve VM (with `-s 0,fbuf,rfb=...`) AND a jail with `allow.fbuf` run concurrently; both work |
 
   **Evidence**: `.sisyphus/evidence/task-12-atf.txt` (kyua report) + `.sisyphus/evidence/task-12-coverage.txt` (gcov ≥ 85%)
 
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — preflight fbuf checks
-  - §4.7 Architecture support — PAGE_SIZE handling per arch
-  - §4.21 FreeBSD 16 target — version pin
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.5 Preflight check framework — preflight fbuf checks
+  - §4.8 Architecture support — PAGE_SIZE handling per arch
+  - §4.22 FreeBSD 16 target — version pin
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8619,7 +8787,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
   - [ ] Agent outputs: "Task T-NN complete" and stops
 
-  **Commit**: YES — `fbuf_jail: kernel module provisioning jail framebuffer + kbd + mouse (TDD)`
+  **Commit**: YES — `displayd: kernel module provisioning jail framebuffer + kbd + mouse (TDD)`
 
 ---
 
@@ -8642,10 +8810,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.2 Investigation Summary — pci_fbuf.c:444-449 + pcii_fbuf_baraddr:218
-  - §4.5 Transport security — rfb= legacy backcompat
-  - §4.6 Backward compatibility — no breaking changes to pci_fbuf
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.3 Investigation Summary — pci_fbuf.c:444-449 + pcii_fbuf_baraddr:218
+  - §4.6 Transport security — rfb= legacy backcompat
+  - §4.7 Backward compatibility — no breaking changes to pci_fbuf
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8686,9 +8854,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — capsicum ordering, security config
-  - §4.6 Backward compatibility — no breaking changes
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.6 Transport security — capsicum ordering, security config
+  - §4.7 Backward compatibility — no breaking changes
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8712,7 +8880,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 - [ ] 15. Add jail-side example + `tests/sys/jail/fbuf/`
 
-  **What to do**: create `contrib/jail-console-example/` with a Makefile, a small C program that calls `console_create(1024, 768, malloc_fb(), CONSOLE_FB_RAW)`, registers a render callback, and exits. Add `tests/sys/jail/fbuf/` shell harness (ATF) that starts a jail with `allow.fbuf`, runs `kldstat -n fbuf_jail` inside, asserts the module is loaded, and tears down. Add to `tests/sys/jail/Makefile`.
+  **What to do**: create `contrib/jail-console-example/` with a Makefile, a small C program that calls `console_create(1024, 768, malloc_fb(), CONSOLE_FB_RAW)`, registers a render callback, and exits. Add `tests/sys/jail/fbuf/` shell harness (ATF) that starts a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts the module is loaded, and tears down. Add to `tests/sys/jail/Makefile`.
 
   **Must NOT do**: don't add a real GUI inside the jail — just prove the kernel API is reachable.
 
@@ -8720,7 +8888,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Parallelization**: Wave 3. Blocks T18. Blocked by T12.
 
-  **References**: `tests/sys/jail/` (existing tests), `sys/modules/fbuf_jail/` (T12), `usr.sbin/bhyve/console.h` (T8).
+  **References**: `tests/sys/jail/` (existing tests), `sys/modules/displayd/` (T12), `usr.sbin/bhyve/console.h` (T8).
 
   **Acceptance**: `kyua test fbuf` passes; the example program builds and runs (no-op since no real render).
 
@@ -8729,9 +8897,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - T12 — fbuf_jail module API
-  - §4.4 Preflight check framework — preflight fbuf checks
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - T12 — displayd module API
+  - §4.5 Preflight check framework — preflight fbuf checks
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8772,11 +8940,11 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.3 GPU Resource Governance — gpu_resource implementation
-  - §4.13 GPU ports model — ports_max + port.N.* sysctls
-  - §4.20 Workload-driven GPU selection — caps registry, GPU_CAPS_REGISTER
+  - §4.4 GPU Resource Governance — gpu_resource implementation
+  - §4.14 GPU ports model — ports_max + port.N.* sysctls
+  - §4.21 Workload-driven GPU selection — caps registry, GPU_CAPS_REGISTER
   - T19, T20 — predecessor tasks
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8877,9 +9045,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — all preflight checks integrated
+  - §4.5 Preflight check framework — all preflight checks integrated
   - T12, T21, T22 — predecessors
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8920,9 +9088,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — VeNCrypt implementation
+  - §4.6 Transport security — VeNCrypt implementation
   - T11 — rfb.c wrap
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -8963,9 +9131,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — rate limit + idle timeout
+  - §4.6 Transport security — rate limit + idle timeout
   - T25 — VeNCrypt handshake
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9004,9 +9172,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — cert readability preflight
-  - §4.5 Transport security — cert/key/permissions
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.5 Preflight check framework — cert readability preflight
+  - §4.6 Transport security — cert/key/permissions
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9047,9 +9215,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — cert format auto-detect
+  - §4.6 Transport security — cert format auto-detect
   - T33 — cert preflight checks
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9090,9 +9258,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — TLS 1.3 only
+  - §4.6 Transport security — TLS 1.3 only
   - T25 — VeNCrypt implementation
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9133,9 +9301,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — SNI + kqueue hot-reload
+  - §4.6 Transport security — SNI + kqueue hot-reload
   - T30 — cert loader
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9174,10 +9342,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — cert preflight checks
-  - §4.5 Transport security — cert validation
+  - §4.5 Preflight check framework — cert preflight checks
+  - §4.6 Transport security — cert validation
   - T30 — cert loader
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9218,10 +9386,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — host policy sysctls
-  - §4.6 Backward compatibility — stricter-wins precedence
+  - §4.6 Transport security — host policy sysctls
+  - §4.7 Backward compatibility — stricter-wins precedence
   - T22 — preflight framework
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9313,7 +9481,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 - [ ] 16. Build wiring (Makefiles)
 
-  **What to do**: update `usr.sbin/bhyve/Makefile` to add `display_transport.c`, `display_backend.c`, `rdp.c`, `cert_loader.c`. Update `sys/modules/Makefile` to add `fbuf_jail`, `preflight`, `gpu_resource`. Update `sys/conf/files` to pull in `subr_preflight.c`, `gpu_resource.c`. Verify each builds clean.
+  **What to do**: update `usr.sbin/bhyve/Makefile` to add `display_transport.c`, `display_backend.c`, `rdp.c`, `cert_loader.c`. Update `sys/modules/Makefile` to add `displayd`, `preflight`, `gpu_resource`. Update `sys/conf/files` to pull in `subr_preflight.c`, `gpu_resource.c`. Verify each builds clean.
 
   **Must NOT do**: don't break the existing `rfb` build. Don't add a circular dependency.
 
@@ -9330,9 +9498,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.4 Preflight check framework — preflight integration
-  - T15 — fbuf_jail jail param validation
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.5 Preflight check framework — preflight integration
+  - T15 — displayd jail param validation
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9373,9 +9541,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.6 Backward compatibility — all compat rules
-  - §4.21 FreeBSD 16 target — version pin
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.7 Backward compatibility — all compat rules
+  - §4.22 FreeBSD 16 target — version pin
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9399,7 +9567,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 - [ ] 18. Smoke test (build, boot, regression, jail fbuf live test, transport TLS)
 
-  **What to do**: write `tests/sys/vmm/fbuf_variants.sh` — boots a bhyve VM with each of: `rfb=127.0.0.1:5900` (legacy), `tcp=127.0.0.1:5900` (legacy), `unix:/tmp/v.sock` (legacy), `transport=rfb` (self-signed TLS), `transport=rfb,tls.cert=/etc/letsencrypt/live/.../` (certbot), `transport=rdp` (refused). Verifies VNC handshake via `nc` / `openssl s_client` / RDP probe. Write `tests/sys/jail/fbuf/load.sh` — creates a jail with `allow.fbuf`, runs `kldstat -n fbuf_jail` inside, asserts loaded. Write `tests/sys/policy/host_policy.sh` — sets `security.policy.legacy_allowed=0` then attempts legacy bhyve start, asserts refused. Write `tests/sys/gpu/stub_backend.sh` — verifies the `gpu_stub` backend is registered by default, sets `hw.gpu.0.stub_capacity=10496` (or 6144 for an AMD-like stub), creates a jail with `allow.gpu=0,gpu.cores=50%`, asserts the resolved cores = 5248 (or 3072). **Write `tests/sys/policy/sysctl_conf_integration.sh` — backs up `/etc/sysctl.conf`, appends `sysctl.conf.snippet` from `share/examples/security/policy-quickstart/`, runs `sysctl -f /etc/sysctl.conf`, asserts every `security.policy.*` / `security.transport.*` value is set, then restores the original `/etc/sysctl.conf`. Verifies the existing ZFS / panic / powercycle settings (e.g. `vfs.zfs.vdev.min_auto_ashift=12`, `kern.powercycle_on_panic=1`) are preserved untouched.** Run all on the FreeBSD VM (Phase 1) using the stub backend. The nvidia box (Phase 2) runs an additional suite with a real backend. Add to `tests/sys/vmm/Makefile` and `tests/sys/jail/Makefile`.
+  **What to do**: write `tests/sys/vmm/fbuf_variants.sh` — boots a bhyve VM with each of: `rfb=127.0.0.1:5900` (legacy), `tcp=127.0.0.1:5900` (legacy), `unix:/tmp/v.sock` (legacy), `transport=rfb` (self-signed TLS), `transport=rfb,tls.cert=/etc/letsencrypt/live/.../` (certbot), `transport=rdp` (refused). Verifies VNC handshake via `nc` / `openssl s_client` / RDP probe. Write `tests/sys/jail/fbuf/load.sh` — creates a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts loaded. Write `tests/sys/policy/host_policy.sh` — sets `security.policy.legacy_allowed=0` then attempts legacy bhyve start, asserts refused. Write `tests/sys/gpu/stub_backend.sh` — verifies the `gpu_stub` backend is registered by default, sets `hw.gpu.0.stub_capacity=10496` (or 6144 for an AMD-like stub), creates a jail with `allow.gpu=0,gpu.cores=50%`, asserts the resolved cores = 5248 (or 3072). **Write `tests/sys/policy/sysctl_conf_integration.sh` — backs up `/etc/sysctl.conf`, appends `sysctl.conf.snippet` from `share/examples/security/policy-quickstart/`, runs `sysctl -f /etc/sysctl.conf`, asserts every `security.policy.*` / `security.transport.*` value is set, then restores the original `/etc/sysctl.conf`. Verifies the existing ZFS / panic / powercycle settings (e.g. `vfs.zfs.vdev.min_auto_ashift=12`, `kern.powercycle_on_panic=1`) are preserved untouched.** Run all on the FreeBSD VM (Phase 1) using the stub backend. The nvidia box (Phase 2) runs an additional suite with a real backend. Add to `tests/sys/vmm/Makefile` and `tests/sys/jail/Makefile`.
 
   **Must NOT do**: don't require a real GPU for the GPU tests (use a stub backend).
 
@@ -9416,10 +9584,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.21 FreeBSD 16 target — build on FreeBSD 16
-  - §4.7 Architecture support — cross-arch smoke tests
+  - §4.22 FreeBSD 16 target — build on FreeBSD 16
+  - §4.8 Architecture support — cross-arch smoke tests
   - All v1 tasks T1-T17 — what was built so far
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9458,9 +9626,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — man page content
+  - §4.6 Transport security — man page content
   - T17 — man page style
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9539,9 +9707,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.6 Backward compatibility — upgrade-must-not-break
+  - §4.7 Backward compatibility — upgrade-must-not-break
   - T17 — man pages
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9656,9 +9824,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — policy-quickstart example
+  - §4.6 Transport security — policy-quickstart example
   - T17 — man page style
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9680,26 +9848,26 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 37. End user guide (`display-enduser.7`, with `bhyve-display-enduser.7` deprecated stub)
+- [ ] 37. End user guide (`display-enduser.7`, with `display-enduser.7` deprecated stub)
 
   **What to do**:
-  1. Write `share/man/man7/bhyve-display-enduser.7` — the **end user perspective** doc. The user asked: "think about what an end user would need to know, especially how to access, and how to secure." Sections:
+  1. Write `share/man/man7/display-enduser.7` — the **end user perspective** doc. The user asked: "think about what an end user would need to know, especially how to access, and how to secure." Sections:
      - **Overview** — what is the bhyve display framework, in plain language. The GPU is a shared resource; the broker is the recommended access path; VNC is the legacy fallback.
      - **How do I see my VM's screen?** — three paths, in order of recommendation:
-       1. **BDP via broker** (recommended): install `bhyve-display-client`, run `bhyve-display-client --server <host> --user <me>`, get a list of fbs I can see, attach to mine.
+       1. **BDP via broker** (recommended): install `displayc`, run `displayc --server <host> --user <me>`, get a list of fbs I can see, attach to mine.
        2. **VNC direct** (legacy): point any VNC client at `<vm-host>:<port>` (the `rfb=` port). Works for backward compat. No central auth.
-       3. **Web**: `bhyve-display-client` runs in a TUI; for web UI, use the `bdp-web` companion (out of scope for this plan, but document the hook).
+       3. **Web**: `displayc` runs in a TUI; for web UI, use the `bdp-web` companion (out of scope for this plan, but document the hook).
      - **How do I see my jail's screen?** — same paths, but the jail needs `allow.fbuf=1` in its config.
      - **How do I know my connection is encrypted?** — check `transport.tls.mode` (default `required`), check the cert (self-signed → expected warning, certbot → no warning), check `security.policy.tls_required=1`.
-     - **How do I see the TV in the lobby?** — multicast subscribe via `bhyve-display-client --multicast-sub menu-board-lobby`.
-     - **How do I publish a stream to a TV?** — `bhyve-display-client --multicast-pub menu-board-lobby --source <fb>` (requires ACL on the channel).
-     - **What can I see?** — run `bhyve-display-client --list` to see all fbs you have permission to view. If you see nothing but root sees everything, ask admin to add you to the jail/VM's `display.acl`.
+     - **How do I see the TV in the lobby?** — multicast subscribe via `displayc --multicast-sub menu-board-lobby`.
+     - **How do I publish a stream to a TV?** — `displayc --multicast-pub menu-board-lobby --source <fb>` (requires ACL on the channel).
+     - **What can I see?** — run `displayc --list` to see all fbs you have permission to view. If you see nothing but root sees everything, ask admin to add you to the jail/VM's `display.acl`.
      - **What can I do?** — view (watch pixels), interact (send kbd/ptr), watch (real-time audit), audit (root only).
      - **Troubleshooting** — common issues: TLS handshake fails, self-signed cert warning (expected for dev), preflight refuses jail start, VNC client can't connect after upgrade, multicast TTL=1 doesn't reach the TV.
      - **Security checklist** — a 5-item list of "is my connection secure?" (TLS on, cert verified, host sysctls set, ACL on my fbs, audit on).
   2. Cross-reference from:
-     - `bhyve-display-broker(8)` (T47) — point at end user guide
-     - `bhyve-display-client(1)` (T47) — point at end user guide
+     - `displayd(8)` (T47) — point at end user guide
+     - `displayc(1)` (T47) — point at end user guide
      - `bdp(7)` (T47) — point at end user guide
      - `display-abstraction-migration(7)` (T34) — "Where to go next"
   3. Run `mandoc -Tlint` on the new man page.
@@ -9713,7 +9881,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **References**: `share/man/man7/` (existing mdoc style), all design sections of this plan.
 
   **Acceptance**:
-  - [ ] `share/man/man7/bhyve-display-enduser.7` exists
+  - [ ] `share/man/man7/display-enduser.7` exists
   - [ ] All sections present
   - [ ] 4 man pages cross-reference it
   - [ ] `mandoc -Tlint` clean
@@ -9723,15 +9891,15 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   Scenario: end user guide is comprehensive
     Tool: Bash (mandoc + grep)
     Steps:
-      1. mandoc -Tlint share/man/man7/bhyve-display-enduser.7
-      2. grep -cE '^Sh [A-Z]' share/man/man7/bhyve-display-enduser.7
+      1. mandoc -Tlint share/man/man7/display-enduser.7
+      2. grep -cE '^Sh [A-Z]' share/man/man7/display-enduser.7
     Expected Result: mandoc clean; ≥ 8 sections
     Evidence: .sisyphus/evidence/task-37-enduser.txt
 
   Scenario: 4 man pages cross-reference the end user guide
     Tool: Bash (grep)
     Steps:
-      1. grep -l 'bhyve-display-enduser' share/man/man8/bhyve-display-broker.8 share/man/man1/bhyve-display-client.1 share/man/man7/bdp.7 share/man/man7/display-abstraction-migration.7
+      1. grep -l 'display-enduser' share/man/man8/displayd.8 share/man/man1/displayc.1 share/man/man7/bdp.7 share/man/man7/display-abstraction-migration.7
     Expected Result: all 4 files mention the guide
     Evidence: .sisyphus/evidence/task-37-enduser-refs.txt
   ```
@@ -9739,10 +9907,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — how to access + secure
-  - §4.6 Backward compatibility — upgrade story
+  - §4.6 Transport security — how to access + secure
+  - §4.7 Backward compatibility — upgrade story
   - T17 — man page style
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9760,24 +9928,24 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
   - [ ] Agent outputs: "Task T-NN complete" and stops
 
-  **Commit**: YES — `docs: add bhyve-display-enduser(7) — end user perspective on access and security`
+  **Commit**: YES — `docs: add display-enduser(7) — end user perspective on access and security`
 
 ---
 
-- [ ] 38. Generic display broker daemon (`displayd` / `display-broker`, with `bhyve-display-broker` deprecated alias)
+- [ ] 38. Generic display broker daemon (`displayd`)
 
   **What to do**:
   1. Create `usr.sbin/displayd/` (new generic home) with `Makefile`, `main.c`, `broker.c`, `broker_session.c`, `broker_auth.c`, `broker_acl.c`, `broker_audit.c`, `broker_registry.c`, `broker_bridge.c`, `broker_config.c`.
-  2. The canonical binary is `displayd`. The old name `bhyve-display-broker` is **kept as a symlink/hardlink alias** that prints a deprecation warning to syslog on first start (T47 man page deprecation stub also written).
-  3. Reads `/etc/display/display-broker.conf` at startup, then sysctls override config, then loader tunables override sysctls. **Tunable precedence: loader > sysctl > config > module default.** (See Tunables Reference §13.) Falls back to `/etc/bhyve/display-broker.conf` if the new path doesn't exist (deprecated, log warning).
+  2. The canonical binary is **`displayd`**. There is no `displayd` (that name was never shipped; nothing to deprecate).
+  3. Reads `/etc/display/display-broker.conf` at startup, then sysctls override config, then loader tunables override sysctls. **Tunable precedence: loader > sysctl > config > module default.** (See Tunables Reference §13.) No fallback path to a "bhyve" location (none exists).
   4. **Default listen is localhost over IPv6 dual-stack (security principles — see "Localhost by default" + "IPv6" design sections).** Default `listen=tcp://[::1]:8443,unix:///var/run/displayd.sock`. Public exposure requires `security.display.broker.listen_public=1` + TLS configured + ACL configured (preflight refuses otherwise).
   5. Listens on configurable socket (TCP and/or Unix), authenticates, manages sessions, fans out pixel/input to the right `display_transport` instance.
-  6. **Privilege model**: starts as root, drops to `_displayd` user (new canonical) after binding port. The `_display-broker` user is kept as a backward-compat alias. Uses Capsicum after bind.
+  6. **Privilege model**: starts as root, drops to `_displayd` user (new canonical) after binding port. Uses Capsicum after bind.
   7. Signals: `SIGHUP` (reload config), `SIGTERM` (graceful shutdown, drain clients), `SIGUSR1` (rotate audit log), `SIGUSR2` (dump diagnostic state to `/var/run/displayd.dump`).
   8. PID file: `/var/run/displayd.pid` (falls back to `/var/run/display-broker.pid`).
   9. **Frame rate enforcement**: every pixel stream is rate-limited via `security.display.broker.max_fps_per_client` and `max_fps_total`. The transport bridge reads the frame, checks the elapsed time since the last frame, drops if too soon. Logs dropped frame counts.
   10. **Bandwidth enforcement**: per-client and per-broker bandwidth tracked atomically. If a client would exceed `max_bandwidth_per_client`, frames are dropped. If the broker would exceed `max_total_bandwidth`, lowest-priority sessions are throttled first.
-  11. **TDD first** — write ATF tests for each module before implementation. Tests cover: config parsing, tunable precedence, privilege drop, frame rate limiting, bandwidth limiting, signal handling, audit log writing, **default localhost bind, public-exposure opt-in, preflight refusal of public-exposure without TLS/ACL, IPv4-only/IPv6-only/dual-stack binds, backward compat with `bhyve-display-broker` symlink**.
+  11. **TDD first** — write ATF tests for each module before implementation. Tests cover: config parsing, tunable precedence, privilege drop, frame rate limiting, bandwidth limiting, signal handling, audit log writing, **default localhost bind, public-exposure opt-in, preflight refusal of public-exposure without TLS/ACL, IPv4-only/IPv6-only/dual-stack binds, backward compat with `displayd` symlink**.
   12. Files: 9 C files + Makefile + man page (T47).
   13. Tests: `tests/sys/display/broker_auth.test`, `tests/sys/display/broker_acl.test`, `tests/sys/display/broker_attach.test`, `tests/sys/display/broker_multiplex.test`, `tests/sys/display/broker_fps_limit.test`, `tests/sys/display/broker_bandwidth_limit.test`, `tests/sys/display/broker_signal.test`, `tests/sys/display/broker_listen_default_localhost.test`, `tests/sys/display/broker_listen_public_requires_tls.test`, `tests/sys/display/broker_listen_public_requires_acl.test`, **`tests/sys/display/broker_listen_ipv6_only.test`**, **`tests/sys/display/broker_listen_ipv4_only.test`**, **`tests/sys/display/broker_listen_dual_stack.test`**, **`tests/sys/display/broker_alias_bhyve.test`** (symlink test).
 
@@ -9795,7 +9963,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **References**: `usr.sbin/bhyve/console.c` (existing patterns), `lib/libpam/`, OpenSSL `SSL_CTX` API, FreeBSD `kqueue(2)`, `Capsicum(4)`, `sysctl(8)`, `TUNABLE_*` macros.
 
   **Acceptance**:
-  - [ ] `bhyve-display-broker -F -c /etc/bhyve/display-broker.conf` starts cleanly
+  - [ ] `displayd -F -c /etc/bhyve/display-broker.conf` starts cleanly
   - [ ] Logs to syslog (`auth.notice`)
   - [ ] `kill -TERM <pid>` drains clients and exits 0
   - [ ] `kldstat` shows no new modules loaded (broker is userspace)
@@ -9809,7 +9977,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
     Tool: Bash (openssl s_client + bdp_probe)
     Preconditions: FreeBSD build env, broker config with self-signed cert
     Steps:
-      1. bhyve-display-broker -F -c test.conf &
+      1. displayd -F -c test.conf &
       2. openssl s_client -connect localhost:8443 -cert /etc/bhyve/test-client.pem -key /etc/bhyve/test-client.key -CAfile /etc/bhyve/ca.pem
       3. Send BDP HELLO probe (0xBD 0x50 0x01 0x01 0x00 0x00 0x00 0x00 0x00)
       4. Assert response is 0xBD 0x50 0x01 0x01 (HELLO reply)
@@ -9867,9 +10035,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   | 13 | `tc_broker_listen_ipv4_only_explicit` | `listen=tcp://127.0.0.1:8443` binds IPv4 only; IPv6 connections refused |
   | 14 | `tc_broker_listen_ipv6_only_explicit` | `listen=tcp://[::1]:8443` binds IPv6 only; IPv4 connections refused |
   | 15 | `tc_broker_listen_dual_stack` | `listen=tcp://[::]:8443` with `IPV6_V6ONLY=0` accepts both IPv4 and IPv6 |
-  | 16 | `tc_broker_alias_bhyve_symlink_works` | Running `bhyve-display-broker` (deprecated symlink) starts the same daemon with deprecation warning |
-  | 17 | `tc_broker_alias_prints_deprecation_warning` | First start of `bhyve-display-broker` prints deprecation warning to syslog |
-  | 18 | `tc_broker_pam_auth_succeeds` | `pam_authenticate()` returns PAM_SUCCESS for valid creds |
+  | 16 | `tc_broker_pam_auth_succeeds` | `pam_authenticate()` returns PAM_SUCCESS for valid creds |
   | 19 | `tc_broker_pam_auth_wrong_password_fails` | `pam_authenticate()` returns PAM_AUTH_ERR for wrong password |
   | 20 | `tc_broker_mtls_cert_required` | mTLS client without cert is rejected at TLS handshake |
   | 21 | `tc_broker_mtls_expired_cert_rejected` | mTLS client with expired cert is rejected (RFC 5280) |
@@ -9917,8 +10083,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   | 8 | `sh_broker_audit_log_records` | `/var/log/audit/broker.log` shows auth/attach/detach events |
   | 9 | `sh_broker_signal_term_drains` | `kill -TERM`; broker waits for in-flight clients; exits 0 |
   | 10 | `sh_broker_signal_hup_reloads` | `kill -HUP`; new config values take effect on next session |
-  | 11 | `sh_broker_alias_bhyve_works` | `bhyve-display-broker` (deprecated symlink) starts; deprecation warning in syslog |
-  | 12 | `sh_broker_fps_limit_enforced` | 60fps source → 10fps received (per_client cap = 10) |
+  | 11 | `sh_broker_fps_limit_enforced` | 60fps source → 10fps received (per_client cap = 10) |
   | 13 | `sh_broker_idle_timeout` | Idle 30s → connection closed by broker |
   | 14 | `sh_broker_dual_stack` | `[::]:8443` accepts both IPv4 and IPv6 (with `IPV6_V6ONLY=0`) |
   | 15 | `sh_broker_ipv6_only` | `[::1]:8443` accepts only IPv6; IPv4 connection refused |
@@ -9931,10 +10096,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — broker architecture
-  - §4.5 Transport security — auth methods, ACL
+  - §4.9 Console broker / multiplexer — broker architecture
+  - §4.6 Transport security — auth methods, ACL
   - T39 — BDP protocol
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -9952,7 +10117,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
   - [ ] Agent outputs: "Task T-NN complete" and stops
 
-  **Commit**: YES — `display-broker: add bhyve-display-broker daemon with auth, ACL, sessions, privilege drop, and tunable precedence`
+  **Commit**: YES — `display-broker: add displayd daemon with auth, ACL, sessions, privilege drop, and tunable precedence`
 
 ---
 
@@ -9960,7 +10125,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **What to do**:
   1. Define `bdp(7)` — the wire protocol spec in `share/man/man7/bdp.7`. Cover: framing, message types, auth methods, ACL semantics, error codes, multicast extension, max frame size.
-  2. Implement `usr.sbin/bhyve-display-broker/bdp.h` + `bdp.c` — frame encode/decode functions, message-type constants, HMAC computation.
+  2. Implement `usr.sbin/displayd/bdp.h` + `bdp.c` — frame encode/decode functions, message-type constants, HMAC computation.
   3. Use OpenSSL's HMAC-SHA256 (truncated to 8 bytes per the spec). OpenSSL **1.1.1 LTS minimum, 3.0+ recommended** (TLS 1.3 + ChaCha20-Poly1305).
   4. Per-session HMAC key derived from TLS session secrets (via `SSL_get_session` + `SSL_SESSION_get_master_key`).
   5. **Frame size**:
@@ -10025,9 +10190,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — BDP wire format spec
-  - §4.5 Transport security — TLS 1.3 mandatory
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - §4.9 Console broker / multiplexer — BDP wire format spec
+  - §4.6 Transport security — TLS 1.3 mandatory
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10057,7 +10222,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   3. Add `display.transport=rfb|bdp` jail param (default: rfb, but recommends bdp when broker is enabled).
   4. Add `display.acl` parsing to `lib/libjail/jail.c` (T9 expansion).
   5. For bhyve VMs: add `display.acl=...` to `pci_fbuf.c` config parser (T13 expansion) and to a new `/etc/bhyve/display.acl` file parser.
-  6. Implement ACL resolution in `usr.sbin/bhyve-display-broker/broker_acl.c`:
+  6. Implement ACL resolution in `usr.sbin/displayd/broker_acl.c`:
      - Function `acl_resolve(const char *resource_name, struct passwd *user) → bool`
      - Looks up jail/VM, gets `display.acl`, parses user/group list
      - Checks `user` in list OR any of `user`'s groups in list
@@ -10118,10 +10283,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — ACL model
+  - §4.9 Console broker / multiplexer — ACL model
   - T38 — broker daemon
   - T9, T13 — jail/VM config keys
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10146,7 +10311,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 - [ ] 41. Resource discovery (jail/VM scan, kqueue event integration)
 
   **What to do**:
-  1. In `usr.sbin/bhyve-display-broker/broker_registry.c`, implement:
+  1. In `usr.sbin/displayd/broker_registry.c`, implement:
      - `registry_scan()` — enumerate all jails with `allow.fbuf=1` and all running bhyve VMs (via `/var/run/bhyve/*.pid`).
      - `registry_watch()` — kqueue on the jail subsystem events (via `/dev/jail/events` if it exists; otherwise periodic poll at `scan_interval`).
      - `registry_lookup(id)` — get resource by ID.
@@ -10195,9 +10360,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — audit log format
+  - §4.9 Console broker / multiplexer — audit log format
   - T40 — ACL resolver
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10222,7 +10387,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 - [ ] 42. Transport bridge (BDP ↔ display_transport)
 
   **What to do**:
-  1. In `usr.sbin/bhyve-display-broker/broker_bridge.c`, implement the per-session bridge.
+  1. In `usr.sbin/displayd/broker_bridge.c`, implement the per-session bridge.
   2. On `ATTACH`:
      - Resolve resource_id to a `display_transport` instance (or spin up a new one if not already running).
      - For an RFB-served fb: open an RFB client connection internally, do the RFB handshake, request pixel updates.
@@ -10243,9 +10408,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Profile**: `unspecified-high`. **Skills**: `[]`.
 
-  **Parallelization**: Wave 5. Blocks T18, T48. Blocked by T7 (transport registry), T11 (rfb wrap), T12 (fbuf_jail), T38 (sysctl reads).
+  **Parallelization**: Wave 5. Blocks T18, T48. Blocked by T7 (transport registry), T11 (rfb wrap), T12 (displayd), T38 (sysctl reads).
 
-  **References**: `usr.sbin/bhyve/rfb.c` (RFB client side), `sys/modules/fbuf_jail/` (kernel fb access), `mmap(2)`, `poll(2)`, `clock_gettime(2)`.
+  **References**: `usr.sbin/bhyve/rfb.c` (RFB client side), `sys/modules/displayd/` (kernel fb access), `mmap(2)`, `poll(2)`, `clock_gettime(2)`.
 
   **Acceptance**:
   - [ ] Attach to RFB-served fb via broker works
@@ -10281,9 +10446,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — resource discovery
+  - §4.9 Console broker / multiplexer — resource discovery
   - T38, T40 — broker + ACL
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10308,7 +10473,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 - [ ] 43. Audit logging (broker events, real-time stream, rate limiting)
 
   **What to do**:
-  1. In `usr.sbin/bhyve-display-broker/broker_audit.c`, implement audit logging.
+  1. In `usr.sbin/displayd/broker_audit.c`, implement audit logging.
   2. Every event (auth, list, attach, detach, input sample, perm denied, broker start/stop) is logged to syslog with structured key=value format.
   3. If `security.display.broker.audit_path` is set, also write to that file.
   4. If `security.display.broker.audit_level=2`, sample input events (every Nth kbd/ptr event, where N = `input_sample_rate`, default 100) and include in audit log.
@@ -10354,9 +10519,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — transport bridge VNC/RDP interop
+  - §4.9 Console broker / multiplexer — transport bridge VNC/RDP interop
   - T11, T13 — rfb wrap + pci_fbuf wire
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10378,10 +10543,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 44. Client library (`libdisplay.so`, with `libbdp.so` deprecated alias)
+- [ ] 44. Client library (`libdisplay.so`)
 
   **What to do**:
-  1. Create `lib/libbdp/` with `Makefile`, `bdp_client.h`, `bdp_client.c`, `bdp_resource.c`, `bdp_session.c`.
+  1. Create `lib/libdisplay/` with `Makefile`, `bdp_client.h`, `bdp_client.c`, `bdp_resource.c`, `bdp_session.c`.
   2. C API:
      - `bdp_connect(host, port, cert_path, key_path, ca_path) → bdp_conn *`
      - `bdp_auth(conn, method, credentials) → bdp_result`
@@ -10396,7 +10561,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
      - `bdp_multicast_sub(conn, channel_name) → bdp_channel *`
      - `bdp_multicast_unsub(channel) → bdp_result`
   3. Thread-safe (per-connection mutex, per-session mutex).
-  4. ABI stability: bump SO version on incompatible changes; add to `lib/libbdp/shlib_version`.
+  4. ABI stability: bump SO version on incompatible changes; add to `lib/libdisplay/shlib_version`.
   5. TDD: ATF tests for each API call, error paths, multi-session over one connection, multicast pub/sub.
 
   **Profile**: `unspecified-high`. **Skills**: `[]`.
@@ -10407,19 +10572,18 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Acceptance**:
   - [ ] All API functions implemented and tested (unicast + multicast)
-  - [ ] `libbdp.so` builds with proper SO version
+  - [ ] `libdisplay.so` builds with proper SO version
   - [ ] ATF tests pass
-  - [ ] Example programs in `lib/libbdp/examples/`
+  - [ ] Example programs in `lib/libdisplay/examples/`
 
   **QA Scenarios**:
   ```
   Scenario: connect, auth, list, attach, read pixels, detach
-    Tool: Bash (atf + libbdp example)
+    Tool: Bash (atf + libdisplay example)
     Steps:
-      1. Run libbdp example program against a test broker
-      2. Assert all API calls succeed
-    Expected Result: example runs cleanly
-    Evidence: .sisyphus/evidence/task-44-libbdp.txt
+  1. Run libdisplay example program against a test broker
+  2. Verify the example prints a resource list and exits 0
+  Evidence: .sisyphus/evidence/task-44-libdisplay.txt
   ```
 
   **Unit Tests (ATF C + shell integration)** — T44 is the client library. Coverage target: ≥ 90% (library is consumed by everyone; quality is critical).
@@ -10473,9 +10637,8 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   | 43 | `tc_bdp_thread_safety_per_conn` | Two threads using the same conn don't corrupt state (mutex verified) |
   | 44 | `tc_bdp_thread_safety_per_session` | Two threads on the same session don't corrupt state |
   | 45 | `tc_bdp_so_version_bump_on_incompat_change` | `shlib_version` is bumped on incompatible ABI change |
-  | 46 | `tc_bdp_alias_libbdp_works` | Linking against `-lbdp` (deprecated) works; deprecation warning at link time |
-  | 47 | `tc_bdp_alias_libdisplay_canonical` | Linking against `-ldisplay` is the canonical form |
-  | 48 | `tc_bdp_per_message_hmac_unique` | Each message has a unique HMAC (no key reuse across sessions) |
+  | 46 | `tc_bdp_canonical_libdisplay` | Linking against `-ldisplay` is the canonical form |
+  | 47 | `tc_bdp_per_message_hmac_unique` | Each message has a unique HMAC (no key reuse across sessions) |
   | 49 | `tc_bdp_session_token_unique_per_session` | Each session gets a unique 128-bit session token |
   | 50 | `tc_bdp_backpressure_on_slow_consumer` | Slow consumer (reads < producer rate) sees dropped-frame events |
 
@@ -10484,8 +10647,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   | # | Test | Expected |
   |---|---|---|
   | 1 | `sh_libdisplay_compiles` | `cc -o test test.c -ldisplay` succeeds |
-  | 2 | `sh_libdisplay_links_against_libbdp` | `cc -o test test.c -lbdp` succeeds with deprecation warning |
-  | 3 | `sh_libdisplay_example_runs` | `libdisplay/examples/list_resources` connects, lists, exits 0 |
+  | 2 | `sh_libdisplay_example_runs` | `libdisplay/examples/list_resources` connects, lists, exits 0 |
   | 4 | `sh_libdisplay_threaded_example` | `libdisplay/examples/threaded_attach` runs with 2 threads, no race conditions |
   | 5 | `sh_libdisplay_multicast_example` | `libdisplay/examples/mcast_pub_sub` publishes 10 frames; subscriber receives 10 |
 
@@ -10494,9 +10656,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — libdisplay public API
+  - §4.9 Console broker / multiplexer — libdisplay public API
   - T39 — BDP protocol
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10514,14 +10676,14 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
   - [ ] Agent outputs: "Task T-NN complete" and stops
 
-  **Commit**: YES — `libbdp: add C client library for BDP with connect/auth/list/attach/read/detach/multicast API`
+  **Commit**: YES — `libdisplay: add C client library for BDP with connect/auth/list/attach/read/detach/multicast API`
 
 ---
 
-- [ ] 45. Sample client (`displayc` / `display-client`, with `bhyve-display-client` deprecated alias)
+- [ ] 45. Sample client (`displayc`)
 
   **What to do**:
-  1. Create `usr.sbin/bhyve-display-client/` with `Makefile`, `main.c`, `client.c`, `tui.c`, `pixel_dump.c`, `multicast.c`.
+  1. Create `usr.sbin/displayc/` with `Makefile`, `main.c`, `client.c`, `tui.c`, `pixel_dump.c`, `multicast.c`.
   2. CLI flags: `--server host:port`, `--cert`, `--key`, `--ca`, `--user`, `--password` (from `getpass`), `--list`, `--attach fb_id`, `--mode view|interact|watch|audit`, `--dump-png file`, `--multicast-create channel_name --multicast-acl @signage`, `--multicast-pub channel_name --source fb_id`, `--multicast-sub channel_name`, `--multicast-list`, `--max-fps N` (override sysctl).
   3. TUI mode: simple ncurses display of pixel data, kbd/ptr input from terminal. Not a full VNC client; just enough to demonstrate the protocol.
   4. PNG dump mode: save a frame to a PNG file.
@@ -10529,35 +10691,35 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   6. Multicast sub mode: subscribe to a channel, display pixels as they arrive (no detach — long-running).
   7. Multicast pub mode: read from a local fb, publish to a channel.
   8. TDD: tests for each CLI mode, error paths.
-  9. Document in `bhyve-display-client(1)` man page.
+  9. Document in `displayc(1)` man page.
 
   **Profile**: `unspecified-high`. **Skills**: `[]`.
 
-  **Parallelization**: Wave 5. Blocks T18, T46. Blocked by T44 (libbdp).
+  **Parallelization**: Wave 5. Blocks T18, T46. Blocked by T44 (libdisplay).
 
-  **References**: `lib/libbdp/`, `lib/libpng/` (for PNG dump), ncurses.
+  **References**: `lib/libdisplay/`, `lib/libpng/` (for PNG dump), ncurses.
 
   **Acceptance**:
   - [ ] All CLI modes work (unicast + multicast)
   - [ ] TUI mode renders pixels
   - [ ] PNG dump saves a valid PNG
-  - [ ] `bhyve-display-client(1)` man page present
+  - [ ] `displayc(1)` man page present
   - [ ] ATF tests pass
 
   **QA Scenarios**:
   ```
   Scenario: list fbs via sample client
-    Tool: Bash (bhyve-display-client --list)
+    Tool: Bash (displayc --list)
     Steps:
-      1. bhyve-display-client --server localhost:8443 --cert ... --user alice --list
+      1. displayc --server localhost:8443 --cert ... --user alice --list
     Expected Result: prints table of fbs alice can see
     Evidence: .sisyphus/evidence/task-45-list.txt
 
   Scenario: multicast sub receives TV stream
-    Tool: Bash (bhyve-display-client --multicast-sub)
+    Tool: Bash (displayc --multicast-sub)
     Steps:
       1. Publisher sends frames to menu-board-lobby
-      2. bhyve-display-client --multicast-sub menu-board-lobby --dump-png /tmp/tv.png
+      2. displayc --multicast-sub menu-board-lobby --dump-png /tmp/tv.png
       3. After 5 seconds, Ctrl-C
     Expected Result: /tmp/tv.png is a valid PNG of the TV stream
     Evidence: .sisyphus/evidence/task-45-multicast.png
@@ -10566,9 +10728,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — BDP client API
+  - §4.9 Console broker / multiplexer — BDP client API
   - T44 — libdisplay
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10586,7 +10748,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] Checkpoint at `.sisyphus/state/task-{N}.checkpoint.json` updated
   - [ ] Agent outputs: "Task T-NN complete" and stops
 
-  **Commit**: YES — `display-client: add bhyve-display-client sample CLI (TUI + PNG dump + list + multicast pub/sub)`
+  **Commit**: YES — `display-client: add displayc sample CLI (TUI + PNG dump + list + multicast pub/sub)`
 
 ---
 
@@ -10632,9 +10794,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — broker e2e
+  - §4.9 Console broker / multiplexer — broker e2e
   - T38-T45 — all broker work
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10660,7 +10822,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **What to do**:
   1. Write `share/man/man8/displayd.8` — daemon reference (config, sysctls, signals, examples, security, files, IPv6, localhost-by-default). Canonical name.
-  2. Write `share/man/man8/bhyve-display-broker.8` — **deprecation stub** that redirects to `displayd(8)`. Same for `bhyve-display-client(1)`, `bhyve-display-enduser(7)`, `display_transport_security(7)` → `display-transport-security(7)`, `policy-quickstart(7)` → `displayd-policy-quickstart(7)`.
+  2. (No deprecation stub man pages — nothing to deprecate. The canonical man pages are: `displayd(8)`, `displayc(1)`, `display-enduser(7)`, `display-transport-security(7)`, `displayd-policy-quickstart(7)` — these are the names from the start.)
   3. Write `share/man/man7/bdp.7` — wire protocol spec (generic, not bhyve-specific).
   4. Write `share/man/man5/display-acl.5` — ACL syntax and semantics (generic).
   5. Write `share/man/man5/display-broker-config.5` — broker config file format (generic).
@@ -10670,7 +10832,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
       - `broker.conf.snippet` — broker config example
      - `display.acl.example` — ACL file example
      - `letsencrypt-broker.sh` — cert recipe
-  7. Cross-reference from existing man pages (`bhyve(8)`, `jail.conf(5)`, `policy-quickstart(7)`, `display_transport_security(7)`, `display-abstraction-migration(7)`, `bhyve-display-enduser(7)`).
+  7. Cross-reference from existing man pages (`bhyve(8)`, `jail.conf(5)`, `policy-quickstart(7)`, `display_transport_security(7)`, `display-abstraction-migration(7)`, `display-enduser(7)`).
   8. Update `policy-quickstart(7)` to add broker section.
   9. Update `display-abstraction-migration(7)` (T34) to add broker migration section.
   10. Run `mandoc -Tlint` on all new/updated man pages.
@@ -10692,8 +10854,8 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   Scenario: man pages cross-reference each other
     Tool: Bash (grep)
     Steps:
-      1. grep -l 'bhyve-display-broker' share/man/man8/*.8 share/man/man7/*.7
-      2. grep -l 'bdp' share/man/man8/bhyve-display-broker.8 share/man/man5/display-acl.5
+      1. grep -l 'displayd' share/man/man8/*.8 share/man/man7/*.7
+      2. grep -l 'bdp' share/man/man8/displayd.8 share/man/man5/display-acl.5
     Expected Result: cross-references present
     Evidence: .sisyphus/evidence/task-47-man-refs.txt
   ```
@@ -10701,9 +10863,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.5 Transport security — broker config file format
+  - §4.6 Transport security — broker config file format
   - T17 — man page style
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10729,7 +10891,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **What to do**:
   1. Extend BDP protocol (T39 expansion) with multicast message types: `0x10 MULTICAST_CREATE`, `0x11 MULTICAST_DESTROY`, `0x12 MULTICAST_PUB`, `0x13 MULTICAST_SUB`, `0x14 MULTICAST_UNSUB`, `0x15 MULTICAST_FRAME` (UDP), `0x16 MULTICAST_LIST`, `0x17 MULTICAST_LIST_REPLY`, `0x18 MULTICAST_ACK`.
-  2. Implement `usr.sbin/bhyve-display-broker/broker_multicast.c`:
+  2. Implement `usr.sbin/displayd/broker_multicast.c`:
      - `mcast_create(channel_name, acl, max_subs) → group, key_id` — allocate a multicast group from `multicast.group_base4` / `group_base6`, generate a per-channel AES-256-GCM key, register.
      - `mcast_destroy(channel_name)` — release group and key.
      - `mcast_pub(channel, frame)` — encrypt frame with channel key, send to multicast group via UDP socket (separate from the broker's TCP listener). **By default, publisher UDP socket is bound to `127.0.0.1` only** (loopback). Public publishing requires `security.display.broker.multicast.publish_public=1`.
@@ -10745,12 +10907,12 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   10. **Encryption**: AES-256-GCM per-channel key, derived from a broker-side master key + channel ID via HKDF. Key delivered to authorized clients over the TLS-protected BDP control channel.
   11. **Audit**: every multicast create/destroy/pub/sub is audited. Per-channel stats queryable via STATS_REQ filter (T51).
   12. **Sample multicast channel lifecycle**:
-      - `bhyve-display-client --multicast-create menu-board-lobby --multicast-acl @signage` (admin)
-      - Publisher: `bhyve-display-client --multicast-pub menu-board-lobby --source web1` (must be in @signage)
-      - Subscriber: `bhyve-display-client --multicast-sub menu-board-lobby` (must be in @signage or in channel ACL)
+      - `displayc --multicast-create menu-board-lobby --multicast-acl @signage` (admin)
+      - Publisher: `displayc --multicast-pub menu-board-lobby --source web1` (must be in @signage)
+      - Subscriber: `displayc --multicast-sub menu-board-lobby` (must be in @signage or in channel ACL)
   13. TDD: tests for each multicast message type, encryption, ACL, frame rate, bandwidth, TTL, IGMP detection, **localhost-only default, public multicast opt-in**.
   14. Update `bdp(7)` man page (T39) with the multicast extension section.
-  15. Update `bhyve-display-client(1)` (T47) with the multicast subcommands.
+  15. Update `displayc(1)` (T47) with the multicast subcommands.
 
   **Must NOT do**:
   - Don't allow multicast publish from a non-uid-0 user without an explicit `multicast.acl` allowing them.
@@ -10778,7 +10940,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **QA Scenarios**:
   ```
   Scenario: TV receives multicast stream
-    Tool: Bash (atf + bhyve-display-client)
+    Tool: Bash (atf + displayc)
     Preconditions: Broker running, test channel created
     Steps:
       1. Publisher sends 30 fps to menu-board-lobby for 5 seconds
@@ -10811,9 +10973,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — multicast UDP design
+  - §4.9 Console broker / multiplexer — multicast UDP design
   - T38 — broker daemon
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -10853,7 +11015,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
      - `broker_audit.c` — augment existing audit events with stats counters
      - `broker_acl.c` — acl_check_total, acl_deny_total, acl_resolve_us
   3. Kernel module stats:
-     - `sys/modules/fbuf_jail/fbuf_jail_stats.c` — `kern.fbuf_jail.stats.{active,total_attaches,total_detaches,bytes_written}`
+     - `sys/modules/displayd/displayd_stats.c` — `kern.displayd.stats.{active,total_attaches,total_detaches,bytes_written}`
      - `sys/modules/gpu_resource/gpu_resource_stats.c` — `kern.gpu_resource.stats.{consumer_count, vram_allocated, cores_in_use, alloc_total, free_total, enforce_fail}`
      - `sys/modules/preflight/preflight_stats.c` — `kern.preflight.stats.{runs_total, check_pass, check_fail, last_run_ms}`
   4. Periodic file dump: every `stats.interval` seconds, write to `stats.path`. Rotate previous file to `stats.path.1`, `stats.path.2`, etc. Keep `stats.rotate_keep` files.
@@ -10916,9 +11078,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.11 Instrumentation, statistics, diagnostics — stats design
+  - §4.12 Instrumentation, statistics, diagnostics — stats design
   - T38 — broker daemon
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11024,9 +11186,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.11 Instrumentation, statistics, diagnostics — DTrace USDT probes
+  - §4.12 Instrumentation, statistics, diagnostics — DTrace USDT probes
   - T38 — broker daemon
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11117,9 +11279,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.11 Instrumentation, statistics, diagnostics — BDP stats message types
+  - §4.12 Instrumentation, statistics, diagnostics — BDP stats message types
   - T39, T44 — BDP protocol + libdisplay
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11247,10 +11409,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.11 Instrumentation, statistics, diagnostics — HTTP health endpoint
-  - §4.9 Localhost by default — localhost-only HTTP
+  - §4.12 Instrumentation, statistics, diagnostics — HTTP health endpoint
+  - §4.10 Localhost by default — localhost-only HTTP
   - T38 — broker daemon
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11332,10 +11494,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.12 Multi-display support — fbuf.count + fbuf.N.*
-  - §4.13 GPU ports model — gpu.ports + per-port resolution
+  - §4.13 Multi-display support — fbuf.count + fbuf.N.*
+  - §4.14 GPU ports model — gpu.ports + per-port resolution
   - T8, T9, T21 — predecessors
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11400,9 +11562,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.12 Multi-display support — wall resource + composite
+  - §4.13 Multi-display support — wall resource + composite
   - T53 — multi-display
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11460,9 +11622,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.12 Multi-display support — BDP multi-display messages
+  - §4.13 Multi-display support — BDP multi-display messages
   - T39, T53, T54 — BDP + multi-display + walls
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11526,9 +11688,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.13 GPU ports model — port enumeration tool
+  - §4.14 GPU ports model — port enumeration tool
   - T21, T53 — gpu_resource + multi-display
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11596,9 +11758,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.14 Audio support — BDP audio message types
+  - §4.15 Audio support — BDP audio message types
   - T39, T55 — BDP + multi-display messages
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11632,7 +11794,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
      - `audio_resource_write(resource, buf, len) → ssize_t` (input)
      - `audio_resource_get_stats(resource) → struct audio_stats`
   3. `audio_stub` backend — generates a test tone (440Hz sine wave) for testing without real audio source. Tunable: `hw.audio.0.stub_frequency=440`, `hw.audio.0.stub_amplitude=0.5`.
-  4. ACL: `display.audio.acl` enforced at the kernel layer (mirror of `fbuf_jail` ACL).
+  4. ACL: `display.audio.acl` enforced at the kernel layer (mirror of `displayd` ACL).
   5. Stats: `kern.audio_resource.stats.{active, total_open, total_close, bytes_read, bytes_written}`.
   6. TDD: ATF tests for each kernel API, stub tone verification (decode and check frequency), ACL.
 
@@ -11640,7 +11802,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
   **Parallelization**: Wave 5. Blocks T57, T59, T46, F1-F4. Blocked by T22 (preflight framework), T40 (ACL).
 
-  **References**: `sys/modules/gpu_resource/`, `sys/modules/fbuf_jail/`, FreeBSD sound(4) for userland API.
+  **References**: `sys/modules/gpu_resource/`, `sys/modules/displayd/`, FreeBSD sound(4) for userland API.
 
   **Acceptance**:
   - [ ] audio_resource.ko loads
@@ -11666,10 +11828,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.14 Audio support — audio_resource.ko mediator
-  - §4.18 Mediated passthrough — attach/detach/reset/reinit hooks
+  - §4.15 Audio support — audio_resource.ko mediator
+  - §4.19 Mediated passthrough — attach/detach/reset/reinit hooks
   - T21 — gpu_resource pattern
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11737,9 +11899,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.14 Audio support — audio routing
+  - §4.15 Audio support — audio routing
   - T58 — audio_resource
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11808,9 +11970,9 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.14 Audio support — bdp-stream for ffmpeg integration
+  - §4.15 Audio support — bdp-stream for ffmpeg integration
   - T39, T44, T57 — BDP + libdisplay + audio messages
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11858,10 +12020,10 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.15 Cast tool design considerations — chromecast design
+  - §4.16 Cast tool design considerations — chromecast design
   - T60 — bdp-stream
   - **DESIGN ONLY — no v1 implementation expected**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11912,9 +12074,9 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — broker endpoints
+  - §4.9 Console broker / multiplexer — broker endpoints
   - **DESIGN ONLY — no v1 implementation**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -11960,10 +12122,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — broker endpoints
-  - §4.15 Cast tool design considerations — miracast=RTSP+RTP+WFD-P2P
+  - §4.9 Console broker / multiplexer — broker endpoints
+  - §4.16 Cast tool design considerations — miracast=RTSP+RTP+WFD-P2P
   - **DESIGN ONLY — no v1 implementation**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12012,10 +12174,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.8 Console broker / multiplexer — broker endpoints
-  - §4.12 Multi-display support — EDID per display
+  - §4.9 Console broker / multiplexer — broker endpoints
+  - §4.13 Multi-display support — EDID per display
   - **DESIGN ONLY — no v1 implementation**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12068,10 +12230,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — host passthrough exclusivity
-  - §4.18 Mediated passthrough — mediator template
+  - §4.18 Bluetooth considerations — host passthrough exclusivity
+  - §4.19 Mediated passthrough — mediator template
   - **DESIGN ONLY — no v1 implementation**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12124,10 +12286,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — device-class abstraction
-  - §4.18 Mediated passthrough — POSIX device mapping
+  - §4.18 Bluetooth considerations — device-class abstraction
+  - §4.19 Mediated passthrough — POSIX device mapping
   - **DESIGN ONLY — no v1 implementation**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12181,10 +12343,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — force-disconnect authorization
+  - §4.18 Bluetooth considerations — force-disconnect authorization
   - T40 — ACL resolver
   - **DESIGN ONLY — no v1 implementation**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12236,10 +12398,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — slot/budget/role/peer model
-  - §4.13 GPU ports model — port allocation pattern
+  - §4.18 Bluetooth considerations — slot/budget/role/peer model
+  - §4.14 GPU ports model — port allocation pattern
   - **DESIGN ONLY — no v1 implementation**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12293,11 +12455,11 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — jail termination cleanup
-  - §4.18 Mediated passthrough — cleanup lifecycle
+  - §4.18 Bluetooth considerations — jail termination cleanup
+  - §4.19 Mediated passthrough — cleanup lifecycle
   - T21 — gpu_resource cleanup pattern
   - **DESIGN ONLY — v3 future boulder**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12343,10 +12505,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — multi-radio coordination
-  - §4.19 Multi-device / heterogeneous hardware — multi-adapter pattern
+  - §4.18 Bluetooth considerations — multi-radio coordination
+  - §4.20 Multi-device / heterogeneous hardware — multi-adapter pattern
   - **DESIGN ONLY — v3 future boulder**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12391,10 +12553,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — LE Audio / Auracast
-  - §4.14 Audio support — audio codec pipeline
+  - §4.18 Bluetooth considerations — LE Audio / Auracast
+  - §4.15 Audio support — audio codec pipeline
   - **DESIGN ONLY — v3 future boulder**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12439,10 +12601,10 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   **Required Context** (in agent's working memory):
   - Plan Navigation Index (§2) — for finding related sections
   - Verification Strategy (§7) — for test framework, test env, agent context protocol
-  - §4.17 Bluetooth considerations — cross-jail peer sharing
+  - §4.18 Bluetooth considerations — cross-jail peer sharing
   - T40, T68 — ACL + BT resource model
   - **DESIGN ONLY — v3 future boulder**
-  - Workload-driven GPU section (§4.20) and FreeBSD 16 target (§4.21) where relevant
+  - Workload-driven GPU section (§4.21) and FreeBSD 16 target (§4.22) where relevant
   - Predecessor task body (the task this one is Blocked By) — for context on what's been built
   - This task body: ~5-15 KB
   - MINIMUM CONTEXT BUDGET: ~85 KB (fits in 200K context window with headroom)
@@ -12472,7 +12634,7 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
 > Never mark F1-F4 as checked before getting the user's okay. Rejection or user feedback → fix → re-run → present again → wait for okay.
 
 - [ ] F1. **Plan compliance audit** — `oracle` agent
-  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify agent context management (added by audit):** every T-task (T1-T60) has a `**Required Context**`, `**Test Procedure**`, and `**Done When**` subsection (60 v1 + 12 v2/v3 design-only = 72 tasks total). **Verify the Plan Navigation Index accuracy** by spot-checking 3 random section references — they should resolve to actual sections with line numbers within ±20 of the index. **Verify checkpoint files exist:** `.sisyphus/state/task-{N}.checkpoint.json` for each completed task. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 15 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all broker config files exist, all broker man pages present (displayd.8, displayc.1, bdp-stream.1, display-acl.5, display-broker-config.5, display-pools.5, display-enduser.7, display-transport-security.7, bdp.7, policy-quickstart.7 — plus deprecation stubs bhyve-display-broker.8 and bhyve-display-enduser.7), e2e test passes. **Verify architectural rules (added by audit):** (a) `displayd` (not `bhyve-display-broker` as the canonical name) is the binary; old name is a deprecated symlink with deprecation warning. (b) `libdisplay` (not `libbdp`) is the canonical library; old name is a deprecated symlink. (c) `/etc/display/` (not `/etc/bhyve/display-broker.conf`) is the canonical config dir; old path is a fallback with warning. (d) `gpu_stub` test backend is mandatory; `hw.gpu.0.stub_capacity=10496` is the default. (e) No `/dev/dri` or `/dev/gpu*` inside jails. (f) No `/dev/bluetooth*` inside jails. (g) `localhost by default` for all new endpoints (`[::1]:8443`); public requires `security.display.broker.listen_public=1` + TLS + ACL. (h) IPv6 dual-stack. (i) TLS 1.3 only by default. (j) Self-signed cert auto-gen when none configured. (k) Host policy sysctls (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) are stricter-wins. (l) Tunable precedence: loader > sysctl > config > default. (m) Every `*_resource.ko` module has `attach()` / `detach()` / `reset()` / `reinit()` hooks. (n) No `switch (vendor_id)` in `gpu_resource.ko`; use `GPU_CAPS_REGISTER` mechanism. (o) OID namespaces `security.bt.*` and `hw.bt.*` are reserved (return ENOENT, not crash). (p) OID namespace `security.display.cast.*` is reserved. (q) `bdp-stream` works (pipes to ffmpeg). (r) HTTP health endpoint works (curl returns 200 + JSON). **Verify design-only items NOT implemented:** (s) T61 cast tool, T62-T72 BT/cast design items — F1 does NOT check for their implementation; F1 DOES check that their OID namespaces are reserved. **Verify unit tests:** (t) Every T-task has at least 5 ATF C test cases documented (where the task has C code) and at least 2 shell integration tests. (u) Coverage targets: ≥ 80% line coverage on C code, ≥ 90% on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence). (v) `tests/sys/env/verify_test_env.sh` exists and is sourced by every test. (w) The plan target is FreeBSD 16 or higher; the build/test env is verified at test start.
+  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify agent context management (added by audit):** every T-task (T1-T60) has a `**Required Context**`, `**Test Procedure**`, and `**Done When**` subsection (60 v1 + 12 v2/v3 design-only = 72 tasks total). **Verify the Plan Navigation Index accuracy** by spot-checking 3 random section references — they should resolve to actual sections with line numbers within ±20 of the index. **Verify checkpoint files exist:** `.sisyphus/state/task-{N}.checkpoint.json` for each completed task. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 15 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all broker config files exist, all broker man pages present (displayd.8, displayc.1, bdp-stream.1, display-acl.5, display-broker-config.5, display-pools.5, display-enduser.7, display-transport-security.7, bdp.7, displayd-policy-quickstart.7) — these are the canonical names from the start; no deprecation stub man pages, e2e test passes. **Verify architectural rules (added by audit):** (a) The canonical binary name is **`displayd`**. (b) The canonical library name is **`libdisplay`**. (c) The canonical config dir is **`/etc/display/`**. These are the names from the start; no "old name" to deprecate from (no product was ever shipped under a different name; see §4.7 for the "no old product to deprecate" note). (d) `gpu_stub` test backend is mandatory; `hw.gpu.0.stub_capacity=10496` is the default. (e) No `/dev/dri` or `/dev/gpu*` inside jails. (f) No `/dev/bluetooth*` inside jails. (g) `localhost by default` for all new endpoints (`[::1]:8443`); public requires `security.display.broker.listen_public=1` + TLS + ACL. (h) IPv6 dual-stack. (i) TLS 1.3 only by default. (j) Self-signed cert auto-gen when none configured. (k) Host policy sysctls (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) are stricter-wins. (l) Tunable precedence: loader > sysctl > config > default. (m) Every `*_resource.ko` module has `attach()` / `detach()` / `reset()` / `reinit()` hooks. (n) No `switch (vendor_id)` in `gpu_resource.ko`; use `GPU_CAPS_REGISTER` mechanism. (o) OID namespaces `security.bt.*` and `hw.bt.*` are reserved (return ENOENT, not crash). (p) OID namespace `security.display.cast.*` is reserved. (q) `bdp-stream` works (pipes to ffmpeg). (r) HTTP health endpoint works (curl returns 200 + JSON). **Verify design-only items NOT implemented:** (s) T61 cast tool, T62-T72 BT/cast design items — F1 does NOT check for their implementation; F1 DOES check that their OID namespaces are reserved. **Verify unit tests:** (t) Every T-task has at least 5 ATF C test cases documented (where the task has C code) and at least 2 shell integration tests. (u) Coverage targets: ≥ 80% line coverage on C code, ≥ 90% on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence). (v) `tests/sys/env/verify_test_env.sh` exists and is sourced by every test. (w) The plan target is FreeBSD 16 or higher; the build/test env is verified at test start.
   Output: `Must Have [N/N] | Backcompat [N/N] | Must NOT Have [N/N] | Tasks [N/N done] | Broker [N/N] | Multicast [N/N] | Architectural Rules [N/N] | OID Reservations [N/N] | Design-Only Excluded [N/N] | Unit Tests [N/N] | Coverage [%] | Evidence [N files] | VERDICT: APPROVE|REJECT`
 
 - [ ] F2. **Code quality review** — `unspecified-high` agent
@@ -12480,7 +12642,7 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
   Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | Hardcoded Constants [N found / N] | Forbidden Patterns [N found / N] | Backcompat [PASS/FAIL] | Parallel [2.3× speedup] | Test Env Script [PRESENT/MISSING] | VERDICT`
 
 - [ ] F3. **Real QA on a FreeBSD host** — `unspecified-high` agent (+ `playwright`/`tmux` if UI)
-  Start from a clean state on a **FreeBSD 16** host (16.0+ latest release). **First action: source `tests/sys/env/verify_test_env.sh` and confirm hard-fail if not FreeBSD 16+.** **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. **Execute the Unit Test Strategy: run `kyua test` on every test directory, verify all 204 documented `tc_` test cases and 62 documented `sh_` shell test cases pass (266 unique test cases total). Verify coverage targets (≥ 80% on C, ≥ 90% on critical paths).** Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**. **Test multi-device scenarios** (per multi-device section): (a) Hot-plug a stub adapter at runtime; verify it appears in `hw.gpu.adapters`; new jail can use it. (b) Hot-unplug a stub adapter; running jails get `ENXIO` on next I/O. (c) Drop a JSON overlay; capability detection works for an unknown vendor. (d) Generic fallback: unknown vendor GPU works with conservative defaults + warning. **Test mediated passthrough scenarios**: (e) After jail stop, stub adapter re-initializes in <1s. (f) FLR + driver reinit logs to audit trail. (g) Cleanup is idempotent (SIGKILL during cleanup is safe). **Test backward compat scenarios**: (h) Deprecated symlinks work (`bhyve-display-broker` → `displayd`, `libbdp` → `libdisplay`, `bhyve-display-client` → `displayc`). (i) Migration script converts old configs. (j) Deprecation warnings print to stderr. **Test broker security scenarios**: (k) Default listen is `[::1]:8443` (not `0.0.0.0` or `::`). (l) `listen_public=1` without TLS → broker exits with preflight error. (m) `listen_public=1` without ACL → broker exits with preflight error. (n) Dual-stack `[::]:8443` accepts both IPv4 and IPv6. (o) TLS 1.2 connection is refused (TLS 1.3 only). (p) mTLS with expired cert is rejected. **Test that F3 will HARD STOP if test env is wrong:** (q) Run the same test on a FreeBSD 15 box — verify it exits 78 with a clear error. (r) Run the same test on a FreeBSD 14 box — verify it exits 78. (s) Run with no sudo/doas — verify it exits 78. (t) Run with sudo requiring password — verify it exits 78. (These are F3-self-tests for the verify_test_env.sh script itself.)
+  Start from a clean state on a **FreeBSD 16** host (16.0+ latest release). **First action: source `tests/sys/env/verify_test_env.sh` and confirm hard-fail if not FreeBSD 16+.** **Build with all cores**: `MAKE_JOBS_NUMBER=$(sysctl -n hw.ncpu) make -j$(sysctl -n hw.ncpu) buildworld buildkernel`. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence to `.sisyphus/evidence/final-qa/`. **Execute the Unit Test Strategy: run `kyua test` on every test directory, verify all 204 documented `tc_` test cases and 62 documented `sh_` shell test cases pass (266 unique test cases total). Verify coverage targets (≥ 80% on C, ≥ 90% on critical paths).** Test cross-task integration (e.g. bhyve + VNC + certbot cert + cert renewal; jail + fbuf + transport; **broker e2e with 2 jails + 1 VM + 3 users + multicast TV**). Test edge cases: empty state, invalid input, rapid actions, host policy off, host policy on, GPU absent with strict, GPU absent without strict, percent parsing of `200%` / `abc` / `50%` / `16384`, TLS refusal, legacy opt-in, self-signed accept, SNI with no SNI, SNI with valid SNI, SNI with unknown SNI, password prompt on TTY, password file, password refused on CLI, sysctl runtime change, eGPU reboot, MIG absent, MIG present, **4K and 8K frames over BDP unicast, 4K over BDP multicast, frame rate limit, bandwidth limit, multicast TTL=1, multicast AES-256-GCM, multicast ACL, tunable precedence (loader > sysctl > config > default)**. **Test multi-device scenarios** (per multi-device section): (a) Hot-plug a stub adapter at runtime; verify it appears in `hw.gpu.adapters`; new jail can use it. (b) Hot-unplug a stub adapter; running jails get `ENXIO` on next I/O. (c) Drop a JSON overlay; capability detection works for an unknown vendor. (d) Generic fallback: unknown vendor GPU works with conservative defaults + warning. **Test mediated passthrough scenarios**: (e) After jail stop, stub adapter re-initializes in <1s. (f) FLR + driver reinit logs to audit trail. (g) Cleanup is idempotent (SIGKILL during cleanup is safe). **Test backward compat scenarios**: (h) Deprecated symlinks work (`displayd` → `displayd`, `libdisplay` → `libdisplay`, `displayc` → `displayc`). (i) Migration script converts old configs. (j) Deprecation warnings print to stderr. **Test broker security scenarios**: (k) Default listen is `[::1]:8443` (not `0.0.0.0` or `::`). (l) `listen_public=1` without TLS → broker exits with preflight error. (m) `listen_public=1` without ACL → broker exits with preflight error. (n) Dual-stack `[::]:8443` accepts both IPv4 and IPv6. (o) TLS 1.2 connection is refused (TLS 1.3 only). (p) mTLS with expired cert is rejected. **Test that F3 will HARD STOP if test env is wrong:** (q) Run the same test on a FreeBSD 15 box — verify it exits 78 with a clear error. (r) Run the same test on a FreeBSD 14 box — verify it exits 78. (s) Run with no sudo/doas — verify it exits 78. (t) Run with sudo requiring password — verify it exits 78. (These are F3-self-tests for the verify_test_env.sh script itself.)
   Output: `Build [PASS, 2.3× parallel speedup] | Test Env Verified [PASS, FreeBSD X.Y] | ATF Tests [N pass/N fail] | Shell Tests [N pass/N fail] | Coverage [N%] | Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | Broker [N/N] | Multicast [N/N] | Multi-Device [N/N] | Mediated [N/N] | Backcompat [N/N] | Security [N/N] | Test Env Self-Tests [N/N] | VERDICT`
 
 - [ ] F4. **Scope fidelity check** — `deep` agent
@@ -12508,14 +12670,14 @@ export MAKE_JOBS_NUMBER=$NCPU
 # --- BUILD phase (parallel) ---
 make -j$NCPU buildworld buildkernel          # Must succeed
 make -j$NCPU -C usr.sbin/bhyve               # Must succeed clean (userspace)
-make -j$NCPU -C sys/modules                   # Must succeed (fbuf_jail, preflight, gpu_resource)
+make -j$NCPU -C sys/modules                   # Must succeed (displayd, preflight, gpu_resource)
 
 # --- INSTALL phase (serial) ---
 make installworld                             # Serial: no -j. Must succeed.
 make installkernel                            # Serial: no -j. Must succeed.
 make -C usr.sbin/bhyve install                # Serial: usually fine to add -j for subdirs,
                                                # but the safe rule is "no -j on installworld/installkernel"
-make -C sys/modules/fbuf_jail install         # and subdir installs also serial for safety.
+make -C sys/modules/displayd install         # and subdir installs also serial for safety.
 make -C sys/modules/preflight install
 make -C sys/modules/gpu_resource install
 make -C share/examples/security/policy-quickstart install
