@@ -47,6 +47,8 @@
 
 #include "orchestration.h"
 
+static uint64_t get_physmem(void);
+
 #define MAX_NODES 256
 
 /*
@@ -478,7 +480,7 @@ scheduler_update_node_resources(const char *node_name,
 /*
  * Get node information
  */
-struct node_info *
+static struct node_info *
 scheduler_get_node(const char *node_name)
 {
 	pthread_mutex_lock(&scheduler_lock);
@@ -498,7 +500,7 @@ scheduler_get_node(const char *node_name)
 /*
  * Set scheduler scoring weights
  */
-int
+static int
 scheduler_set_weights(int cpu_weight, int memory_weight, int pod_count_weight)
 {
 	pthread_mutex_lock(&scheduler_lock);
