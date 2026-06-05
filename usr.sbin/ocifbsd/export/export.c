@@ -36,14 +36,14 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
-#include <sys/json.h>
-#include <sys/sha.h>
 
 #include <errno.h>
 #include <fcntl.h>
 #include <fts.h>
+#include <libgen.h>
 #include <libutil.h>
 #include <pthread.h>
+#include <sha256.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,13 +55,60 @@
 #include "export.h"
 #include "../include/ocifbsd.h"
 
+/*
+ * Recursive mkdir(2). FreeBSD 16's <libutil.h> does not export mkdirp
+ * in any public header. We provide a local copy.
+ */
+static int
+mkdirp_local(const char *path, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *p;
+	size_t len;
+
+	if (path == NULL || *path == '\0')
+		return (-1);
+
+	len = strlcpy(buf, path, sizeof(buf));
+	if (len >= sizeof(buf))
+		return (-1);
+
+	for (p = buf + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, mode) != 0 && errno != EEXIST)
+			return (-1);
+		*p = '/';
+	}
+
+	if (mkdir(buf, mode) != 0 && errno != EEXIST)
+		return (-1);
+	return (0);
+}
+
+#define	mkdirp(path, mode)	mkdirp_local((path), (mode))
+
+static char *export_create_metadata(const char *name);
+static int export_get_container_image(const char *name, uint8_t **data,
+    size_t *size);
+static size_t compress_image(uint8_t *input, size_t input_size,
+    uint8_t **output, int level);
+static size_t decompress_image(uint8_t *input, size_t input_size,
+    uint8_t **output);
+static int export_write_volumes(FILE *fp, const char *name);
+static int export_write_config(FILE *fp, const char *name);
+static void export_calculate_checksum(const char *path);
+static int import_create_container(const char *metadata, uint8_t *image_data,
+    size_t image_size, int compressed, const char *target);
+
 /* Global state */
 static struct export_config default_config;
 static struct export_stats stats;
 static pthread_mutex_t export_lock = PTHREAD_MUTEX_INITIALIZER;
 static int initialized = 0;
 static TAILQ_HEAD(, export_job) export_jobs;
-static uint64_t next_job_id = 1;
+static uint64_t next_job_id __attribute__((unused)) = 1;
 
 /* FEB magic bytes */
 static const char FEB_MAGIC[4] = { 'F', 'E', 'B', '\0' };
@@ -193,7 +240,7 @@ export_to_feb(const char *name, struct export_config *config, char **output_path
         strlcpy(output_file, *output_path, sizeof(output_file));
     } else {
         snprintf(output_file, sizeof(output_file),
-            "%s/exports/%s.feb", OCIFBSD_VAR_DIR, name);
+            "%s/exports/%s.feb", OCIFBSD_DATA_DIR, name);
     }
 
     /* Ensure directory exists */
@@ -374,7 +421,7 @@ export_get_container_image(const char *name, uint8_t **data, size_t *size)
     int ret = -1;
 
     snprintf(root_path, sizeof(root_path), "%s/containers/%s/root",
-        OCIFBSD_VAR_DIR, name);
+        OCIFBSD_DATA_DIR, name);
 
     fp = fopen(root_path, "r");
     if (fp == NULL)
@@ -457,7 +504,7 @@ export_write_volumes(FILE *fp, const char *name)
     char volume_path[PATH_MAX];
 
     snprintf(volume_path, sizeof(volume_path),
-        "%s/volumes/%s", OCIFBSD_VAR_DIR, name);
+        "%s/volumes/%s", OCIFBSD_DATA_DIR, name);
 
     /* Volume export logic */
     syslog(LOG_INFO, "Exporting volumes for: %s", name);
@@ -477,7 +524,7 @@ export_write_config(FILE *fp, const char *name)
     size_t n;
 
     snprintf(config_path, sizeof(config_path),
-        "%s/containers/%s/config.json", OCIFBSD_VAR_DIR, name);
+        "%s/containers/%s/config.json", OCIFBSD_DATA_DIR, name);
 
     cfp = fopen(config_path, "r");
     if (cfp == NULL)
@@ -529,6 +576,8 @@ import_create_container(const char *metadata, uint8_t *image_data,
         }
     }
 
+    (void)size;
+
     /* Create container */
     ret = 0;  /* Would call ocifbsd create */
 
@@ -575,7 +624,7 @@ export_to_raw(const char *name, const char *output_path)
 
     snprintf(cmd, sizeof(cmd),
         "dd if=%s/containers/%s/root of=%s bs=1M",
-        OCIFBSD_VAR_DIR, name, output_path);
+        OCIFBSD_DATA_DIR, name, output_path);
 
     syslog(LOG_INFO, "Exporting to raw: %s", cmd);
 
@@ -708,7 +757,6 @@ network_detect_interfaces(void)
     FILE *fp;
     static char result[4096];
     char buf[256];
-    int len = 0;
 
     fp = popen("ifconfig -l", "r");
     if (fp == NULL)
@@ -718,7 +766,6 @@ network_detect_interfaces(void)
 
     while (fgets(buf, sizeof(buf), fp) != NULL) {
         strlcat(result, buf, sizeof(result));
-        len += strlen(buf);
     }
 
     pclose(fp);
@@ -785,7 +832,7 @@ jail_to_container(const char *jail_name, const char *container_name)
 
     /* Export jail config */
     snprintf(config_path, sizeof(config_path),
-        "%s/jails/%s/config.json", OCIFBSD_VAR_DIR, jail_name);
+        "%s/jails/%s/config.json", OCIFBSD_DATA_DIR, jail_name);
 
     ret = jail_export_config(jail_name, config_path);
     if (ret != 0)
@@ -905,8 +952,6 @@ export_stats_json(char **json_out)
 int
 main(int argc, char *argv[])
 {
-    int ch;
-
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <command> [args]\n", argv[0]);
         fprintf(stderr, "Commands: export, import, list, status\n");

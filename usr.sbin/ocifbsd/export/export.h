@@ -173,6 +173,7 @@ struct export_job {
     char            *output_url;
     uint64_t        output_size;
     struct export_config config;
+    TAILQ_ENTRY(export_job) next;
 };
 
 /* Export statistics */
