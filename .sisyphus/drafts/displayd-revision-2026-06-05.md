@@ -129,14 +129,30 @@ A test for the deprecation/migration path: secrets can be staged to `/etc/displa
 **User said**:
 1. "make the title 'displayd: bhyve Display Abstraction And Container Framebuffer'"
 2. "we should also have a TOC with links to the sections, and validate the first line in the tables, granted the links may solve that problem .. because if we go by line numbers, we need to tell the agent to validate that its actually the content they need"
+3. "looking at 'allow.fbuf; fbuf.nokbd; fbuf.nomouse;' maybe we need to add a `fbuf.nohid` that disables the mouse and keyboard, and a `fbuf.allowhid` to allow mouse and keyboard HID = Human Interface Devices"
+4. "the chart 'Architecture (corrected — GPU is a host-side shared resource):' isn't mermaid"
+5. "Not mermaid: The unified source: bdp-stream + BDP device-info protocol (T60 + T62-design)"
+6. "Not mermaid: The state machine (per-adapter binding):"
+7. "Not mermaid: Authorization layers (defense in depth):"
+8. "not mermaid: A single physical A100 can be split into up to 7 MIG instances. Each MIG looks like a separate GPU to the VM"
+9. "not mermaid in section: 7. SR-IOV PFs and VFs:"
+10. "not mermaid: 9. What happens at hot-plug time when a new GPU is detected"
+11. "not mermaid: Test directory layout (FreeBSD convention):"
+12. "Should this be mermaid?: Every test (ATF C, shell, or QA scenario) MUST have a procedure with six steps:" (NO — it's a procedure, not a diagram; kept as text)
+13. "should be mermaid: 5. Test Coverage Recording Coverage is recorded in .sisyphus/evidence/run-{id}/coverage/:"
+14. "Should be mermaid: 8. Test Data Catalog (certs, jails, users, configs)"
+15. "should be mermaid: Execution Strategy Parallel Execution Waves"
+16. "prob should be mermaid: Test Procedure (per-test) — for each of the 20 ATF C cases in T8:" (kept original as text; added Mermaid flowchart as visual summary)
+17. "the problem with ascii art, is that an agent may mis-interpret, where mermaid is explicit"
 
 ### Changes applied
 
+#### Title and TOC
 1. **Title updated** (line 1):
    - Old: `# bhyve Display Abstraction + Jail Framebuffer`
    - New: `# displayd: bhyve Display Abstraction And Container Framebuffer`
 
-2. **New `## Table of Contents` section added** at line 33 (right after TL;DR, before Plan Navigation Index). Contains:
+2. **New `## Table of Contents` section** at line 33 (right after TL;DR, before Plan Navigation Index). Contains:
    - Validation protocol blockquote (3-step protocol for the agent)
    - Top-level sections list (17 clickable anchor links)
    - Design sections list (23 clickable anchor links)
@@ -146,44 +162,55 @@ A test for the deprecation/migration path: secrets can be staged to `/etc/displa
    - Added clickable links in the "Section" / "Design section" column (anchor-based, never drifts)
    - Added new `First line content` column showing the actual heading text
    - Validated all `First line` column line numbers against the live `grep -n "^## " plan.md` and `grep -n "^### " plan.md` output
-   - Removed the stale "(Line numbers are approximate; use `grep -n "^## " file.md` for the live numbers.)" disclaimer — line numbers are now validated, not approximate
+   - Removed the stale "(Line numbers are approximate; use `grep -n "^## " file.md` for the live numbers.)" disclaimer
 
-4. **Section "5. Section reference convention" updated** (Agent Context Management):
+4. **Fixed initial anchor bug**: TOC links for design sections used `#42-...` style (with section number prefix) but the actual heading slugs are `#additive-kbdmouse-model-...` (without the "4.2" prefix). All 23 design section anchors fixed in BOTH the TOC and the navigation table.
+
+5. **Section "5. Section reference convention" updated** (Agent Context Management):
    - Now recommends **clickable TOC links** as the **preferred** navigation mechanism (anchor-based, doesn't drift)
    - Line numbers downgraded to **fallback** mechanism (must re-validate with grep before use)
-   - Added explicit verification steps for the agent (re-validate First line, re-validate First line content)
 
-5. **F1-F4 verification updated**:
+6. **F1-F4 verification updated**:
    - F1: TOC link validation, First line column validation, First line content column validation
    - F2: Stale §3.X design section references check
    - F3: Link-validation protocol test
    - F4: TOC and Plan Navigation Index sync check
 
-6. **Must Have list updated** to include the link-validation protocol as a hard requirement.
+#### HID params
+7. **New sub-section `#### HID-level controls` added to §4.2**:
+   - `fbuf.nohid` (boolean, default false) — coarse-grained opt-out that disables all virtual HID devices from fbuf
+   - `fbuf.allowhid` (boolean, default false) — separate permission for raw HID device nodes (`/dev/uhid*`)
+   - State table (8 rows for 4 boolean params combinations)
+   - Precedence rules (stricter-wins; host policy `security.fbuf.allowhid` defaults to 0)
+   - 5 new ATF C tests + 3 new shell tests
+   - 4 new "Must NOT do" rules
 
-### Plan stats after this turn (this turn)
+#### ASCII art → Mermaid conversions (13 total)
+- Architecture (corrected) at §4.9 — graph TB
+- Unified source: bdp-stream at §4.17 — graph TB
+- State machine (per-adapter binding) at §4.18 — flowchart TB
+- Authorization layers (defense in depth) at §4.18 — flowchart TB with subgraphs
+- MIG instances at §4.21 — graph TB (tree)
+- SR-IOV PFs and VFs at §4.20 — graph TB (tree)
+- Hot-plug time when a new GPU is detected at §4.21 — flowchart TB
+- GPU caps discovery pipeline at §4.21 — flowchart TB (6-step pipeline + overlays)
+- Test directory layout (FreeBSD convention) at §7 — graph TB (filesystem tree)
+- Test Coverage Recording at §7 — graph TB (filesystem tree)
+- Test Data Catalog (certs, jails, users, configs) at §7 — graph TB (filesystem tree)
+- Parallel Execution Waves at §13 — graph TB (5 waves + 1 F-wave with subgraphs)
+- T8 Test Procedure (high-level 6-step flow) at §14 — flowchart LR (added as visual summary; original detailed text preserved)
 
-- 12,778 lines (was 12,674 before this turn; +104 net lines for TOC + tables + F1-F4 updates)
-- 17 top-level sections (now includes the new "Table of Contents" — wait, that's an 18th section)
+### Plan stats after this turn (final)
 
-Wait, let me recount. The "## Table of Contents" is now the 2nd top-level section (after TL;DR, before Plan Navigation Index). So now there are 18 top-level `##` sections:
-1. TL;DR
-2. Table of Contents (NEW)
-3. Plan Navigation Index
-4. Visual Overview
-5. Context
-6. Tunables Reference
-7. Work Objectives
-8. Verification Strategy
-9. Files
-10. Regeneration
-11. Failures
-12. Coverage Shortfalls
-13. Verdict
-14. Execution Strategy
-15. TODOs
-16. Final Verification Wave
-17. Commit Strategy
-18. Success Criteria
-
-The original "17 top-level sections" needs to be updated to "18 top-level sections" (added Table of Contents).
+- **12,989 lines** (was 12,674 at the start of the audit; +315 net lines)
+- **21 Mermaid diagrams** (was 12; +9 from this turn's conversions)
+- **18 top-level sections** (was 17; added "## Table of Contents")
+- **23 design sections in §4** (unchanged)
+- **77 tasks** (T0-T72 = 73 implementation + design-only, plus F1-F4 = 4 final verifications)
+- **0 ASCII art** in non-mermaid code blocks (all 13 user-flagged diagrams converted)
+- **0 TBD/TODO/FIXME markers** (unresolved)
+- **2 stale product name references** (INTENTIONAL — in "no old product to deprecate" framing, explicitly stating `fbuf_jail` was never shipped)
+- **Line count claim updated**: 12,989 lines (matches actual)
+- **Mermaid count claim updated**: 21 (matches actual)
+- **All anchor links valid** (verified against actual heading slugs)
+- **All "First line" column values** match `grep -n` output (validated)

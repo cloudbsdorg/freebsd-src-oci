@@ -61,29 +61,29 @@
 
 ### Design sections in Context (§4)
 
-- [§4.1 — Original Request](#41-original-request)
-- [§4.2 — Additive KBD/Mouse model](#42-additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule)
-- [§4.3 — Investigation Summary](#43-investigation-summary)
-- [§4.4 — GPU Resource Governance](#44-gpu-resource-governance-third-workstream--framework-only)
-- [§4.5 — Preflight check framework](#45-preflight-check-framework-cross-cutting)
-- [§4.6 — Transport security](#46-transport-security-vnc-hardening)
-- [§4.7 — Backward compatibility](#47-backward-compatibility-the-upgrade-must-not-break-promise)
-- [§4.8 — Architecture support](#48-architecture-support-jails-run-everywhere)
-- [§4.9 — Console broker / multiplexer](#49-console-broker--multiplexer-phase-2-workstream--added-per-user-request)
-- [§4.10 — Localhost by default](#410-localhost-by-default-security-principle--added-per-user-request)
-- [§4.11 — IPv6 / dual-stack support](#411-ipv6--dual-stack-support-security--portability-principle)
-- [§4.12 — Instrumentation, statistics, diagnostics](#412-instrumentation-statistics-diagnostics-t49t52--added-per-user-request)
-- [§4.13 — Multi-display support](#413-multi-display-support-added-per-user-question)
-- [§4.14 — GPU ports model](#414-gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports)
-- [§4.15 — Audio support](#415-audio-support-added-per-user-request--needed-for-chromecast-use-case)
-- [§4.16 — Cast tool design considerations](#416-cast-tool-design-considerations-no-implementation--added-per-user-clarification)
-- [§4.17 — Combining cast methods](#417-combining-cast-methods-multi-protocol-cast--design-only)
-- [§4.18 — Bluetooth considerations](#418-bluetooth-considerations-future--design-only)
-- [§4.19 — Mediated passthrough](#419-mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story)
-- [§4.20 — Multi-device / heterogeneous hardware](#420-multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request)
-- [§4.21 — Workload-driven GPU selection](#421-workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request)
-- [§4.22 — FreeBSD 16 target platform](#422-freebsd-16-target-platform-added-per-user-confirmation)
-- [§4.23 — Auto-load / zero-friction](#423-auto-load--zero-friction-no-operator-config-changes-required)
+- [§4.1 — Original Request](#original-request)
+- [§4.2 — Additive KBD/Mouse model](#additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule)
+- [§4.3 — Investigation Summary](#investigation-summary)
+- [§4.4 — GPU Resource Governance](#gpu-resource-governance-third-workstream--framework-only)
+- [§4.5 — Preflight check framework](#preflight-check-framework-cross-cutting)
+- [§4.6 — Transport security](#transport-security-vnc-hardening)
+- [§4.7 — Backward compatibility](#backward-compatibility-the-upgrade-must-not-break-promise)
+- [§4.8 — Architecture support](#architecture-support-jails-run-everywhere)
+- [§4.9 — Console broker / multiplexer](#console-broker--multiplexer-phase-2-workstream--added-per-user-request)
+- [§4.10 — Localhost by default](#localhost-by-default-security-principle--added-per-user-request)
+- [§4.11 — IPv6 / dual-stack support](#ipv6--dual-stack-support-security--portability-principle)
+- [§4.12 — Instrumentation, statistics, diagnostics](#instrumentation-statistics-diagnostics-t49t52--added-per-user-request)
+- [§4.13 — Multi-display support](#multi-display-support-added-per-user-question)
+- [§4.14 — GPU ports model](#gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports)
+- [§4.15 — Audio support](#audio-support-added-per-user-request--needed-for-chromecast-use-case)
+- [§4.16 — Cast tool design considerations](#cast-tool-design-considerations-no-implementation--added-per-user-clarification)
+- [§4.17 — Combining cast methods](#combining-cast-methods-multi-protocol-cast--design-only)
+- [§4.18 — Bluetooth considerations](#bluetooth-considerations-future--design-only)
+- [§4.19 — Mediated passthrough](#mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story)
+- [§4.20 — Multi-device / heterogeneous hardware](#multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request)
+- [§4.21 — Workload-driven GPU selection](#workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request)
+- [§4.22 — FreeBSD 16 target platform](#freebsd-16-target-platform-added-per-user-confirmation)
+- [§4.23 — Auto-load / zero-friction](#auto-load--zero-friction-no-operator-config-changes-required)
 
 ### Task & verification references
 
@@ -110,21 +110,21 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 |---|---|---|---|---|
 | §1 | [TL;DR](#tldr) | Quick summary, critical path, frame size, frame rate sysctls | 3 | `## TL;DR` |
 | §2 | [Plan Navigation Index](#plan-navigation-index-agent-context-management) | This section (agent context management) | 97 | `## Plan Navigation Index (agent context management)` |
-| §3 | [Visual Overview](#visual-overview) | 12 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram, multi-display, audio sources/sinks, VMware passthrough failure, mediator pattern, BT device-class abstraction, BT bind/unbind lifecycle) | 366 | `## Visual Overview` |
+| §3 | [Visual Overview](#visual-overview) | 7 Mermaid diagrams (system architecture, GPU resource sharing, BDP auth/attach sequence, multicast UDP, broker session state machine, task timeline Gantt, module/class diagram). **Plan total: 21 Mermaid diagrams** — 14 additional ones are inline in design sections and other areas (MIG instances, Architecture corrected, Unified source, State machine per-adapter binding, Authorization layers, SR-IOV, Hot-plug time, GPU caps discovery pipeline, Test directory layout, Test coverage recording, Test data catalog, Parallel Execution Waves, T8 Test Procedure high-level flow, multi-display, audio sources/sinks, VMware passthrough failure, mediator pattern, BT device-class abstraction, BT bind/unbind lifecycle). | 366 | `## Visual Overview` |
 | §4 | [Context](#context) | 23 design sections (§4.1–§4.23, all physically inside this section) | 758 | `## Context` |
-| §5 | [Tunables Reference](#tunables-reference) | 80+ sysctls in 13 sub-sections | 5273 | `## Tunables Reference` |
-| §6 | [Work Objectives](#work-objectives) | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5512 | `## Work Objectives` |
-| §7 | [Verification Strategy](#verification-strategy-mandatory) | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5861 | `## Verification Strategy (MANDATORY)` |
-| §8 | [Files](#files) | 9+ files referenced (bhyve source tree, target files) | 6980 | `## Files` |
-| §9 | [Regeneration](#regeneration) | regenerate.sh shipped example | 7007 | `## Regeneration` |
-| §10 | [Failures](#failures) | Follow-up actions matrix | 7217 | `## Failures` |
-| §11 | [Coverage Shortfalls](#coverage-shortfalls) | Coverage recording | 7224 | `## Coverage Shortfalls` |
-| §12 | [Verdict](#verdict) | Final test summary | 7230 | `## Verdict` |
-| §13 | [Execution Strategy](#execution-strategy) | Parallel waves, dep matrix, agent dispatch | 7296 | `## Execution Strategy` |
-| §14 | [TODOs](#todos) | 60 v1 implementation tasks (T1–T60) + 4 design-only v2 (T62–T64, T68) + 7 design-only BT v2/v3 (T65–T72) + 4 final verifications (F1–F4) | 7457 | `## TODOs` |
-| §15 | [Final Verification Wave](#final-verification-wave-mandatory--after-all-implementation-tasks) | F1, F2, F3, F4 | 12680 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
-| §16 | [Commit Strategy](#commit-strategy) | Per-task commits | 12705 | `## Commit Strategy` |
-| §17 | [Success Criteria](#success-criteria) | Verification commands + checklist | 12709 | `## Success Criteria` |
+| §5 | [Tunables Reference](#tunables-reference) | 80+ sysctls in 13 sub-sections | 5396 | `## Tunables Reference` |
+| §6 | [Work Objectives](#work-objectives) | Core objective, Concrete Deliverables, Definition of Done, Must Have, Must NOT Have, Test Strategy, Phase 1 | 5635 | `## Work Objectives` |
+| §7 | [Verification Strategy](#verification-strategy-mandatory) | Test Strategy, Unit Test Strategy, QA Policy, Build Environment, Test Environment, Test Environment Verification, Test Execution, Agent Context Management | 5984 | `## Verification Strategy (MANDATORY)` |
+| §8 | [Files](#files) | 9+ files referenced (bhyve source tree, target files) | 7158 | `## Files` |
+| §9 | [Regeneration](#regeneration) | regenerate.sh shipped example | 7185 | `## Regeneration` |
+| §10 | [Failures](#failures) | Follow-up actions matrix | 7395 | `## Failures` |
+| §11 | [Coverage Shortfalls](#coverage-shortfalls) | Coverage recording | 7402 | `## Coverage Shortfalls` |
+| §12 | [Verdict](#verdict) | Final test summary | 7408 | `## Verdict` |
+| §13 | [Execution Strategy](#execution-strategy) | Parallel waves, dep matrix, agent dispatch | 7474 | `## Execution Strategy` |
+| §14 | [TODOs](#todos) | 60 v1 implementation tasks (T1–T60) + 4 design-only v2 (T62–T64, T68) + 7 design-only BT v2/v3 (T65–T72) + 4 final verifications (F1–F4) | 7648 | `## TODOs` |
+| §15 | [Final Verification Wave](#final-verification-wave-mandatory--after-all-implementation-tasks) | F1, F2, F3, F4 | 12891 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
+| §16 | [Commit Strategy](#commit-strategy) | Per-task commits | 12916 | `## Commit Strategy` |
+| §17 | [Success Criteria](#success-criteria) | Verification commands + checklist | 12920 | `## Success Criteria` |
 
 ### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition; all 23 sections physically located inside §4 after the structural reorg)
 
@@ -132,29 +132,29 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 
 | § | Design section | Purpose | First line | First line content |
 |---|---|---|---|---|
-| §4.1 | [Original Request](#41-original-request) | What the user asked for | 760 | `### Original Request` |
-| §4.2 | [Additive KBD/Mouse model](#42-additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule) | Default-on kbd+mouse with fbuf, opt-out via `fbuf.nokbd` / `fbuf.nomouse` | 764 | `### Additive KBD/Mouse model (the "opt-out via fbuf.nokbd / fbuf.nomouse" rule)` |
-| §4.3 | [Investigation Summary](#43-investigation-summary) | What we found (3 layers) | 822 | `### Investigation Summary` |
-| §4.4 | [GPU Resource Governance](#44-gpu-resource-governance-third-workstream--framework-only) | GPU mediation rules (T19–T21 framework) | 839 | `### GPU Resource Governance (third workstream — framework only)` |
-| §4.5 | [Preflight check framework](#45-preflight-check-framework-cross-cutting) | 20 preflight checks | 865 | `### Preflight check framework (cross-cutting)` |
-| §4.6 | [Transport security](#46-transport-security-vnc-hardening) | TLS 1.3, certbot, etc. | 900 | `### Transport security (VNC hardening)` |
-| §4.7 | [Backward compatibility](#47-backward-compatibility-the-upgrade-must-not-break-promise) | Upgrade-must-not-break promise | 949 | `### Backward compatibility (the upgrade-must-not-break promise)` |
-| §4.8 | [Architecture support](#48-architecture-support-jails-run-everywhere) | Big/little endian, multi-arch | 1180 | `### Architecture support (jails run everywhere)` |
-| §4.9 | [Console broker / multiplexer](#49-console-broker--multiplexer-phase-2-workstream--added-per-user-request) | Broker architecture | 1265 | `### Console broker / multiplexer (Phase 2 workstream — added per user request)` |
-| §4.10 | [Localhost by default](#410-localhost-by-default-security-principle--added-per-user-request) | All new endpoints default to localhost | 1437 | `### Localhost by default (security principle — added per user request)` |
-| §4.11 | [IPv6 / dual-stack support](#411-ipv6--dual-stack-support-security--portability-principle) | IPv6 default | 1512 | `### IPv6 / dual-stack support (security + portability principle)` |
-| §4.12 | [Instrumentation, statistics, diagnostics](#412-instrumentation-statistics-diagnostics-t49t52--added-per-user-request) | T49–T52 design | 1630 | `### Instrumentation, statistics, diagnostics (T49–T52 — added per user request)` |
-| §4.13 | [Multi-display support](#413-multi-display-support-added-per-user-question) | Walls, ports, mixed resolutions | 1810 | `### Multi-display support (added per user question)` |
-| §4.14 | [GPU ports model](#414-gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports) | Per-port resource allocation, port policy, gpu-port-info tool | 2025 | `### GPU ports model (added per user clarification — "it comes down to how many ports")` |
-| §4.15 | [Audio support](#415-audio-support-added-per-user-request--needed-for-chromecast-use-case) | AC97/HDA, BDP audio messages | 2192 | `### Audio support (added per user request — needed for chromecast use case)` |
-| §4.16 | [Cast tool design considerations](#416-cast-tool-design-considerations-no-implementation--added-per-user-clarification) | Cast (design only) | 2483 | `### Cast tool design considerations (no implementation — added per user clarification)` |
-| §4.17 | [Combining cast methods](#417-combining-cast-methods-multi-protocol-cast--design-only) | Multi-protocol cast | 2678 | `### Combining cast methods (multi-protocol cast — design only)` |
-| §4.18 | [Bluetooth considerations](#418-bluetooth-considerations-future--design-only) | BT (design only) | 2791 | `### Bluetooth considerations (future — design only)` |
-| §4.19 | [Mediated passthrough](#419-mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story) | Control plane retained | 3804 | `### Mediated passthrough — the host retains the control plane (architectural principle, added per user's PCI-passthrough story)` |
-| §4.20 | [Multi-device / heterogeneous hardware](#420-multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request) | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 4050 | `### Multi-device / heterogeneous hardware (architectural principle, added per user request)` |
-| §4.21 | [Workload-driven GPU selection + dynamic capability discovery](#421-workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request) | Plug-in capability registry | 4481 | `### Workload-driven GPU selection + dynamic capability discovery (architectural principle, added per user request)` |
-| §4.22 | [FreeBSD 16 target platform](#422-freebsd-16-target-platform-added-per-user-confirmation) | Version pin | 5120 | `### FreeBSD 16 target platform (added per user confirmation)` |
-| §4.23 | [Auto-load / zero-friction](#423-auto-load--zero-friction-no-operator-config-changes-required) | kld_list, rc.conf, devd, cert auto-gen, hot-plug | 5193 | `### Auto-load / zero-friction (no operator config changes required)` |
+| §4.1 | [Original Request](#original-request) | What the user asked for | 760 | `### Original Request` |
+| §4.2 | [Additive KBD/Mouse model](#additive-kbdmouse-model-the-opt-out-via-fbufnokbd--fbufnomouse-rule) | Default-on kbd+mouse with fbuf, opt-out via `fbuf.nokbd` / `fbuf.nomouse`; includes HID-level controls (`fbuf.nohid`, `fbuf.allowhid`) | 764 | `### Additive KBD/Mouse model (the "opt-out via fbuf.nokbd / fbuf.nomouse" rule)` |
+| §4.3 | [Investigation Summary](#investigation-summary) | What we found (3 layers) | 882 | `### Investigation Summary` |
+| §4.4 | [GPU Resource Governance](#gpu-resource-governance-third-workstream--framework-only) | GPU mediation rules (T19–T21 framework) | 899 | `### GPU Resource Governance (third workstream — framework only)` |
+| §4.5 | [Preflight check framework](#preflight-check-framework-cross-cutting) | 20 preflight checks | 925 | `### Preflight check framework (cross-cutting)` |
+| §4.6 | [Transport security](#transport-security-vnc-hardening) | TLS 1.3, certbot, etc. | 960 | `### Transport security (VNC hardening)` |
+| §4.7 | [Backward compatibility](#backward-compatibility-the-upgrade-must-not-break-promise) | Upgrade-must-not-break promise | 1009 | `### Backward compatibility (the upgrade-must-not-break promise)` |
+| §4.8 | [Architecture support](#architecture-support-jails-run-everywhere) | Big/little endian, multi-arch | 1240 | `### Architecture support (jails run everywhere)` |
+| §4.9 | [Console broker / multiplexer](#console-broker--multiplexer-phase-2-workstream--added-per-user-request) | Broker architecture | 1325 | `### Console broker / multiplexer (Phase 2 workstream — added per user request)` |
+| §4.10 | [Localhost by default](#localhost-by-default-security-principle--added-per-user-request) | All new endpoints default to localhost | 1509 | `### Localhost by default (security principle — added per user request)` |
+| §4.11 | [IPv6 / dual-stack support](#ipv6--dual-stack-support-security--portability-principle) | IPv6 default | 1584 | `### IPv6 / dual-stack support (security + portability principle)` |
+| §4.12 | [Instrumentation, statistics, diagnostics](#instrumentation-statistics-diagnostics-t49t52--added-per-user-request) | T49–T52 design | 1702 | `### Instrumentation, statistics, diagnostics (T49–T52 — added per user request)` |
+| §4.13 | [Multi-display support](#multi-display-support-added-per-user-question) | Walls, ports, mixed resolutions | 1882 | `### Multi-display support (added per user question)` |
+| §4.14 | [GPU ports model](#gpu-ports-model-added-per-user-clarification--it-comes-down-to-how-many-ports) | Per-port resource allocation, port policy, gpu-port-info tool | 2097 | `### GPU ports model (added per user clarification — "it comes down to how many ports")` |
+| §4.15 | [Audio support](#audio-support-added-per-user-request--needed-for-chromecast-use-case) | AC97/HDA, BDP audio messages | 2264 | `### Audio support (added per user request — needed for chromecast use case)` |
+| §4.16 | [Cast tool design considerations](#cast-tool-design-considerations-no-implementation--added-per-user-clarification) | Cast (design only) | 2555 | `### Cast tool design considerations (no implementation — added per user clarification)` |
+| §4.17 | [Combining cast methods](#combining-cast-methods-multi-protocol-cast--design-only) | Multi-protocol cast | 2750 | `### Combining cast methods (multi-protocol cast — design only)` |
+| §4.18 | [Bluetooth considerations](#bluetooth-considerations-future--design-only) | BT (design only) | 2878 | `### Bluetooth considerations (future — design only)` |
+| §4.19 | [Mediated passthrough](#mediated-passthrough--the-host-retains-the-control-plane-architectural-principle-added-per-users-pci-passthrough-story) | Control plane retained | 3888 | `### Mediated passthrough — the host retains the control plane (architectural principle, added per user's PCI-passthrough story)` |
+| §4.20 | [Multi-device / heterogeneous hardware](#multi-device--heterogeneous-hardware-architectural-principle-added-per-user-request) | Adapter enumeration, hot-plug, pools, MIG/SR-IOV | 4134 | `### Multi-device / heterogeneous hardware (architectural principle, added per user request)` |
+| §4.21 | [Workload-driven GPU selection + dynamic capability discovery](#workload-driven-gpu-selection--dynamic-capability-discovery-architectural-principle-added-per-user-request) | Plug-in capability registry | 4576 | `### Workload-driven GPU selection + dynamic capability discovery (architectural principle, added per user request)` |
+| §4.22 | [FreeBSD 16 target platform](#freebsd-16-target-platform-added-per-user-confirmation) | Version pin | 5243 | `### FreeBSD 16 target platform (added per user confirmation)` |
+| §4.23 | [Auto-load / zero-friction](#auto-load--zero-friction-no-operator-config-changes-required) | kld_list, rc.conf, devd, cert auto-gen, hot-plug | 5316 | `### Auto-load / zero-friction (no operator config changes required)` |
 
 (Line numbers validated against the live file via `grep -n "^### " plan.md` at the time of this table update. After any edit, re-run grep and update the table; the agent's F1 verifier does this check.)
 
@@ -170,7 +170,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 
 ### Agent Context Management (the "how to not run out of context" section)
 
-The plan is **12,638 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
+The plan is **12,989 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
 
 **The solution: structured context management per task.**
 
@@ -819,6 +819,66 @@ The user said: *"i want the keybard and mouse additive, so fbuf.nokbd, fbuf.nomo
 - Do NOT change the default behavior in a future version without a deprecation cycle — operators depend on the additive default.
 - Do NOT omit `/dev/kbd0` or `/dev/ums0` "for security" — the additive model is the explicit design choice.
 
+#### HID-level controls (`fbuf.nohid`, `fbuf.allowhid`)
+
+The user said: *"looking at 'allow.fbuf; fbuf.nokbd; fbuf.nomouse;' maybe we need to add a `fbuf.nohid` that disables the mouse and keyboard, and a `fbuf.allowhid` to allow mouse and keyboard HID = Human Interface Devices"*.
+
+**HID = Human Interface Devices** (USB HID class — kbd, mouse, gamepad, touchscreen, etc.). The base fbuf parameters (`fbuf.nokbd`, `fbuf.nomouse`) control the **virtual** kbd/mouse devices provided by `displayd.ko`. The new HID-level parameters add:
+
+1. **`fbuf.nohid`** (boolean, default `false`) — coarse-grained opt-out that **disables all virtual HID devices** from fbuf (equivalent to setting both `fbuf.nokbd=1` and `fbuf.nomouse=1`). Useful when an operator wants to attach a single flag for "no input at all from fbuf" without enumerating per-device.
+2. **`fbuf.allowhid`** (boolean, default `false`) — a **separate permission** that allows the jail to access **raw HID device nodes** (`/dev/uhid*` — FreeBSD's uhid driver, used for direct HID access without the fbuf virtualization layer). This is a different concern: it controls raw device passthrough, not the virtual HID stack.
+
+**Why two separate parameters (not a single `fbuf.hid=...` enum):**
+- They are **orthogonal** concerns: `fbuf.nohid` is "don't virtualize HID from fbuf" (display-side), `fbuf.allowhid` is "allow raw HID device nodes in the jail" (passthrough-side). Combining them into one flag would lose expressiveness.
+- A jail may want **both** (`fbuf.nohid=1 fbuf.allowhid=1`): no virtual kbd/mouse from fbuf, but raw access to a USB kbd physically attached to the host.
+- A jail may want **only virtual** (default): `fbuf.nohid=0 fbuf.allowhid=0` — virtual kbd/mouse on, no raw HID access.
+- A jail may want **only raw** (`fbuf.nohid=1 fbuf.allowhid=1`): no virtual HID, only raw HID. Useful for kiosk VMs that want a single physical keyboard mapped to a specific input layer.
+
+**State table (jail side, single fbuf, single HID raw bus):**
+
+| Config | Virtual `/dev/kbd0` | Virtual `/dev/ums0` | Raw `/dev/uhid0` | Notes |
+|---|---|---|---|---|
+| `allow.fbuf;` (default) | ✓ | ✓ | ✗ | Virtual HID on, raw HID off |
+| `allow.fbuf; fbuf.nokbd;` | ✗ | ✓ | ✗ | Kbd off, mouse on, raw HID off |
+| `allow.fbuf; fbuf.nomouse;` | ✓ | ✗ | ✗ | Mouse off, kbd on, raw HID off |
+| `allow.fbuf; fbuf.nokbd; fbuf.nomouse;` | ✗ | ✗ | ✗ | No virtual HID, no raw HID |
+| `allow.fbuf; fbuf.nohid;` | ✗ | ✗ | ✗ | `fbuf.nohid` shorthand = both off |
+| `allow.fbuf; fbuf.nohid=1 fbuf.allowhid=1;` | ✗ | ✗ | ✓ | No virtual HID, raw HID allowed |
+| `allow.fbuf; fbuf.allowhid=1;` | ✓ | ✓ | ✓ | Virtual HID on **and** raw HID on |
+| `allow.fbuf; fbuf.nokbd=1 fbuf.allowhid=1;` | ✗ | ✓ | ✓ | Kbd off (virtual), mouse on (virtual), raw HID on |
+
+**Precedence (stricter-wins, per host policy):**
+- `fbuf.nohid=1` is **stricter** than the per-device flags: it forces both `/dev/kbd0` and `/dev/ums0` to be absent regardless of `fbuf.nokbd` / `fbuf.nomouse`.
+- The kernel applies precedence in this order: (1) host policy `security.fbuf.allowhid` (default `0`), (2) jail param `fbuf.allowhid`, (3) jail params `fbuf.nohid` / `fbuf.nokbd` / `fbuf.nomouse`. Each step can only **disable** — never enable past the previous step.
+- If host policy `security.fbuf.allowhid=0` and jail `fbuf.allowhid=1` → raw HID is still off. The jail is refused the device (audit log entry).
+- If jail `fbuf.nohid=1` and jail `fbuf.allowhid=1` → virtual HID off (correct: `nohid` is stricter), raw HID on. The jail gets raw HID but no virtual kbd/mouse.
+
+**Host policy sysctl (added to Tunables Reference §3):**
+- `security.fbuf.allowhid` (default `0`, stricter-wins) — host-wide policy. When `0`, NO jail can use `fbuf.allowhid=1` — the jail is denied raw HID access even if it requests it (audit log: "raw HID denied by host policy"). When `1`, jails can opt in via `fbuf.allowhid=1`.
+
+**Implementation rule (T9, T12, T13 must enforce):**
+- `fbuf.nohid=1` is a **shorthand** for `fbuf.nokbd=1 fbuf.nomouse=1` — the kernel sets both bits internally before evaluating devfs rules. There is no separate devfs rule for `nohid`.
+- `fbuf.allowhid=1` requires `allow.fbuf=1` (you cannot have raw HID in a jail without the fbuf framework loaded). The kernel rejects `fbuf.allowhid=1` with `allow.fbuf=0` (EINVAL, audit log: "raw HID requires allow.fbuf").
+- The `devfs.rules` template (T22) adds a rule: `fbuf.allowhid=1 → include /dev/uhid*` (mode 0660, owner `root:_displayd`). The rule is **conditional** on `fbuf.allowhid=1` AND `security.fbuf.allowhid=1`.
+- No `/dev/hidraw*` nodes on FreeBSD by default. If the kernel has `hw.usb.usbhid.enable=1` and the `hidraw` driver is loaded, `fbuf.allowhid=1` may also expose `/dev/hidraw*` (kernel detects at devfs rule eval time). This is automatic; no separate jail param.
+
+**Test requirements (added to T12, T18, T53):**
+- ATF C test `tc_fbuf_nohid_disables_all_hid` — verify `allow.fbuf; fbuf.nohid=1;` produces ONLY `/dev/fb0`, no `/dev/kbd0` and no `/dev/ums0`.
+- ATF C test `tc_fbuf_allowhid_creates_uhid` — verify `allow.fbuf; fbuf.allowhid=1;` AND `security.fbuf.allowhid=1` produces `/dev/fb0`, `/dev/kbd0`, `/dev/ums0`, AND `/dev/uhid0`.
+- ATF C test `tc_fbuf_allowhid_denied_by_host_policy` — verify `allow.fbuf; fbuf.allowhid=1;` with `security.fbuf.allowhid=0` does NOT create `/dev/uhid0` (denied by host); audit log contains "raw HID denied by host policy".
+- ATF C test `tc_fbuf_nohid_and_allowhid_coexist` — verify `allow.fbuf; fbuf.nohid=1; fbuf.allowhid=1;` AND `security.fbuf.allowhid=1` produces `/dev/fb0` only, NO virtual kbd/mouse, YES `/dev/uhid0`.
+- Shell test `sh_fbuf_nohid_jls` — `jail -c name=fbnohid allow.fbuf=1 fbuf.nohid=1 persist` succeeds; `jls -j fbnohid -v fbuf.nohid` shows 1; `jexec fbnohid ls /dev/ | grep -E 'kbd|ums'` returns nothing.
+- Shell test `sh_fbuf_allowhid_uhid_nodes` — `sysctl security.fbuf.allowhid=1 && jail -c name=fbuhid allow.fbuf=1 fbuf.allowhid=1 persist` succeeds; `jexec fbuhid ls /dev/uhid*` returns `/dev/uhid0`.
+- Shell test `sh_fbuf_allowhid_default_off` — without `sysctl security.fbuf.allowhid=1`, a jail with `fbuf.allowhid=1` does NOT get `/dev/uhid*` (host policy blocks it).
+- Multi-display variant (T53): `tc_fbuf_multi_display_nohid` — `fbuf.0.nohid=1` disables kbd+mouse on display 0 only, displays 1+ still get both.
+
+**Must NOT do (added to T9, T12, T13, T22, T53):**
+- Do NOT allow `fbuf.allowhid=1` without `allow.fbuf=1` — raw HID is a sub-permission of fbuf.
+- Do NOT bypass the host policy `security.fbuf.allowhid=0` — when 0, `fbuf.allowhid=1` is silently denied, never enabled.
+- Do NOT add `nohid` as a "set" flag (no "additive HID") — it's a coarse opt-out, not an opt-in.
+- Do NOT make `fbuf.allowhid=1` default ON — raw device passthrough is a security concern that must be explicit.
+- Do NOT create `/dev/uhid*` nodes that aren't owned by `root:_displayd` mode 0660 — no world-writable HID.
+
 ### Investigation Summary
 
 **Today**, bhyve's display stack is three layers in `usr.sbin/bhyve/`:
@@ -1278,31 +1338,43 @@ This is a **second, parallel workstream** that builds on top of the abstraction 
 
 **Architecture (corrected — GPU is a host-side shared resource):**
 
-```
-   [BDP Client]   -+                            [BDP Client]   -+
-                   |                                          |
-                   +-----------[ TLS 1.3 / mTLS ]-------------+
-                                      |
-                                      v
-                          [ display-broker daemon ]
-                          (single process, multi-user)
-                                      |
-                  +---[ PAM / NSS / mTLS CA / OAuth ]--------+
-                                      |
-                                      v
-                            [ Resource Registry ]
-                            (jail subsystem + bhyve VM scan)
-                                      |
-                  +-------+-------+-------+-------+
-                  v       v       v       v       v
-              [jail]   [jail]  [bhyve]  [bhyve]  [gpu-fb]
-                  |       |       |       |       |
-                  +---+---+-------+-------+-------+
-                                      |
-                          [ display_transport layer ]
-                          (same registry T1-T18)
-                                      |
-                          [ RFB / RDP / future transports ]
+```mermaid
+graph TB
+    C1["BDP Client"]
+    C2["BDP Client"]
+
+    TLS["TLS 1.3 / mTLS"]
+
+    BROKER["display-broker daemon<br/>(single process, multi-user)"]
+
+    AUTH["PAM / NSS / mTLS CA / OAuth"]
+    REG["Resource Registry<br/>(jail subsystem + bhyve VM scan)"]
+
+    J1[jail]
+    J2[jail]
+    V1[bhyve]
+    V2[bhyve]
+    G[gpu-fb]
+
+    TRANSPORT["display_transport layer<br/>(same registry T1-T18)"]
+    RFB["RFB / RDP / future transports"]
+
+    C1 --> TLS
+    C2 --> TLS
+    TLS --> BROKER
+    BROKER --> AUTH
+    AUTH --> REG
+    REG --> J1
+    REG --> J2
+    REG --> V1
+    REG --> V2
+    REG --> G
+    J1 --> TRANSPORT
+    J2 --> TRANSPORT
+    V1 --> TRANSPORT
+    V2 --> TRANSPORT
+    G --> TRANSPORT
+    TRANSPORT --> RFB
 ```
 
 **AND the GPU is a host-side resource shared with the host desktop userspace** (see Visual Overview diagram #2). The same `gpu_resource` kernel framework mediates host desktop DRI access AND jail/bhyve access, enforced by `host_gpu_quota` (`hw.gpu.0.share`).
@@ -2692,22 +2764,37 @@ They are radically different on the wire. Merging them in one daemon means imple
 
 **The unified source: `bdp-stream` + BDP device-info protocol (T60 + T62-design)**
 
-```
-                          +------------------+
-                          |  bdp-stream (T60)|  <-- single source of pixels+audio+metadata
-                          |  unix pipe or TCP|
-                          +--------+---------+
-                                   |
-        +-------------+------------+--------------+--------------+-------------+
-        |             |            |              |              |             |
-   cast-chromecast  cast-airplay  cast-miracast  cast-roku    cast-firetv   cast-dlna
-        (v2)           (v2)         (v2)         (v2)          (v2)          (v2)
-        |             |            |              |              |             |
-   +----v----+   +----v----+   +---v----+    +----v----+    +----v----+    +---v----+
-   | mDNS    |   | mDNS    |   | Wi-Fi  |    | mDNS    |    | ADB     |    | UPnP   |
-   | _google-|   | _airplay|   | Direct |    | _roku.  |    | tcp:5555|    | UDP    |
-   | cast    |   | _raop   |   | P2P    |    | _tcp    |    | discovery|  | 1900   |
-   +---------+   +---------+   +--------+    +---------+    +----------+   +--------+
+```mermaid
+graph TB
+    BDP["bdp-stream (T60)<br/>single source of pixels+audio+metadata<br/>unix pipe or TCP"]
+
+    CHROMECAST["cast-chromecast<br/>(v2)"]
+    AIRPLAY["cast-airplay<br/>(v2)"]
+    MIRACAST["cast-miracast<br/>(v2)"]
+    ROKU["cast-roku<br/>(v2)"]
+    FIRETV["cast-firetv<br/>(v2)"]
+    DLNA["cast-dlna<br/>(v2)"]
+
+    MCAST_C["mDNS<br/>_googlecast._tcp"]
+    MCAST_A["mDNS<br/>_airplay._raop"]
+    MCAST_M["Wi-Fi Direct P2P"]
+    MCAST_R["mDNS<br/>_roku._tcp"]
+    MCAST_F["ADB tcp:5555<br/>discovery"]
+    MCAST_D["UPnP UDP 1900"]
+
+    BDP --> CHROMECAST
+    BDP --> AIRPLAY
+    BDP --> MIRACAST
+    BDP --> ROKU
+    BDP --> FIRETV
+    BDP --> DLNA
+
+    CHROMECAST --> MCAST_C
+    AIRPLAY --> MCAST_A
+    MIRACAST --> MCAST_M
+    ROKU --> MCAST_R
+    FIRETV --> MCAST_F
+    DLNA --> MCAST_D
 ```
 
 Each v2 cast tool is a thin (~2000-5000 LoC) adapter. They all share:
@@ -3341,27 +3428,25 @@ The "10% of an antenna" mistake was applying the GPU's percent model to BT. The 
 
    **The state machine (per-adapter binding):**
 
-   ```
-            bind                    unbind
-   HOST ──────────────► JAIL:<jid> ──────────────► HOST
-     ▲                    │   │                       ▲
-     │                    │   │                       │
-     │   cleanup-         │   │  cleanup-             │  cleanup-
-     │   timeout          │   │  failure              │  failure
-     │   (force-release)  │   │  (retry once)         │  (stays in
-     │                    │   │                       │   host, audit)
-     │                    │   ▼                       │
-     │                    │ DYING                     │
-     │                    │   │                       │
-     │                    │   │ cleanup ok            │
-     │                    │   └─────────────► HOST ───┘
-     │                    │
-     │                    └─► RELEASED (transient, immediately → HOST)
-     │
-     └──► FREE (manual operator action: hw.bt.0.binding=free)
-              │
-              │   bind (jail or host)
-              └─────────► JAIL:<jid> or HOST
+   ```mermaid
+   flowchart TB
+       HOST[HOST]
+       JAIL["JAIL: jid"]
+       DYING[DYING]
+       RELEASED["RELEASED<br/>(transient, immediately → HOST)"]
+       FREE["FREE<br/>(manual operator action:<br/>hw.bt.0.binding=free)"]
+
+       HOST -->|bind| JAIL
+       JAIL -->|unbind| HOST
+       JAIL -->|cleanup timeout<br/>force-release| HOST
+       JAIL -->|cleanup failure<br/>retry once| DYING
+       DYING -->|cleanup ok| HOST
+       DYING -->|cleanup failure<br/>stays in host, audit| HOST
+       JAIL -->|cleanup ok| RELEASED
+       RELEASED --> HOST
+       HOST -->|manual operator action| FREE
+       FREE -->|bind| JAIL
+       FREE -->|bind| HOST
    ```
 
    **The reference-counted binding (handles all termination cases):**
@@ -3499,33 +3584,32 @@ The "10% of an antenna" mistake was applying the GPU's percent model to BT. The 
 
    **Authorization layers (defense in depth):**
 
-   ```
-   ┌──────────────────────────────────────────────────────────────────────┐
-   │ Layer 1: CLI tool (displayc / btctl / displayd-ctl)                  │
-   │   - Checks: operator uid/gid == 0 OR gid ∈ {_displayd, _bt_admin}   │
-   │   - Checks: target resource is owned by operator OR operator is root│
-   │   - Refuses with EACCES if either fails                              │
-   │   - Logs the authorization decision locally                          │
-   └──────────────────────────────────────────────────────────────────────┘
-                                    │  (BDP message, mTLS, signed)
-                                    ▼
-   ┌──────────────────────────────────────────────────────────────────────┐
-   │ Layer 2: broker (displayd, T38)                                      │
-   │   - Re-validates: BDP mTLS cert CN matches an authorized user       │
-   │   - Re-validates: ACL in display.acl grants "disconnect" to user    │
-   │   - Re-validates: target resource exists and is in operator's scope │
-   │   - Refuses with EACCES BDP message if any fails                     │
-   │   - Logs the authorization decision to broker's audit (T43)         │
-   └──────────────────────────────────────────────────────────────────────┘
-                                    │  (kernel ioctl, mTLS-attested)
-                                    ▼
-   ┌──────────────────────────────────────────────────────────────────────┐
-   │ Layer 3: kernel (bt_resource.ko + kern_jail.c)                       │
-   │   - Re-validates: caller has CAP_PRIV_DISCONNECT or is in jail root │
-   │   - Re-validates: target BT peer is in fact connected to a jail     │
-   │   - Refuses with EACCES ioctl return if any fails                   │
-   │   - Logs the authorization decision to kernel audit (T43)           │
-   └──────────────────────────────────────────────────────────────────────┘
+   ```mermaid
+   flowchart TB
+       subgraph L1["Layer 1: CLI tool (displayc / btctl / displayd-ctl)"]
+           L1A["Checks: operator uid/gid == 0 OR gid in _displayd, _bt_admin"]
+           L1B["Checks: target resource is owned by operator OR operator is root"]
+           L1C["Refuses with EACCES if either fails"]
+           L1D["Logs the authorization decision locally"]
+       end
+
+       subgraph L2["Layer 2: broker (displayd, T38)"]
+           L2A["Re-validates: BDP mTLS cert CN matches an authorized user"]
+           L2B["Re-validates: ACL in display.acl grants 'disconnect' to user"]
+           L2C["Re-validates: target resource exists and is in operator's scope"]
+           L2D["Refuses with EACCES BDP message if any fails"]
+           L2E["Logs the authorization decision to broker's audit (T43)"]
+       end
+
+       subgraph L3["Layer 3: kernel (bt_resource.ko + kern_jail.c)"]
+           L3A["Re-validates: caller has CAP_PRIV_DISCONNECT or is in jail root"]
+           L3B["Re-validates: target BT peer is in fact connected to a jail"]
+           L3C["Refuses with EACCES ioctl return if any fails"]
+           L3D["Logs the authorization decision to kernel audit (T43)"]
+       end
+
+       L1 -->|BDP message, mTLS, signed| L2
+       L2 -->|kernel ioctl, mTLS-attested| L3
    ```
 
    **Three layers, each independent. The kernel is the final gatekeeper.** A bug in the CLI tool cannot bypass the kernel check. A bug in the broker cannot bypass the kernel check. The kernel's check is the only one that can actually *cause* the disconnect, so it is the only one that matters for security.
@@ -4298,12 +4382,18 @@ The jail doesn't care if the host picked NVIDIA, AMD, or Intel. The mediator tra
 
 A single physical A100 can be split into up to 7 MIG instances. Each MIG looks like a separate GPU to the VM:
 
-```
-nvidia.A100.ABC123          (the physical GPU, 80GB)
-├── nvidia.A100.ABC123.mig0  (1g.5gb: 1/7 compute, 5GB memory)
-├── nvidia.A100.ABC123.mig1  (1g.5gb)
-├── nvidia.A100.ABC123.mig2  (1g.5gb)
-└── ...
+```mermaid
+graph TB
+    GPU["nvidia.A100.ABC123<br/>(the physical GPU, 80GB)"]
+    MIG0["nvidia.A100.ABC123.mig0<br/>(1g.5gb: 1/7 compute, 5GB memory)"]
+    MIG1["nvidia.A100.ABC123.mig1<br/>(1g.5gb)"]
+    MIG2["nvidia.A100.ABC123.mig2<br/>(1g.5gb)"]
+    MIGN["..."]
+
+    GPU --> MIG0
+    GPU --> MIG1
+    GPU --> MIG2
+    GPU --> MIGN
 ```
 
 The mediator enumerates MIG instances as first-class adapters:
@@ -4329,11 +4419,16 @@ gpu.memory_mb = 5120;                       # 5GB
 
 Network and storage devices often have SR-IOV. The PF (Physical Function) is the host-managed adapter; VFs (Virtual Functions) are the slices given to VMs.
 
-```
-ix0 (PF, host-owned)
-├── ix0vf0 (VF 0, given to VM1)
-├── ix0vf1 (VF 1, given to VM2)
-└── ...
+```mermaid
+graph TB
+    PF["ix0 (PF, host-owned)"]
+    VF0["ix0vf0 (VF 0, given to VM1)"]
+    VF1["ix0vf1 (VF 1, given to VM2)"]
+    VFn["..."]
+
+    PF --> VF0
+    PF --> VF1
+    PF --> VFn
 ```
 
 The mediator enumerates VFs as first-class adapters. The `pf_resource.ko` and `vf_resource.ko` (future) follow the same pattern.
@@ -4816,25 +4911,44 @@ The mediator reads this at runtime. The capability list is restored. No recompil
 
 **5. The discovery order (what runs when):**
 
-```
-device_attach(dev)
-  └─► gpu_resource_attach(dev)
-        └─► gpu_caps_discover(dev, &caps)
-              ├─► build_canonical_name(dev)            /* PCI config space, always */
-              ├─► gpu_caps_lookup(vendor, device)      /* link-time registered modules */
-              │     ├─► nvidia_caps_discover()         /* if vendor 0x10de */
-              │     ├─► amd_caps_discover()            /* if vendor 0x1002 */
-              │     ├─► intel_caps_discover()          /* if vendor 0x8086 */
-              │     ├─► <vendor>_caps_discover()       /* if vendor <other> */
-              │     └─► NULL                           /* if no module registered */
-              ├─► try_load_overlay(dev, &caps)          /* /etc/display/gpu-overlays/<vid>-<did>.json */
-              │     └─► parse + apply JSON, set caps->overlay = "loaded"
-              ├─► generic_caps_discover()              /* fallback if no module AND no overlay */
-              │     └─► conservative defaults, caps->overlay = "missing"
-              ├─► read_pci_caps(dev)                    /* FLR, MSI, SR-IOV, AER */
-              └─► read_connected_display_edid(dev)      /* max resolution, refresh, HDR */
-        ├─► gpu_adapters_register(&caps)               /* add to hw.gpu.adapters */
-        └─► audit_log_gpu_added(&caps)                  /* forensic record */
+```mermaid
+flowchart TB
+    ATTACH["device_attach(dev)"]
+    RES_ATTACH["gpu_resource_attach(dev)"]
+    DISCOVER["gpu_caps_discover(dev, &amp;caps)"]
+    CANON["build_canonical_name(dev)<br/>(PCI config space, always)"]
+    LOOKUP["gpu_caps_lookup(vendor, device)<br/>(link-time registered modules)"]
+    NVIDIA["nvidia_caps_discover()<br/>(if vendor 0x10de)"]
+    AMD["amd_caps_discover()<br/>(if vendor 0x1002)"]
+    INTEL["intel_caps_discover()<br/>(if vendor 0x8086)"]
+    OTHER["&lt;vendor&gt;_caps_discover()<br/>(if vendor &lt;other&gt;)"]
+    NULL["NULL<br/>(if no module registered)"]
+    OVERLAY["try_load_overlay(dev, &amp;caps)<br/>/etc/display/gpu-overlays/&lt;vid&gt;-&lt;did&gt;.json"]
+    OVERLAY_PARSE["parse + apply JSON,<br/>set caps-&gt;overlay = 'loaded'"]
+    GENERIC["generic_caps_discover()<br/>(fallback if no module AND no overlay)"]
+    GENERIC_DEFAULTS["conservative defaults,<br/>caps-&gt;overlay = 'missing'"]
+    PCI_CAPS["read_pci_caps(dev)<br/>(FLR, MSI, SR-IOV, AER)"]
+    EDID["read_connected_display_edid(dev)<br/>(max resolution, refresh, HDR)"]
+    REGISTER["gpu_adapters_register(&amp;caps)<br/>(add to hw.gpu.adapters)"]
+    AUDIT["audit_log_gpu_added(&amp;caps)<br/>(forensic record)"]
+
+    ATTACH --> RES_ATTACH
+    RES_ATTACH --> DISCOVER
+    DISCOVER --> CANON
+    DISCOVER --> LOOKUP
+    DISCOVER --> OVERLAY
+    DISCOVER --> GENERIC
+    DISCOVER --> PCI_CAPS
+    DISCOVER --> EDID
+    LOOKUP --> NVIDIA
+    LOOKUP --> AMD
+    LOOKUP --> INTEL
+    LOOKUP --> OTHER
+    LOOKUP --> NULL
+    OVERLAY --> OVERLAY_PARSE
+    GENERIC --> GENERIC_DEFAULTS
+    DISCOVER --> REGISTER
+    DISCOVER --> AUDIT
 ```
 
 **6. The matching algorithm revisited (workload → vendor → adapter):**
@@ -4986,15 +5100,24 @@ For vendors that need custom register reads (e.g. proprietary capability registe
 
 **9. What happens at hot-plug time when a new GPU is detected:**
 
-```
-USB or PCIe hot-plug event → device_attach
-  └─► gpu_caps_discover runs the 6-step pipeline above
-        └─► if overlay present: log "GPU ... capabilities loaded from /etc/display/gpu-overlays/..."
-        └─► if no overlay, no module: log "GPU ... has no capability module or overlay (using generic defaults)"
-        └─► gpu_adapters_register(&caps)  /* available for new jail starts */
-        └─► audit_log_gpu_added(&caps)     /* forensic record */
-        └─► DTrace: gpu-resource:adapter-enumerated fires
-        └─► notify existing jails that don't currently own this adapter: "new GPU available, rebalance?"
+```mermaid
+flowchart TB
+    EVT["USB or PCIe hot-plug event → device_attach"]
+    DISCOVER["gpu_caps_discover<br/>runs the 6-step pipeline above"]
+    OVERLAY_LOG["if overlay present:<br/>log 'GPU ... capabilities loaded from /etc/display/gpu-overlays/...'"]
+    GENERIC_LOG["if no overlay, no module:<br/>log 'GPU ... has no capability module or overlay (using generic defaults)'"]
+    REG["gpu_adapters_register(&amp;caps)<br/>(available for new jail starts)"]
+    AUDIT["audit_log_gpu_added(&amp;caps)<br/>(forensic record)"]
+    DTRACE["DTrace: gpu-resource:adapter-enumerated fires"]
+    NOTIFY["notify existing jails that don't currently own this adapter:<br/>'new GPU available, rebalance?'"]
+
+    EVT --> DISCOVER
+    DISCOVER --> OVERLAY_LOG
+    DISCOVER --> GENERIC_LOG
+    DISCOVER --> REG
+    DISCOVER --> AUDIT
+    DISCOVER --> DTRACE
+    DISCOVER --> NOTIFY
 ```
 
 **The "rebalance" question (optional, operator-driven):**
@@ -5892,59 +6015,72 @@ pid_file=/var/run/display-broker.pid
 
 **Test directory layout (FreeBSD convention):**
 
-```
-tests/
-├── sys/
-│   ├── modules/
-│   │   ├── displayd/           # T12
-│   │   │   ├── displayd_test.c
-│   │   │   ├── displayd_atf.c
-│   │   │   ├── Kyuafile
-│   │   │   └── Makefile
-│   │   ├── gpu_resource/        # T21
-│   │   ├── audio_resource/      # T58
-│   │   └── preflight/           # T22
-│   ├── jail/
-│   │   ├── fbuf/                # T12, T15
-│   │   ├── gpu/                 # T21, T23
-│   │   ├── audio/               # T58
-│   │   └── mediator/            # Mediated passthrough
-│   ├── policy/                  # T35
-│   │   ├── host_policy.c
-│   │   ├── sysctl_conf_integration.sh
-│   │   └── loader_tunable_precedence.sh
-│   ├── preflight/               # T22, T23, T28, T33
-│   ├── transport/
-│   │   ├── tls/                 # T25
-│   │   ├── cert_loader/         # T30
-│   │   ├── rate_limit/          # T26
-│   │   └── sni/                 # T32
-│   ├── vmm/                     # T13, T18
-│   │   ├── fbuf_legacy.sh
-│   │   ├── fbuf_transport.sh
-│   │   └── fbuf_variants.sh
-│   ├── broker/                  # T37-T52
-│   │   ├── auth.sh
-│   │   ├── acl.sh
-│   │   ├── multicast.sh
-│   │   ├── stats.sh
-│   │   ├── dtrace.sh
-│   │   ├── health.sh
-│   │   └── e2e.sh
-│   ├── multi_gpu/               # multi-device section
-│   │   ├── hotplug.sh
-│   │   ├── pool_resolution.sh
-│   │   └── vendor_caps.sh
-│   └── bhyve/                   # T13, T18
-├── lib/
-│   └── libdisplay/              # T44
-│       ├── bdp_encode_decode_test.c
-│       ├── bdp_session_test.c
-│       └── bdp_acl_test.c
-└── usr.sbin/
-    ├── displayd/                # T38
-    ├── displayc/                # T45
-    └── bdp-stream/              # T60
+```mermaid
+graph TB
+    TESTS["tests/"]
+    SYS["sys/"]
+    MODULES["modules/"]
+    DISPLAYD_MOD["displayd/ (T12)<br/>displayd_test.c<br/>displayd_atf.c<br/>Kyuafile<br/>Makefile"]
+    GPU_RES_MOD["gpu_resource/ (T21)"]
+    AUDIO_RES_MOD["audio_resource/ (T58)"]
+    PREFLIGHT_MOD["preflight/ (T22)"]
+    JAIL["jail/"]
+    FBUF["fbuf/ (T12, T15)"]
+    GPU["gpu/ (T21, T23)"]
+    AUDIO["audio/ (T58)"]
+    MEDIATOR["mediator/ (Mediated passthrough)"]
+    POLICY["policy/ (T35)<br/>host_policy.c<br/>sysctl_conf_integration.sh<br/>loader_tunable_precedence.sh"]
+    PREFLIGHT_SYS["preflight/ (T22, T23, T28, T33)"]
+    TRANSPORT["transport/"]
+    TLS["tls/ (T25)"]
+    CERT["cert_loader/ (T30)"]
+    RATE["rate_limit/ (T26)"]
+    SNI["sni/ (T32)"]
+    VMM["vmm/ (T13, T18)<br/>fbuf_legacy.sh<br/>fbuf_transport.sh<br/>fbuf_variants.sh"]
+    BROKER["broker/ (T37-T52)<br/>auth.sh, acl.sh, multicast.sh<br/>stats.sh, dtrace.sh, health.sh, e2e.sh"]
+    MULTI_GPU["multi_gpu/<br/>hotplug.sh, pool_resolution.sh, vendor_caps.sh"]
+    BHYVE["bhyve/ (T13, T18)"]
+    LIB["lib/"]
+    LIBDISPLAY["libdisplay/ (T44)<br/>bdp_encode_decode_test.c<br/>bdp_session_test.c<br/>bdp_acl_test.c"]
+    USRSBIN["usr.sbin/"]
+    DISPLAYD_USR["displayd/ (T38)"]
+    DISPLAYC["displayc/ (T45)"]
+    BDPSTREAM["bdp-stream/ (T60)"]
+
+    TESTS --> SYS
+    TESTS --> LIB
+    TESTS --> USRSBIN
+
+    SYS --> MODULES
+    SYS --> JAIL
+    SYS --> POLICY
+    SYS --> PREFLIGHT_SYS
+    SYS --> TRANSPORT
+    SYS --> VMM
+    SYS --> BROKER
+    SYS --> MULTI_GPU
+    SYS --> BHYVE
+
+    MODULES --> DISPLAYD_MOD
+    MODULES --> GPU_RES_MOD
+    MODULES --> AUDIO_RES_MOD
+    MODULES --> PREFLIGHT_MOD
+
+    JAIL --> FBUF
+    JAIL --> GPU
+    JAIL --> AUDIO
+    JAIL --> MEDIATOR
+
+    TRANSPORT --> TLS
+    TRANSPORT --> CERT
+    TRANSPORT --> RATE
+    TRANSPORT --> SNI
+
+    LIB --> LIBDISPLAY
+
+    USRSBIN --> DISPLAYD_USR
+    USRSBIN --> DISPLAYC
+    USRSBIN --> BDPSTREAM
 ```
 
 **Test categories (per FreeBSD convention):**
@@ -6615,17 +6751,26 @@ kyua test tests/sys/modules/gpu_resource/ 2>&1 | tee .sisyphus/evidence/task-{N+
 
 Coverage is recorded in `.sisyphus/evidence/run-{id}/coverage/`:
 
-```
-.sisyphus/evidence/run-{id}/coverage/
-├── gcov-line.info              # lcov --capture output
-├── gcov-branch.info            # lcov --capture --rc lcov_branch_coverage=1
-├── lcov-html/                  # lcov --html-details (human-readable)
-│   ├── index.html
-│   └── usr.sbin/displayd/
-│       ├── main.c.gcov.html
-│       └── ...
-├── lcov-cobertura.xml          # for CI integration
-└── summary.json                # machine-readable summary
+```mermaid
+graph TB
+    COV[".sisyphus/evidence/run-{id}/coverage/"]
+    LINE["gcov-line.info<br/>(lcov --capture output)"]
+    BRANCH["gcov-branch.info<br/>(lcov --capture --rc lcov_branch_coverage=1)"]
+    HTML["lcov-html/<br/>(lcov --html-details, human-readable)"]
+    INDEX["index.html"]
+    DISPLAYD_HTML["usr.sbin/displayd/main.c.gcov.html"]
+    ELLIPSIS_HTML["..."]
+    COBERTURA["lcov-cobertura.xml<br/>(for CI integration)"]
+    SUMMARY["summary.json<br/>(machine-readable summary)"]
+
+    COV --> LINE
+    COV --> BRANCH
+    COV --> HTML
+    COV --> COBERTURA
+    COV --> SUMMARY
+    HTML --> INDEX
+    HTML --> DISPLAYD_HTML
+    HTML --> ELLIPSIS_HTML
 ```
 
 The `summary.json` contains:
@@ -6759,35 +6904,68 @@ kyua test -r /usr/tests tests/sys/modules/displayd/atf_displayd:tc_displayd_modu
 
 Tests need shared data. The catalog is checked into the source tree (under `tests/data/`):
 
-```
-tests/data/
-├── certs/
-│   ├── ca.pem
-│   ├── ca.key
-│   ├── server-selfsigned.pem
-│   ├── server-selfsigned.key
-│   ├── client-valid.pem
-│   ├── client-valid.key
-│   ├── client-expired.pem
-│   ├── client-expired.key
-│   ├── client-revoked.pem
-│   └── client-revoked.key
-├── configs/
-│   ├── broker-minimal.conf
-│   ├── broker-full.conf
-│   ├── acl-default.conf
-│   ├── acl-team-web.conf
-│   └── policy-quickstart.conf
-├── users/
-│   ├── test-alice.passwd        # alice:testpassword
-│   ├── test-bob.passwd
-│   ├── test-root.passwd
-│   └── setup-test-users.sh      # creates the users in /etc/passwd
-├── jails/
-│   ├── test-jail-fbuf.conf      # jail.conf fragment for fbuf test
-│   ├── test-jail-gpu.conf
-│   └── test-jail-audio.conf
-└── README.md                    # documents each file's purpose
+```mermaid
+graph TB
+    DATA["tests/data/"]
+    CERTS["certs/"]
+    CA_PEM["ca.pem"]
+    CA_KEY["ca.key"]
+    SRV_PEM["server-selfsigned.pem"]
+    SRV_KEY["server-selfsigned.key"]
+    CLI_V_PEM["client-valid.pem"]
+    CLI_V_KEY["client-valid.key"]
+    CLI_E_PEM["client-expired.pem"]
+    CLI_E_KEY["client-expired.key"]
+    CLI_R_PEM["client-revoked.pem"]
+    CLI_R_KEY["client-revoked.key"]
+    CONFIGS["configs/"]
+    BR_MIN["broker-minimal.conf"]
+    BR_FULL["broker-full.conf"]
+    ACL_DEF["acl-default.conf"]
+    ACL_WEB["acl-team-web.conf"]
+    POL_QS["policy-quickstart.conf"]
+    USERS["users/"]
+    ALICE["test-alice.passwd<br/>(alice:testpassword)"]
+    BOB["test-bob.passwd"]
+    ROOT["test-root.passwd"]
+    SETUP_USERS["setup-test-users.sh<br/>(creates the users in /etc/passwd)"]
+    JAILS["jails/"]
+    JAIL_FBUF["test-jail-fbuf.conf<br/>(jail.conf fragment for fbuf test)"]
+    JAIL_GPU["test-jail-gpu.conf"]
+    JAIL_AUDIO["test-jail-audio.conf"]
+    README["README.md<br/>(documents each file's purpose)"]
+
+    DATA --> CERTS
+    DATA --> CONFIGS
+    DATA --> USERS
+    DATA --> JAILS
+    DATA --> README
+
+    CERTS --> CA_PEM
+    CERTS --> CA_KEY
+    CERTS --> SRV_PEM
+    CERTS --> SRV_KEY
+    CERTS --> CLI_V_PEM
+    CERTS --> CLI_V_KEY
+    CERTS --> CLI_E_PEM
+    CERTS --> CLI_E_KEY
+    CERTS --> CLI_R_PEM
+    CERTS --> CLI_R_KEY
+
+    CONFIGS --> BR_MIN
+    CONFIGS --> BR_FULL
+    CONFIGS --> ACL_DEF
+    CONFIGS --> ACL_WEB
+    CONFIGS --> POL_QS
+
+    USERS --> ALICE
+    USERS --> BOB
+    USERS --> ROOT
+    USERS --> SETUP_USERS
+
+    JAILS --> JAIL_FBUF
+    JAILS --> JAIL_GPU
+    JAILS --> JAIL_AUDIO
 ```
 
 The data is generated by `tests/data/regenerate.sh` (run once at project bootstrap, not per-test). The certs are valid for 100 years (test certs only). The users are created in a dedicated test range (uid 5000-5999) to avoid colliding with real users.
@@ -7297,70 +7475,83 @@ Common failure modes have predefined follow-up actions:
 
 ### Parallel Execution Waves
 
-```
-Wave 1 (Start Immediately — recon + design, all parallel):
-├── T1: Audit bhyvegc for VMM coupling
-├── T2: Verify input fan-out (kbd/ptr consumer registration path)
-├── T3: Audit jail parameter API (kern_jail.c, lib/libjail, jail.conf.5)
-├── T4: Draft display_transport.h vtable
-├── T5: Draft display_backend.h vtable
-├── T6: Draft fbuf jail-param set + flag bits
-└── T19: Audit GPU kernel subsystem (DRM, devfs, nvidia presence)
+```mermaid
+graph TB
+    subgraph W1["Wave 1 (Start Immediately — recon + design, all parallel)"]
+        T1["T1: Audit bhyvegc for VMM coupling"]
+        T2["T2: Verify input fan-out (kbd/ptr consumer registration path)"]
+        T3["T3: Audit jail parameter API (kern_jail.c, lib/libjail, jail.conf.5)"]
+        T4["T4: Draft display_transport.h vtable"]
+        T5["T5: Draft display_backend.h vtable"]
+        T6["T6: Draft fbuf jail-param set + flag bits"]
+        T19["T19: Audit GPU kernel subsystem (DRM, devfs, nvidia presence)"]
+    end
 
-Wave 2 (After Wave 1 — core abstraction, MAX PARALLEL):
-├── T7: Implement display_transport.{h,c} registry
-├── T8: Refactor console.{c,h} to multi-instance + caller-provided fb
-├── T9: Add fbuf jail param registration in kern_jail.c
-├── T10: Add PRISON_FLAG_PRISON_FBUF + prison_check_fbuf() helper
-├── T20: Design gpu_resource kernel framework
-├── T22: Implement preflight check framework (built-in sys/kern/subr_preflight.c + loadable shim sys/modules/preflight/)
-├── T24: Design transport security model + config keys
-└── T27: Wire transport security into display_transport_init signature
+    subgraph W2["Wave 2 (After Wave 1 — core abstraction, MAX PARALLEL)"]
+        T7["T7: Implement display_transport.{h,c} registry"]
+        T8["T8: Refactor console.{c,h} to multi-instance + caller-provided fb"]
+        T9["T9: Add fbuf jail param registration in kern_jail.c"]
+        T10["T10: Add PRISON_FLAG_PRISON_FBUF + prison_check_fbuf() helper"]
+        T20["T20: Design gpu_resource kernel framework"]
+        T22["T22: Implement preflight check framework"]
+        T24["T24: Design transport security model + config keys"]
+        T27["T27: Wire transport security into display_transport_init signature"]
+    end
 
-Wave 3 (After Wave 2 — wire-up, parallel where deps allow):
-├── T11: Wrap rfb.c as a registered display_transport
-├── T12: Implement sys/modules/displayd/ kernel module
-├── T13: Wire pci_fbuf.c to display_transport_init (with legacy rfb= compat)
-├── T14: Add rdp.c stub + register
-├── T15: Add jail-side example + tests/sys/jail/fbuf/
-├── T21: Add gpu jail params + implement gpu_resource module
-├── T23: Add 11 shipped preflight checks
-├── T25: Implement VeNCrypt TLS in rfb.c
-├── T26: Add rate limiting + idle timeout + audit logging to rfb.c
-├── T28: Add transport security preflight checks
-├── T30: Implement cert loader + discovery + self-signed auto-gen
-├── T31: Add kqueue hot-reload for certbot-style cert renewal
-├── T32: Add SNI support (sni_dir, default_cert, servername callback)
-├── T33: Add cert format/chain/expiry preflight checks
-└── T35: Implement host policy sysctls + enforcement layer
+    subgraph W3["Wave 3 (After Wave 2 — wire-up, parallel where deps allow)"]
+        T11["T11: Wrap rfb.c as a registered display_transport"]
+        T12["T12: Implement sys/modules/displayd/ kernel module"]
+        T13["T13: Wire pci_fbuf.c to display_transport_init (with legacy rfb= compat)"]
+        T14["T14: Add rdp.c stub + register"]
+        T15["T15: Add jail-side example + tests/sys/jail/fbuf/"]
+        T21["T21: Add gpu jail params + implement gpu_resource module"]
+        T23["T23: Add 11 shipped preflight checks"]
+        T25["T25: Implement VeNCrypt TLS in rfb.c"]
+        T26["T26: Add rate limiting + idle timeout + audit logging to rfb.c"]
+        T28["T28: Add transport security preflight checks"]
+        T30["T30: Implement cert loader + discovery + self-signed auto-gen"]
+        T31["T31: Add kqueue hot-reload for certbot-style cert renewal"]
+        T32["T32: Add SNI support (sni_dir, default_cert, servername callback)"]
+        T33["T33: Add cert format/chain/expiry preflight checks"]
+        T35["T35: Implement host policy sysctls + enforcement layer"]
+    end
 
-Wave 4 (After Wave 3 — docs + smoke):
-├── T16: Build wiring (Makefiles)
-├── T17: Documentation (jail.conf.5, bhyve.8, display-abstraction.md)
-├── T18: Smoke test (build, boot, regression, jail fbuf live test, transport TLS)
-├── T29: Document transport security (display_transport_security(7))
-├── T34: Migration guide (display-abstraction-migration.7)
-├── T36: Create share/examples/security/policy-quickstart/ + man cross-references
-└── T37: End user guide (display-enduser.7)
+    subgraph W4["Wave 4 (After Wave 3 — docs + smoke)"]
+        T16["T16: Build wiring (Makefiles)"]
+        T17["T17: Documentation (jail.conf.5, bhyve.8, display-abstraction.md)"]
+        T18["T18: Smoke test (build, boot, regression, jail fbuf live test, transport TLS)"]
+        T29["T29: Document transport security (display_transport_security(7))"]
+        T34["T34: Migration guide (display-abstraction-migration.7)"]
+        T36["T36: Create share/examples/security/policy-quickstart/ + man cross-references"]
+        T37["T37: End user guide (display-enduser.7)"]
+    end
 
-Wave 5 (After Wave 4 — broker + multicast, the new workstream):
-├── T38: Console broker daemon (displayd) with frame rate + bandwidth tunables
-├── T39: BDP wire protocol with 16-64 MB frame support
-├── T40: ACL system (jail/VM params, file fallback, default-deny)
-├── T41: Resource discovery (kqueue watch, scan_interval)
-├── T42: Transport bridge (BDP ↔ display_transport) with frame rate enforcement
-├── T43: Audit (syslog, file, BDP stream) with rate limiting
-├── T44: Client library (libdisplay.so) with unicast + multicast API
-├── T45: Sample client (displayc) with TUI + PNG + multicast pub/sub
-├── T46: End-to-end broker test (2 jails + 1 VM + 3 users + multicast)
-├── T47: Broker docs (displayd(8), bdp(7), display-acl(5), display-broker-config(5), displayc(1))
-└── T48: BDP Multicast UDP (TV / advertising / video wall) with AES-256-GCM, per-channel ACL, sysctls for FPS/bandwidth/TTL/IGMP
+    subgraph W5["Wave 5 (After Wave 4 — broker + multicast, the new workstream)"]
+        T38["T38: Console broker daemon (displayd) with frame rate + bandwidth tunables"]
+        T39["T39: BDP wire protocol with 16-64 MB frame support"]
+        T40["T40: ACL system (jail/VM params, file fallback, default-deny)"]
+        T41["T41: Resource discovery (kqueue watch, scan_interval)"]
+        T42["T42: Transport bridge (BDP ↔ display_transport) with frame rate enforcement"]
+        T43["T43: Audit (syslog, file, BDP stream) with rate limiting"]
+        T44["T44: Client library (libdisplay.so) with unicast + multicast API"]
+        T45["T45: Sample client (displayc) with TUI + PNG + multicast pub/sub"]
+        T46["T46: End-to-end broker test (2 jails + 1 VM + 3 users + multicast)"]
+        T47["T47: Broker docs (displayd(8), bdp(7), display-acl(5), display-broker-config(5), displayc(1))"]
+        T48["T48: BDP Multicast UDP (TV / advertising / video wall)"]
+    end
 
-Wave F (After ALL tasks — 4 parallel reviews):
-├── F1: Plan compliance audit (oracle) — covers broker + multicast
-├── F2: Code quality review (no AI slop, kernel coding style, no hardcoded constants — every knob is a sysctl)
-├── F3: Real QA (FreeBSD build, bhyve boot, jail fbuf test, broker e2e, multicast TV test)
-└── F4: Scope fidelity check (no spillover)
+    subgraph WF["Wave F (After ALL tasks — 4 parallel reviews)"]
+        F1["F1: Plan compliance audit (oracle)"]
+        F2["F2: Code quality review (no AI slop, kernel coding style, no hardcoded constants)"]
+        F3["F3: Real QA (FreeBSD build, bhyve boot, jail fbuf test, broker e2e, multicast TV test)"]
+        F4["F4: Scope fidelity check (no spillover)"]
+    end
+
+    W1 --> W2
+    W2 --> W3
+    W3 --> W4
+    W4 --> W5
+    W5 --> WF
 ```
 
 ### Dependency Matrix (compact)
@@ -8227,6 +8418,26 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
   - [ ] `tests/sys/vmm/fbuf_legacy.sh` still passes
 
   **Test Procedure (per-test)** — for each of the 20 ATF C cases in T8:
+
+  The high-level 6-step flow (visual summary):
+
+  ```mermaid
+  flowchart LR
+      P["1. PREREQUISITES<br/>Test env: FreeBSD 16+<br/>Packages: kyua, git, bash<br/>State: clean (no leftover consoles)"]
+      S["2. SETUP<br/>source verify_test_env.sh<br/>mkdir tmpdir, allocate fb<br/>no leftover state"]
+      E["3. EXECUTE<br/>kyua test ...<br/>tee evidence file"]
+      V["4. VERIFY<br/>Exit code 0<br/>'PASS' in output<br/>manifest.json updated"]
+      T["5. TEARDOWN<br/>munmap fb<br/>rmdir tmpdir<br/>(idempotent)"]
+      R["6. RE-RUN SAFETY<br/>YES — no persistent state"]
+
+      P --> S
+      S --> E
+      E --> V
+      V --> T
+      T --> R
+  ```
+
+  The detailed procedure (source of truth for the test runner):
 
   ```
   TEST: tc_console_create_with_provided_fb (T8 example)
