@@ -235,8 +235,7 @@ static void
 process_health_result(struct health_check_state *state, int result)
 {
 	struct service *svc;
-	struct service_replica *replica;
-	
+
 	pthread_mutex_lock(&state->lock);
 	
 	if (result == 0) {
