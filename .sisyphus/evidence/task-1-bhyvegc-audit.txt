@@ -1,0 +1,203 @@
+T1 bhyvegc API audit - evidence (read-only recon, no source modified)
+Host: pppoe1.cloudbsd.org (FreeBSD 16.0-CURRENT, amd64)
+Repo: ~/git/freebsd-src-pppoe
+Branch: displayd
+Date: 2026-06-06
+Task: T1 from .sisyphus/plans/freebsd-display-abstraction.md (Wave 1, recon)
+
+==============================================================================
+1. Branch confirmation
+==============================================================================
+$ git rev-parse --abbrev-ref HEAD
+displayd
+
+==============================================================================
+2. File locations (find usr.sbin/bhyve -name "*gc*" -o -name "*bhyvegc*")
+==============================================================================
+usr.sbin/bhyve/bhyvegc.c
+usr.sbin/bhyve/bhyvegc.h
+
+==============================================================================
+3. Line counts
+==============================================================================
+     100 usr.sbin/bhyve/bhyvegc.c
+      46 usr.sbin/bhyve/bhyvegc.h
+     117 usr.sbin/bhyve/console.c
+      53 usr.sbin/bhyve/console.h
+     487 usr.sbin/bhyve/pci_fbuf.c
+     803 total
+
+NOTE: The plan estimated "430+ lines" for bhyvegc. Actual is 100. The plan
+also expected bhyvegc_text_* / bhyvegc_draw_* functions, but the public API
+has only 4 functions: init, set_fbaddr, resize, get_image. Text/draw logic
+lives in amd64/vga.c, NOT in bhyvegc.
+
+==============================================================================
+4. Full grep for "bhyvegc" across usr.sbin/bhyve/
+==============================================================================
+usr.sbin/bhyve/Makefile
+usr.sbin/bhyve/amd64/vga.c
+usr.sbin/bhyve/amd64/vga.h
+usr.sbin/bhyve/bhyvegc.c
+usr.sbin/bhyve/bhyvegc.h
+usr.sbin/bhyve/console.c
+usr.sbin/bhyve/console.h
+usr.sbin/bhyve/pci_fbuf.c
+usr.sbin/bhyve/rfb.c
+usr.sbin/bhyve/usb_mouse.c
+
+==============================================================================
+5. Register call sites (console_kbd_register / console_ptr_register / console_fb_register)
+==============================================================================
+Files containing register calls:
+usr.sbin/bhyve/amd64/ps2kbd.c
+usr.sbin/bhyve/amd64/ps2mouse.c
+usr.sbin/bhyve/console.c
+usr.sbin/bhyve/console.h
+usr.sbin/bhyve/pci_fbuf.c
+usr.sbin/bhyve/usb_mouse.c
+
+Exact sites:
+usr.sbin/bhyve/amd64/ps2kbd.c:502:	console_kbd_register(ps2kbd_event, sc, 1);
+usr.sbin/bhyve/amd64/ps2mouse.c:415:	console_ptr_register(ps2mouse_event, sc, 1);
+usr.sbin/bhyve/usb_mouse.c:317:	console_ptr_register(umouse_event, sc, 10);
+usr.sbin/bhyve/pci_fbuf.c:445:	console_fb_register(pci_fbuf_render, sc);
+
+Note: usb_mouse.c uses priority 10 (overrides ps2mouse at priority 1).
+ps2kbd uses priority 1, ps2mouse uses priority 1.
+
+==============================================================================
+6. bhyvegc/console call sites in pci_fbuf.c
+==============================================================================
+46:#include "bhyvegc.h"
+112:	struct bhyvegc_image *gc_image;
+363:pci_fbuf_render(struct bhyvegc *gc, void *arg)
+378:		bhyvegc_resize(gc, sc->memregs.width, sc->memregs.height);
+444:	console_init(sc->memregs.width, sc->memregs.height, sc->fb_base);
+445:	console_fb_register(pci_fbuf_render, sc);
+449:	sc->gc_image = console_get_image();
+
+==============================================================================
+7. bhyvegc/console call sites in rfb.c
+==============================================================================
+64:#include "bhyvegc.h"
+271:	struct bhyvegc_image *gc_image;
+274:	gc_image = console_get_image();           (rfb_thread)
+517:rfb_send_rect(struct rfb_softc *rc, int cfd, struct bhyvegc_image *gc,
+601:rfb_send_all(struct rfb_softc *rc, int cfd, struct bhyvegc_image *gc)
+693:	struct bhyvegc_image *gc_image;
+721:	console_refresh();
+722:	gc_image = console_get_image();
+909:	console_key_event(key_msg.down, htonl(key_msg.sym), htonl(0));
+932:	console_key_event((int)extkey_msg.down, htonl(extkey_msg.sym), htonl(extkey_msg.code));
+949:	console_ptr_event(ptr_msg.button, htons(ptr_msg.x), htons(ptr_msg.y));
+
+==============================================================================
+8. bhyvegc call sites in amd64/vga.c / vga.h
+==============================================================================
+usr.sbin/bhyve/amd64/vga.c:40:#include "bhyvegc.h"
+usr.sbin/bhyve/amd64/vga.c:52:	struct bhyvegc		*gc;
+usr.sbin/bhyve/amd64/vga.c:55:	struct bhyvegc_image	*gc_image;
+usr.sbin/bhyve/amd64/vga.c:182:vga_check_size(struct bhyvegc *gc, struct vga_softc *sc)
+usr.sbin/bhyve/amd64/vga.c:208:		bhyvegc_resize(gc, sc->gc_width, sc->gc_height);
+usr.sbin/bhyve/amd64/vga.c:319:vga_render(struct bhyvegc *gc, void *arg)
+usr.sbin/bhyve/amd64/vga.c:1287:	sc->gc_image = console_get_image();
+usr.sbin/bhyve/amd64/vga.h:158:struct bhyvegc;
+usr.sbin/bhyve/amd64/vga.h:160:void	vga_render(struct bhyvegc *gc, void *arg);
+
+==============================================================================
+9. bhyvegc/console call sites in usb_mouse.c
+==============================================================================
+44:#include "bhyvegc.h"
+260:	struct bhyvegc_image *gc;
+262:	gc = console_get_image();
+317:	console_ptr_register(umouse_event, sc, 10);
+
+==============================================================================
+10. Public API of bhyvegc.h (full text)
+==============================================================================
+struct bhyvegc;
+
+struct bhyvegc_image {
+	int		vgamode;
+	int		width;
+	int		height;
+	uint32_t	*data;
+};
+
+struct bhyvegc *bhyvegc_init(int width, int height, void *fbaddr);
+void bhyvegc_set_fbaddr(struct bhyvegc *gc, void *fbaddr);
+void bhyvegc_resize(struct bhyvegc *gc, int width, int height);
+struct bhyvegc_image *bhyvegc_get_image(struct bhyvegc *gc);
+
+==============================================================================
+11. Internal struct bhyvegc (bhyvegc.c:37-40)
+==============================================================================
+struct bhyvegc {
+	struct bhyvegc_image	*gc_image;
+	int raw;
+};
+
+==============================================================================
+12. Public API of console.h (full text)
+==============================================================================
+struct bhyvegc;
+
+typedef void (*fb_render_func_t)(struct bhyvegc *gc, void *arg);
+typedef void (*kbd_event_func_t)(int down, uint32_t keysym, uint32_t keycode, void *arg);
+typedef void (*ptr_event_func_t)(uint8_t mask, int x, int y, void *arg);
+
+void console_init(int w, int h, void *fbaddr);
+void console_set_fbaddr(void *fbaddr);
+struct bhyvegc_image *console_get_image(void);
+
+void console_fb_register(fb_render_func_t render_cb, void *arg);
+void console_refresh(void);
+
+void console_kbd_register(kbd_event_func_t event_cb, void *arg, int pri);
+void console_key_event(int down, uint32_t keysym, uint32_t keycode);
+
+void console_ptr_register(ptr_event_func_t event_cb, void *arg, int pri);
+void console_ptr_event(uint8_t button, int x, int y);
+
+==============================================================================
+13. console.c state struct (file-static, singleton)
+==============================================================================
+static struct {
+	struct bhyvegc		*gc;
+
+	fb_render_func_t	fb_render_cb;
+	void			*fb_arg;
+
+	kbd_event_func_t	kbd_event_cb;
+	void			*kbd_arg;
+	int			kbd_priority;
+
+	ptr_event_func_t	ptr_event_cb;
+	void			*ptr_arg;
+	int			ptr_priority;
+} console;
+
+==============================================================================
+14. RFB init call (transport init today; no vtable, hard-wired)
+==============================================================================
+usr.sbin/bhyve/pci_fbuf.c:455:	error = rfb_init(sc->rfb_family, sc->rfb_host, sc->rfb_port,
+usr.sbin/bhyve/rfb.c:1341:rfb_init(sa_family_t family, const char *hostname, int port, int wait,
+
+==============================================================================
+15. Verdict
+==============================================================================
+bhyvegc is pure pixel manipulation, safe for non-VM use.
+0 hidden couplings.
+
+The only VMM dependency in the whole pipeline is one line in pci_fbuf.c:
+	sc->fb_base = vm_create_devmem(pi->pi_vmctx, VM_FRAMEBUFFER,
+	    "framebuffer", FB_SIZE);
+and even that is hidden behind a void * before it reaches bhyvegc.
+
+Function table (13 entries, all non-VMM-coupled):
+  bhyvegc_init, bhyvegc_set_fbaddr, bhyvegc_resize, bhyvegc_get_image
+  console_init, console_set_fbaddr, console_get_image
+  console_fb_register, console_refresh
+  console_kbd_register, console_key_event
+  console_ptr_register, console_ptr_event
