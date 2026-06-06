@@ -1,0 +1,425 @@
+T19 GPU kernel audit - evidence (read-only recon, no source modified)
+Host: pppoe1.cloudbsd.org (FreeBSD 16.0-CURRENT src tree inspection)
+Repo: ~/git/freebsd-src-oci  (plan said ~/git/freebsd-src-pppoe — that's a
+       single-file placeholder; the actual plan repo is freebsd-src-oci)
+Branch: framebuffer  (plan said displayd — branch in the actual repo is
+       framebuffer; the on-disk T1 commit 8b5c92196df used framebuffer,
+       see .sisyphus/state/task-1.checkpoint.json)
+Date: 2026-06-06
+Task: T19 from .sisyphus/plans/freebsd-display-abstraction.md (Wave 1, recon)
+
+NOTE ON WORKDIR: the plan path "~/git/freebsd-src-pppoe" is a stub; the
+T1 commit and .sisyphus/ structure live in ~/git/freebsd-src-oci on
+branch framebuffer. The .sisyphus/ drafts/evidence here are therefore
+created in the freebsd-src-oci tree (T1 was, per its checkpoint).
+
+==============================================================================
+0. Plan-path discrepancies (the "what the plan said vs. what's actually there")
+==============================================================================
+
+The T19 task body in the plan names four source paths. Three do not exist
+in this tree. This is a real finding — the planner should be told.
+
+| Plan says                                | Actual in tree                                 | Status   |
+|------------------------------------------|------------------------------------------------|----------|
+| sys/dev/drm/                             | sys/dev/drm2/                                  | different name (renamed drm2) |
+| sys/modules/drm/                         | (absent)                                       | not loadable; built statically |
+| compat/nvidia/                           | (absent); only sys/contrib/dev/nvidia/{LICENCE.nvidia, tegra*_xusb.bin.uu} | nvidia.ko is out-of-tree |
+| sys/kern/kern_cgroup.c                   | (absent); only sys/compat/linuxkpi/.../cgroup.h | no native cgroup framework |
+| devfs_rule_add() (function)              | DEVFSIO_RADD ioctl on devfs mount fd           | ioctl API, not function call |
+
+See audit §0 for full table + §10 for the recommended plan corrections.
+
+==============================================================================
+1. sys/dev/drm2/ directory structure (the real DRM core)
+==============================================================================
+
+$ ls sys/dev/drm2/ | head -20
+drm.h
+drmP.h
+drm_agpsupport.c
+drm_atomic.h
+drm_auth.c
+drm_buffer.c
+drm_buffer.h
+drm_bufs.c
+drm_context.c
+drm_core.h
+drm_crtc.c
+drm_crtc.h
+drm_crtc_helper.c
+drm_crtc_helper.h
+drm_dma.c
+drm_dp_helper.c
+drm_dp_helper.h
+drm_dp_iic_helper.c
+drm_drv.c
+drm_edid.c
+...
+
+$ find sys/dev/drm2 -name "*.c" -o -name "*.h" | wc -l
+77
+
+$ wc -l sys/dev/drm2/*.c sys/dev/drm2/*.h | tail -1
+ 30797 total
+
+$ ls sys/dev/drm2/ttm/
+ttm_agp_backend.c
+ttm_bo.c
+ttm_bo_api.h
+ttm_bo_driver.h
+ttm_bo_manager.c
+ttm_bo_util.c
+ttm_bo_vm.c
+ttm_execbuf_util.c
+ttm_execbuf_util.h
+ttm_lock.c
+ttm_memory.c
+ttm_object.c
+
+==============================================================================
+2. DRM build wiring (sys/conf/files)
+==============================================================================
+
+$ grep -n "drm" sys/conf/files | head -10
+1577:dev/drm2/drm_agpsupport.c	optional drm2
+1578:dev/drm2/drm_auth.c		optional drm2
+1579:dev/drm2/drm_bufs.c		optional drm2
+1580:dev/drm2/drm_buffer.c	optional drm2
+1581:dev/drm2/drm_context.c	optional drm2
+1582:dev/drm2/drm_crtc.c		optional drm2
+1583:dev/drm2/drm_crtc_helper.c	optional drm2
+1584:dev/drm2/drm_dma.c		optional drm2
+1585:dev/drm2/drm_dp_helper.c	optional drm2
+1586:dev/drm2/drm_dp_iic_helper.c	optional drm2
+
+$ grep -n "DRM\|drm" sys/conf/options | head -3
+574:# DRM options
+575:DRM_DEBUG		opt_drm.h
+
+$ find sys/modules -maxdepth 2 -name "drm*" 2>/dev/null
+(no output — no sys/modules/drm or sys/modules/drm2 exists)
+
+$ find sys/modules -name "*nvidia*" 2>/dev/null
+(no output)
+
+$ find sys/modules -name "*amdgpu*" -o -name "*i915*" -o -name "*radeon*" 2>/dev/null
+(no output)
+
+Verdict: DRM2 is compiled statically (optional drm2). Not loadable.
+No KMS drivers (i915kms, amdgpu, radeonkms) are in the tree.
+
+==============================================================================
+3. DRM cdevsw (sys/dev/drm2/drm_stub.c:73-82)
+==============================================================================
+
+$ sed -n '70,90p' sys/dev/drm2/drm_stub.c
+module_param_named(timestamp_precision_usec, drm_timestamp_precision, int, 0600);
+module_param_named(timestamp_monotonic, drm_timestamp_monotonic, int, 0600);
+
+static struct cdevsw drm_cdevsw = {
+	.d_version =	D_VERSION,
+	.d_open =	drm_open,
+	.d_read =	drm_read,
+	.d_ioctl =	drm_ioctl,
+	.d_poll =	drm_poll,
+	.d_mmap_single = drm_mmap_single,
+	.d_name =	"drm",
+	.d_flags =	D_TRACKCLOSE
+};
+
+$ sed -n '365,395p' sys/dev/drm2/drm_stub.c
+		break;
+	case DRM_MINOR_RENDER:
+		minor_devname = "dri/renderD%d";
+		break;
+	default:
+		minor_devname = "dri/card%d";
+		break;
+	}
+
+	ret = make_dev_p(MAKEDEV_WAITOK | MAKEDEV_CHECKNAME, &new_minor->device,
+	    &drm_cdevsw, 0, DRM_DEV_UID, DRM_DEV_GID,
+	    DRM_DEV_MODE, minor_devname, minor_id);
+	if (ret) {
+		DRM_ERROR("Failed to create cdev: %d\n", ret);
+		goto err_mem;
+	}
+	new_minor->device->si_drv1 = new_minor;
+	*minor = new_minor;
+
+	DRM_DEBUG("new minor assigned %d\n", minor_id);
+	return 0;
+
+err_mem:
+	free(new_minor, DRM_MEM_MINOR);
+err_idr:
+	*minor = NULL;
+	return ret;
+}
+
+==============================================================================
+4. DRM device defaults (sys/dev/drm2/drmP.h:1594-1596)
+==============================================================================
+
+$ sed -n '1592,1600p' sys/dev/drm2/drmP.h
+    ((o) & ~(DRM_GEM_MAPPING_OFF(DRM_GEM_MAX_IDX) | DRM_GEM_MAPPING_KEY))
+
+SYSCTL_DECL(_hw_drm);
+
+#define DRM_DEV_MODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
+#define DRM_DEV_UID	UID_ROOT
+#define DRM_DEV_GID	GID_VIDEO
+
+#define DRM_WAKEUP(w)		wakeup((void *)w)
+#define DRM_WAKEUP_INT(w)	wakeup(w)
+#define DRM_INIT_WAITQUEUE(queue) do {(void)(queue);} while (0)
+
+=> root:video 0660 — default DRM/DRM-render ownership.
+
+==============================================================================
+5. DRM hook points (the cdevsw entries — file:line + signature)
+==============================================================================
+
+$ grep -n "^int drm_open\|^drm_open_helper\|^int drm_read\|^int drm_poll\|^int\s\+drm_mmap_single" \
+  sys/dev/drm2/drm_fops.c sys/dev/drm2/drm_drv.c sys/dev/drm2/drm_vm.c
+sys/dev/drm2/drm_fops.c:120:int drm_open(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p)
+sys/dev/drm2/drm_fops.c:176:static int drm_open_helper(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p, struct drm_device *dev)
+sys/dev/drm2/drm_fops.c:491:drm_read(struct cdev *kdev, struct uio *uio, int ioflag)
+sys/dev/drm2/drm_fops.c:550:int drm_poll(struct cdev *kdev, int events, struct thread *td)
+sys/dev/drm2/drm_fops.c:581:drm_mmap_single(struct cdev *kdev, vm_ooffset_t *offset, vm_size_t size, struct vm_object **obj_res, int nprot)
+sys/dev/drm2/drm_drv.c:355:int drm_ioctl(struct cdev *kdev, u_long cmd, caddr_t data, int flags, DRM_STRUCTPROC *p)
+
+$ grep -n "EXPORT_SYMBOL(drm_open\|EXPORT_SYMBOL(drm_ioctl\|EXPORT_SYMBOL(drm_mmap\|EXPORT_SYMBOL(drm_poll" sys/dev/drm2/*.c
+sys/dev/drm2/drm_drv.c:495:EXPORT_SYMBOL(drm_ioctl);
+sys/dev/drm2/drm_fops.c:163:EXPORT_SYMBOL(drm_open);
+sys/dev/drm2/drm_fops.c:533:EXPORT_SYMBOL(drm_read);
+sys/dev/drm2/drm_fops.c:578:EXPORT_SYMBOL(drm_poll);
+
+$ grep -n "drm_gem_mmap_single\|^drm_gem_mmap" sys/dev/drm2/drm_gem.c
+456:drm_gem_mmap_single(struct drm_device *dev, vm_ooffset_t *offset, vm_size_t size,
+
+$ grep -n "ttm_mem_global_alloc\|ttm_bo_init_mm" sys/dev/drm2/ttm/ttm_bo.c
+1229:	ttm_mem_global_free(bdev->glob->mem_glob, acc_size);
+1231:	ret = ttm_mem_global_alloc(mem_glob, acc_size, false, false);
+1248:		ttm_mem_global_free(mem_glob, acc_size);
+1435:int ttm_bo_init_mm(struct ttm_bo_device *bdev, unsigned type,
+
+$ grep -n "drm_agp_acquire\|drm_agp_release\|drm_agp_enable" sys/dev/drm2/drm_agpsupport.c
+97:int drm_agp_acquire(struct drm_device * dev)
+112:EXPORT_SYMBOL(drm_agp_acquire);
+126:int drm_agp_acquire_ioctl(struct drm_device *dev, void *data,
+140:int drm_agp_release(struct drm_device * dev)
+148:EXPORT_SYMBOL(drm_agp_release);
+150:int drm_agp_release_ioctl(struct drm_device *dev, void *data,
+166:int drm_agp_enable(struct drm_device * dev, struct drm_agp_mode mode)
+
+==============================================================================
+6. devfs rule API (the plan got this wrong)
+==============================================================================
+
+$ grep -n "devfs_rule_add\b" sys/fs/devfs/*.c sys/sys/devfs.h 2>/dev/null
+(no output — there is no devfs_rule_add() kernel function)
+
+$ grep -n "devfs_rule_add\b" sbin/devfs/*.c usr.sbin/*/devfs*.c 2>/dev/null
+(no output — also absent in userspace)
+
+$ grep -n "DEVFSIO_RADD" sbin/devfs/rule.c
+116:		rulespec_infp(stdin, DEVFSIO_RADD, in_rsnum);
+119:		rv = ioctl(mpfd, DEVFSIO_RADD, &dr);
+121:			err(1, "ioctl DEVFSIO_RADD");
+
+$ grep -n "DEVFSIO_" sys/fs/devfs/devfs.h
+105:#define	DEVFSIO_RADD		_IOWR('D', 0, struct devfs_rule)
+106:#define	DEVFSIO_RDEL		_IOW('D', 1, devfs_rid)
+107:#define	DEVFSIO_RAPPLY		_IOW('D', 2, struct devfs_rule)
+108:#define	DEVFSIO_RAPPLYID	_IOW('D', 3, devfs_rid)
+109:#define	DEVFSIO_RGETNEXT       	_IOWR('D', 4, struct devfs_rule)
+111:#define	DEVFSIO_SUSE		_IOW('D', 10, devfs_rsnum)
+112:#define	DEVFSIO_SAPPLY		_IOW('D', 11, devfs_rsnum)
+113:#define	DEVFSIO_SGETNEXT	_IOWR('D', 12, devfs_rsnum)
+
+$ grep -n "devfs_rules_ioctl\|devfs_rule_applyde\|devfs_rule_run" sys/fs/devfs/devfs_rule.c
+160:devfs_rules_ioctl(struct devfs_mount *dm, u_long cmd, caddr_t data, struct thread *td)
+343:devfs_rule_applyde_recursive(struct devfs_krule *dk, struct devfs_mount *dm,
+349:	devfs_rule_run(dk, dm, de, devfs_rule_depth);
+357:devfs_rule_applydm(struct devfs_krule *dk, struct devfs_mount *dm)
+
+=> The devfs rule API is ioctl-based (DEVFSIO_RADD), not function-call-based.
+   The plan's reference to `devfs_rule_add()` is incorrect for this tree.
+
+$ ls sbin/devfs/
+devfs.8    devfs.c   devfs.conf    devfs.rules    rule.c
+
+==============================================================================
+7. nvidia / nvidia.ko presence
+==============================================================================
+
+$ ls compat 2>&1
+ls: cannot access 'compat': No such file or directory
+
+$ ls sys/contrib/dev/nvidia/
+LICENCE.nvidia
+tegra124_xusb.bin.uu
+tegra210_xusb.bin.uu
+
+$ find sys -name "nvidia.ko" 2>/dev/null
+(no output)
+
+$ find sys -name "nvidia*" -type f 2>/dev/null | head -10
+sys/arm64/nvidia
+sys/arm/nvidia
+sys/modules/dtb/nvidia
+sys/contrib/dev/nvidia
+sys/contrib/device-tree/include/dt-bindings/memory/nvidia,tegra264.h
+sys/contrib/device-tree/include/dt-bindings/reset/nvidia,tegra264.h
+sys/contrib/device-tree/include/dt-bindings/clock/nvidia,tegra264.h
+sys/contrib/device-tree/src/arm64/nvidia
+sys/contrib/device-tree/src/arm/nvidia
+sys/contrib/device-tree/Bindings/rtc/nvidia,tegra20-rtc.txt
+sys/contrib/dev/nvidia/LICENCE.nvidia
+sys/contrib/dev/nvidia/tegra124_xusb.bin.uu
+sys/contrib/dev/nvidia/tegra210_xusb.bin.uu
+
+=> nvidia.ko is NOT in src. The only nvidia content in src is the Tegra
+   SoC XUSB firmware (ARM-only, not x86 dGPU) + the LICENCE text.
+   `compat/nvidia/` is an out-of-tree tarball location, absent in src.
+
+==============================================================================
+8. sys/kern/kern_cgroup.c — not present (and what replaces it)
+==============================================================================
+
+$ find sys -name "kern_cgroup.c" 2>/dev/null
+(no output)
+
+$ find sys -name "cgroup*" 2>/dev/null
+sys/compat/linuxkpi/common/include/linux/cgroup.h
+
+=> No native cgroup framework. The only cgroup.h is the linuxkpi shim
+   (header-only, for Linux guest drivers).
+   Closest analog on host: sys/kern/subr_racct.c (per-jail resource
+   accounting, used by kern_jail.c for memory/IO/CPU quotas).
+
+==============================================================================
+9. Existing resource mediation patterns (prison_check family)
+==============================================================================
+
+$ grep -n "prison_check" sys/sys/jail.h
+468:int prison_check(struct ucred *cred1, struct ucred *cred2);
+469:bool prison_check_nfsd(struct ucred *cred);
+502:int prison_check_ip4(const struct ucred *, const struct in_addr *);
+503:int prison_check_ip4_locked(const struct prison *, const struct in_addr *);
+513:int prison_check_ip6(const struct ucred *, const struct in6_addr *);
+514:int prison_check_ip6_locked(const struct prison *, const struct in6_addr *);
+519:int prison_check_af(struct ucred *cred, int af);
+522:int prison_priv_check(struct ucred *cred, int priv);
+
+$ grep -n "^prison_check\|^int\s\+prison_check" sys/kern/kern_jail.c
+3953:prison_check_af(struct ucred *cred, int af)
+4058:prison_check(struct ucred *cred1, struct ucred *cred2)
+4076:prison_check_nfsd(struct ucred *cred)
+
+$ sed -n '4055,4075p' sys/kern/kern_jail.c
+ * Return 0 if jails permit p1 to frob p2, otherwise ESRCH.
+ */
+int
+prison_check(struct ucred *cred1, struct ucred *cred2)
+{
+
+	return ((cred1->cr_prison == cred2->cr_prison ||
+	    prison_ischild(cred1->cr_prison, cred2->cr_prison)) ? 0 : ESRCH);
+}
+
+$ grep -n "prison_add_allow\b" sys/kern/kern_jail.c
+5253:prison_add_allow(const char *prefix, const char *name, const char *prefix_descr,
+5371:	vfsp->vfc_prison_flag = prison_add_allow("mount", vfsp->vfc_name,
+5378:	vfsp->vfc_prison_flag = prison_add_allow("mount", vfsp->vfc_name,
+
+=> T20 should add a `prison_check_gpu(struct ucred *, struct drm_device *, enum gpu_op)`
+   following the same convention (returns 0/errno), and a `prison_add_allow("gpu", "open", ...)`
+   to register `allow.gpu.open` style jail params.
+
+==============================================================================
+10. sys/modules grep for kms/gpu/video drivers
+==============================================================================
+
+$ ls sys/modules/ | grep -iE "gpu|drm|kms|nvidia|amdgpu|radeon|video"
+linuxkpi_video
+videomode
+
+$ ls sys/modules/agp/
+Makefile
+
+=> No i915kms, no amdgpu, no radeonkms, no nvidia. Only the linuxkpi_video
+   shim and the generic videomode helper. The agp module exists but is the
+   legacy GART, not a KMS driver.
+
+==============================================================================
+11. /dev/dri/* consumers
+==============================================================================
+
+$ grep -rln "/dev/dri\|dri/" sys/ 2>/dev/null
+sys/dev/drm2/drm_stub.c
+sys/compat/linsysfs/linsysfs.c
+sys/compat/linux/linux_util.c
+
+=> Only the DRM2 framework itself, the linsysfs shim, and the linux util
+   shim touch `/dev/dri/*`. No bhyve, jail, or VMM code path does.
+   The surface is clean for T20.
+
+==============================================================================
+12. Files of interest — quick line-count summary
+==============================================================================
+
+$ wc -l sys/dev/drm2/drm_drv.c sys/dev/drm2/drm_fops.c \
+        sys/dev/drm2/drm_stub.c sys/dev/drm2/drm_gem.c \
+        sys/dev/drm2/drm_ioctl.c sys/dev/drm2/drm_vm.c \
+        sys/dev/drm2/drm_agpsupport.c sys/dev/drm2/ttm/ttm_bo.c \
+        sys/dev/drm2/ttm/ttm_memory.c sys/dev/drm2/ttm/ttm_bo_vm.c \
+        sys/dev/drm2/ttm/ttm_bo_manager.c 2>/dev/null
+  1242 sys/dev/drm2/drm_drv.c
+   632 sys/dev/drm2/drm_fops.c
+   463 sys/dev/drm2/drm_stub.c
+  1099 sys/dev/drm2/drm_gem.c
+  1148 sys/dev/drm2/drm_ioctl.c
+   264 sys/dev/drm2/drm_vm.c
+   195 sys/dev/drm2/drm_agpsupport.c
+  1839 sys/dev/drm2/ttm/ttm_bo.c
+   400 sys/dev/drm2/ttm/ttm_memory.c
+   100 sys/dev/drm2/ttm/ttm_bo_vm.c
+   300 sys/dev/drm2/ttm/ttm_bo_manager.c
+
+==============================================================================
+13. Verdict
+==============================================================================
+
+Verdict (one line):
+  DRI is the right abstraction; DRM2 hooks available at open/mmap/ioctl,
+  but the actual KMS drivers (i915kms, amdgpu, radeonkms, nvidia.ko)
+  are NOT in this base tree.
+
+Hook-point map (file:line):
+  drm_open                 : sys/dev/drm2/drm_fops.c:120
+  drm_open_helper          : sys/dev/drm2/drm_fops.c:176
+  drm_read                 : sys/dev/drm2/drm_fops.c:491
+  drm_ioctl                : sys/dev/drm2/drm_drv.c:355
+  drm_poll                 : sys/dev/drm2/drm_fops.c:550
+  drm_mmap_single          : sys/dev/drm2/drm_fops.c:581
+  drm_gem_mmap_single      : sys/dev/drm2/drm_gem.c:456
+  ttm_mem_global_alloc     : sys/dev/drm2/ttm/ttm_bo.c:1229-1248
+  ttm_bo_init_mm           : sys/dev/drm2/ttm/ttm_bo.c:1435
+  drm_cdevsw (static)      : sys/dev/drm2/drm_stub.c:73-82
+  DRM_DEV_UID/GID/MODE     : sys/dev/drm2/drmP.h:1594-1596  (root:video 0660)
+  devfs DEVFSIO_RADD       : sys/fs/devfs/devfs.h:105 + sys/fs/devfs/devfs_rule.c:160
+  devfs ruleset_apply      : sys/fs/devfs/devfs.h:191 + devfs_rule.c:343-357
+
+Path corrections for the planner (T19→T21):
+  - sys/dev/drm/         → sys/dev/drm2/
+  - sys/modules/drm/     → (does not exist; DRM2 is statically compiled)
+  - compat/nvidia/       → (does not exist; nvidia.ko is out-of-tree)
+  - sys/kern/kern_cgroup.c → sys/kern/subr_racct.c (racct = the FreeBSD analog)
+  - devfs_rule_add()     → DEVFSIO_RADD ioctl on devfs mount fd
+
+Commit: NO (per plan, but user requested commit of audit+evidence files only,
+        no source-tree changes). Commit message:
+        audit(t19): GPU kernel subsystem recon
