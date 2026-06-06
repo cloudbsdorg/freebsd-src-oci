@@ -121,7 +121,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 | §11 | [Coverage Shortfalls](#coverage-shortfalls) | Coverage recording | 7402 | `## Coverage Shortfalls` |
 | §12 | [Verdict](#verdict) | Final test summary | 7408 | `## Verdict` |
 | §13 | [Execution Strategy](#execution-strategy) | Parallel waves, dep matrix, agent dispatch | 7474 | `## Execution Strategy` |
-| §14 | [TODOs](#todos) | 60 v1 implementation tasks (T1–T60) + 4 design-only v2 (T62–T64, T68) + 7 design-only BT v2/v3 (T65–T72) + 4 final verifications (F1–F4) | 7648 | `## TODOs` |
+| §14 | [TODOs](#todos) | 60 v1 implementation tasks (T1–T60) + 5 design-only v2 (T61–T64, T68) + 7 design-only BT v2/v3 (T65–T72) + 4 final verifications (F1–F4) | 7648 | `## TODOs` |
 | §15 | [Final Verification Wave](#final-verification-wave-mandatory-after-all-implementation-tasks) | F1, F2, F3, F4 | 12940 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
 | §16 | [Commit Strategy](#commit-strategy) | Per-task commits | 12965 | `## Commit Strategy` |
 | §17 | [Success Criteria](#success-criteria) | Verification commands + checklist | 12969 | `## Success Criteria` |
@@ -171,7 +171,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 
 ### Agent Context Management (the "how to not run out of context" section)
 
-The plan is **13,040 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
+The plan is **13,039 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
 
 **The solution: structured context management per task.**
 
@@ -342,7 +342,7 @@ If the agent's context is lost (or the user restarts the session), the recovery 
 **F1-F4 updates:**
 
 - **F1** verifies:
-  - Every T-task (T1-T72, 72 total) has a "Required Context" subsection
+  - Every T-task (T0-T72, 73 total) has a "Required Context" subsection
   - Every T-task has a "Done When" subsection
   - The Plan Navigation Index is present at the top of the plan
   - The Table of Contents (§1) is present at the top of the plan, with clickable anchor links to every top-level section and every design section in §4
@@ -2826,7 +2826,7 @@ Each v2 cast tool is a thin (~2000-5000 LoC) adapter. They all share:
 - The operator can mix-and-match: cast one VM to a chromecast and another to an Apple TV simultaneously.
 - The same plumbing works for headless VMs (no GPU, just `gpu_stub` → HLS → chromecast) and full-passthrough GPUs (real EDID → accurate capabilities).
 
-**Cast-tools-defined-in-future (T62-T64 design only — not v1):**
+**Cast-tools-defined-in-future (T61-T64 design only — not v1):**
 
 | Task | Cast target | Wire protocol | Auth | Notes |
 |---|---|---|---|---|
@@ -7619,21 +7619,20 @@ graph TB
 | T58 | T3, T20, T21 (gpu_resource pattern) | T46, T57, T59, F1-F4 |
 | T59 | T58, T57 | T46, T60, F1-F4 |
 | T60 | T38, T39, T44, T57, T59 | T46, F1-F4 |
-| T61 | – (v2 follow-on, deferred; depends on T38 + Cast spec) | – |
-| T62-T64 | – (DESIGN ONLY, no impl in v1; tracked for v2) | – |
+| T61-T64 | – (DESIGN ONLY, no impl in v1; tracked for v2) | – |
 | T65-T68 | – (DESIGN ONLY, no impl in v1; tracked for v2) | – |
 | T69-T72 | – (DESIGN ONLY, no impl in v1; tracked for v3 future boulder) | – |
 | F1-F4 | T18, T37, T46, T47, T48, T49, T50, T51, T52, T54, T55, T56, T57, T58, T59, T60 | – |
 
-### Design-Only Task Notes (T62-T72)
+### Design-Only Task Notes (T61-T72)
 
-T62-T72 are **documented but not implemented in v1**. They appear in the dep matrix as `-` (no dependencies, no blockers) because they are design-only and have no v1 implementation. They are tracked so:
+T61-T72 are **documented but not implemented in v1**. They appear in the dep matrix as `-` (no dependencies, no blockers) because they are design-only and have no v1 implementation. They are tracked so:
 
-1. **The v2 workstream has a clear foundation** — T62-T68 (HLS, RTSP, EDID passthrough, BT host passthrough exclusivity, BT device-class abstraction, BT force-disconnect authz, BT slot/bandwidth model) are scheduled for v2.
+1. **The v2 workstream has a clear foundation** — T61-T68 (Chromecast, HLS, RTSP, EDID passthrough, BT host passthrough exclusivity, BT device-class abstraction, BT force-disconnect authz, BT slot/bandwidth model) are scheduled for v2.
 2. **The v3 future boulder is preserved** — T69-T72 (BT jail termination cleanup, BT multi-radio coordination, BT LE Audio / Auracast, BT cross-jail peer sharing) are v3 future boulders.
 3. **F1-F4 final reviewers do NOT need to verify v2/v3 tasks** — only v1 tasks. The reviewers will check that v1 deliverables exist and that design-only tasks have full design notes in the plan.
 
-The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (parallel with T57 → T58 → T59 → T60). T61 is v2 only. T62-T72 are v2/v3 only.
+The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (parallel with T57 → T58 → T59 → T60). T61-T72 are v2/v3 only.
 
 ### Agent Dispatch Summary
 
@@ -12347,7 +12346,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-### Design-Only Tasks (T62-T72)
+### Design-Only Tasks (T61-T72)
 
 These tasks are **documented but not implemented in v1**. They are explicitly tracked so the design work is preserved and the v2 workstream has a clear foundation. Each task has full design notes (What to do, References, Acceptance) but no implementation timeline, code, or QA Scenarios in v1.
 
@@ -12946,7 +12945,7 @@ These tasks are **documented but not implemented in v1**. They are explicitly tr
 > Never mark F1-F4 as checked before getting the user's okay. Rejection or user feedback → fix → re-run → present again → wait for okay.
 
 - [ ] F1. **Plan compliance audit** — `oracle` agent
-  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify agent context management (added by audit):** every T-task (T1-T60) has a `**Required Context**`, `**Test Procedure**`, and `**Done When**` subsection (60 v1 + 12 v2/v3 design-only = 72 tasks total). **Verify the Plan Navigation Index accuracy** by spot-checking 3 random section references — they should resolve to actual sections with line numbers within ±20 of the index. **Verify checkpoint files exist:** `.sisyphus/state/task-{N}.checkpoint.json` for each completed task. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 15 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all broker config files exist, all broker man pages present (displayd.8, displayc.1, bdp-stream.1, display-acl.5, display-broker-config.5, display-pools.5, display-enduser.7, display-transport-security.7, bdp.7, displayd-policy-quickstart.7) — these are the canonical names from the start; no deprecation stub man pages, e2e test passes. **Verify architectural rules (added by audit):** (a) The canonical binary name is **`displayd`**. (b) The canonical library name is **`libdisplay`**. (c) The canonical config dir is **`/etc/display/`**. These are the names from the start; no "old name" to deprecate from (no product was ever shipped under a different name; see §4.7 for the "no old product to deprecate" note). (d) `gpu_stub` test backend is mandatory; `hw.gpu.0.stub_capacity=10496` is the default. (e) No `/dev/dri` or `/dev/gpu*` inside jails. (f) No `/dev/bluetooth*` inside jails. (g) `localhost by default` for all new endpoints (`[::1]:8443`); public requires `security.display.broker.listen_public=1` + TLS + ACL. (h) IPv6 dual-stack. (i) TLS 1.3 only by default. (j) Self-signed cert auto-gen when none configured. (k) Host policy sysctls (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) are stricter-wins. (l) Tunable precedence: loader > sysctl > config > default. (m) Every `*_resource.ko` module has `attach()` / `detach()` / `reset()` / `reinit()` hooks. (n) No `switch (vendor_id)` in `gpu_resource.ko`; use `GPU_CAPS_REGISTER` mechanism. (o) OID namespaces `security.bt.*` and `hw.bt.*` are reserved (return ENOENT, not crash). (p) OID namespace `security.display.cast.*` is reserved. (q) `bdp-stream` works (pipes to ffmpeg). (r) HTTP health endpoint works (curl returns 200 + JSON). **Verify design-only items NOT implemented:** (s) T61 cast tool, T62-T72 BT/cast design items — F1 does NOT check for their implementation; F1 DOES check that their OID namespaces are reserved. **Verify unit tests:** (t) Every T-task has at least 5 ATF C test cases documented (where the task has C code) and at least 2 shell integration tests. (u) Coverage targets: ≥ 80% line coverage on C code, ≥ 90% on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence). (v) `tests/sys/env/verify_test_env.sh` exists and is sourced by every test. (w) The plan target is FreeBSD 16 or higher; the build/test env is verified at test start.
+  Read the plan end-to-end. For each "Must Have" and "Backcompat guarantee" item: verify implementation exists (read file, grep for the symbol/feature, run the smoke test). For each "Must NOT Have" and "Backcompat regression" item: grep the codebase for the forbidden pattern — reject with `file:line` if found. **Verify every QA scenario has a corresponding evidence file in `.sisyphus/evidence/`.** Compare deliverables against the plan's "Concrete Deliverables" list. **Verify agent context management (added by audit):** every T-task (T0-T72) has a `**Required Context**`, `**Test Procedure**`, and `**Done When**` subsection (1 template validation + 60 v1 + 12 v2/v3 design-only = 73 tasks total). **Verify the Plan Navigation Index accuracy** by spot-checking 3 random section references — they should resolve to actual sections with line numbers within ±20 of the index. **Verify checkpoint files exist:** `.sisyphus/state/task-{N}.checkpoint.json` for each completed task. **Verify broker + multicast deliverables:** broker daemon exists and starts, BDP protocol has all 15 unicast + 9 multicast message types, ACL resolver handles jail param + file + default-deny, multicast channel create/pub/sub works, all broker config files exist, all broker man pages present (displayd.8, displayc.1, bdp-stream.1, display-acl.5, display-broker-config.5, display-pools.5, display-enduser.7, display-transport-security.7, bdp.7, displayd-policy-quickstart.7) — these are the canonical names from the start; no deprecation stub man pages, e2e test passes. **Verify architectural rules (added by audit):** (a) The canonical binary name is **`displayd`**. (b) The canonical library name is **`libdisplay`**. (c) The canonical config dir is **`/etc/display/`**. These are the names from the start; no "old name" to deprecate from (no product was ever shipped under a different name; see §4.7 for the "no old product to deprecate" note). (d) `gpu_stub` test backend is mandatory; `hw.gpu.0.stub_capacity=10496` is the default. (e) No `/dev/dri` or `/dev/gpu*` inside jails. (f) No `/dev/bluetooth*` inside jails. (g) `localhost by default` for all new endpoints (`[::1]:8443`); public requires `security.display.broker.listen_public=1` + TLS + ACL. (h) IPv6 dual-stack. (i) TLS 1.3 only by default. (j) Self-signed cert auto-gen when none configured. (k) Host policy sysctls (`security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*`) are stricter-wins. (l) Tunable precedence: loader > sysctl > config > default. (m) Every `*_resource.ko` module has `attach()` / `detach()` / `reset()` / `reinit()` hooks. (n) No `switch (vendor_id)` in `gpu_resource.ko`; use `GPU_CAPS_REGISTER` mechanism. (o) OID namespaces `security.bt.*` and `hw.bt.*` are reserved (return ENOENT, not crash). (p) OID namespace `security.display.cast.*` is reserved. (q) `bdp-stream` works (pipes to ffmpeg). (r) HTTP health endpoint works (curl returns 200 + JSON). **Verify design-only items NOT implemented:** (s) T61 cast tool, T62-T72 BT/cast design items — F1 does NOT check for their implementation; F1 DOES check that their OID namespaces are reserved. **Verify unit tests:** (t) Every T-task has at least 5 ATF C test cases documented (where the task has C code) and at least 2 shell integration tests. (u) Coverage targets: ≥ 80% line coverage on C code, ≥ 90% on critical paths (mediator attach/detach, ACL resolver, BDP encode/decode, sysctl precedence). (v) `tests/sys/env/verify_test_env.sh` exists and is sourced by every test. (w) The plan target is FreeBSD 16 or higher; the build/test env is verified at test start.
   Output: `Must Have [N/N] | Backcompat [N/N] | Must NOT Have [N/N] | Tasks [N/N done] | Broker [N/N] | Multicast [N/N] | Architectural Rules [N/N] | OID Reservations [N/N] | Design-Only Excluded [N/N] | Unit Tests [N/N] | Coverage [%] | Evidence [N files] | VERDICT: APPROVE|REJECT`
 
 - [ ] F2. **Code quality review** — `unspecified-high` agent
