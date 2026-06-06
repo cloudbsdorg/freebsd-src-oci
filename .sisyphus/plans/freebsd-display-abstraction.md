@@ -122,9 +122,10 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 | §12 | [Verdict](#verdict) | Final test summary | 7408 | `## Verdict` |
 | §13 | [Execution Strategy](#execution-strategy) | Parallel waves, dep matrix, agent dispatch | 7474 | `## Execution Strategy` |
 | §14 | [TODOs](#todos) | 60 v1 implementation tasks (T1–T60) + 4 design-only v2 (T62–T64, T68) + 7 design-only BT v2/v3 (T65–T72) + 4 final verifications (F1–F4) | 7648 | `## TODOs` |
-| §15 | [Final Verification Wave](#final-verification-wave-mandatory-after-all-implementation-tasks) | F1, F2, F3, F4 | 12891 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
-| §16 | [Commit Strategy](#commit-strategy) | Per-task commits | 12916 | `## Commit Strategy` |
-| §17 | [Success Criteria](#success-criteria) | Verification commands + checklist | 12920 | `## Success Criteria` |
+| §15 | [Final Verification Wave](#final-verification-wave-mandatory-after-all-implementation-tasks) | F1, F2, F3, F4 | 12940 | `## Final Verification Wave (MANDATORY — after ALL implementation tasks)` |
+| §16 | [Commit Strategy](#commit-strategy) | Per-task commits | 12965 | `## Commit Strategy` |
+| §17 | [Success Criteria](#success-criteria) | Verification commands + checklist | 12969 | `## Success Criteria` |
+| §18 | [Table of Contents](#table-of-contents) | Clickable anchor links to all sections (navigation aid, not content) | 33 | `## Table of Contents` |
 
 ### Design sections in Context (§4.X — note: shifted from §3 to §4 after agent-context addition; all 23 sections physically located inside §4 after the structural reorg)
 
@@ -170,7 +171,7 @@ The user noted: *"what if the agent runs out of its context window, how do we en
 
 ### Agent Context Management (the "how to not run out of context" section)
 
-The plan is **13,039 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
+The plan is **13,040 lines**. An agent's context window is typically **200K tokens (~150K words = ~80K lines)**, but the plan is only one of many things in the agent's context (commits, file diffs, tool results, intermediate state). An agent can easily exhaust context mid-task.
 
 **The solution: structured context management per task.**
 
