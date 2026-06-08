@@ -77,14 +77,10 @@ noop_fb_render(struct bhyvegc *gc, void *arg)
 }
 
 /*
- * Mark a test as expected to fail until the per-instance console
- * implementation (T8.B) lands. Centralising it here keeps the
- * red->green transition a single line delete in each HEAD.
+ * T8.B is now landed; the suite is GREEN.  The EXPECT_T8B_FAIL
+ * shim is no longer needed and all its call sites have been
+ * deleted.
  */
-#define	EXPECT_T8B_FAIL(tc)	do {						\
-	atf_tc_set_md_var((tc), "expected_failure",				\
-	    "T8.B (console per-instance implementation) not yet landed");	\
-} while (0)
 
 ATF_TC(tc_console_create_with_provided_fb);
 ATF_TC_HEAD(tc_console_create_with_provided_fb, tc)
@@ -92,7 +88,6 @@ ATF_TC_HEAD(tc_console_create_with_provided_fb, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_create with explicit fb returns a context whose image "
 	    "exposes the supplied width, height, and pixel data pointer");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_create_with_provided_fb, tc)
 {
@@ -115,7 +110,6 @@ ATF_TC_HEAD(tc_console_create_with_null_fb_raw_fails, tc)
 {
 	atf_tc_set_md_var(tc, "descr",
 	    "console_create with NULL fb and CONSOLE_FB_RAW returns NULL");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_create_with_null_fb_raw_fails, tc)
 {
@@ -130,7 +124,6 @@ ATF_TC_HEAD(tc_console_create_with_bhyvegc_default, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_create with NULL fb and the bhyvegc default flavour "
 	    "allocates its own back-buffer and exposes a non-NULL image");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_create_with_bhyvegc_default, tc)
 {
@@ -152,7 +145,6 @@ ATF_TC_HEAD(tc_console_destroy_idempotent, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "Calling console_destroy twice on the same context is safe "
 	    "and does not trip the address sanitizer");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_destroy_idempotent, tc)
 {
@@ -169,7 +161,6 @@ ATF_TC_HEAD(tc_console_destroy_null_safe, tc)
 {
 	atf_tc_set_md_var(tc, "descr",
 	    "console_destroy(NULL) is a no-op and must not crash");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_destroy_null_safe, tc)
 {
@@ -182,7 +173,6 @@ ATF_TC_HEAD(tc_console_set_fbaddr_ctx_swaps_pointer, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_set_fbaddr_ctx rebinds the pixel data pointer so "
 	    "console_get_image_ctx reflects the new buffer");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_set_fbaddr_ctx_swaps_pointer, tc)
 {
@@ -207,7 +197,6 @@ ATF_TC_HEAD(tc_console_refresh_with_no_fb_cb_is_noop, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_refresh_ctx invokes the registered fb callback and "
 	    "survives a benign no-op implementation");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_refresh_with_no_fb_cb_is_noop, tc)
 {
@@ -226,7 +215,6 @@ ATF_TC_HEAD(tc_console_kbd_register_priority_higher_wins, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "When two keyboard callbacks are registered, the higher "
 	    "priority value receives events; the lower is shadowed");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_kbd_register_priority_higher_wins, tc)
 {
@@ -252,7 +240,6 @@ ATF_TC_HEAD(tc_console_kbd_register_same_pri_first_wins, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "When two keyboard callbacks are registered with the same "
 	    "priority, the first registration retains the slot");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_kbd_register_same_pri_first_wins, tc)
 {
@@ -275,7 +262,6 @@ ATF_TC_HEAD(tc_console_kbd_unregister_returns_zero, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_kbd_unregister_ctx returns 0 on success when the "
 	    "callback was previously registered");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_kbd_unregister_returns_zero, tc)
 {
@@ -298,7 +284,6 @@ ATF_TC_HEAD(tc_console_kbd_unregister_missing_returns_enoent, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_kbd_unregister_ctx returns ENOENT when the callback "
 	    "pointer was never registered against the context");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_kbd_unregister_missing_returns_enoent, tc)
 {
@@ -316,7 +301,6 @@ ATF_TC_HEAD(tc_console_ptr_event_dispatches_to_registered, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_ptr_event_ctx delivers mask, x and y verbatim to the "
 	    "registered pointer callback");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_ptr_event_dispatches_to_registered, tc)
 {
@@ -341,7 +325,6 @@ ATF_TC_HEAD(tc_console_ptr_register_priority_higher_wins, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "Pointer callbacks follow the same priority rule as keyboard "
 	    "callbacks: the highest priority registration is dispatched");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_ptr_register_priority_higher_wins, tc)
 {
@@ -366,7 +349,6 @@ ATF_TC_HEAD(tc_console_get_image_returns_null_after_destroy, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "After console_destroy(ctx) returns, console_get_image_ctx(ctx) "
 	    "returns NULL and does not touch freed memory");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_get_image_returns_null_after_destroy, tc)
 {
@@ -388,7 +370,6 @@ ATF_TC_HEAD(tc_console_legacy_init_creates_default_ctx, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "The legacy console_init entry point also creates a default "
 	    "per-instance context accessible via console_get_default");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_legacy_init_creates_default_ctx, tc)
 {
@@ -411,7 +392,6 @@ ATF_TC_HEAD(tc_console_two_instances_independent, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "Two independently created contexts keep their own framebuffer "
 	    "and do not cross-deliver events");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_two_instances_independent, tc)
 {
@@ -452,7 +432,6 @@ ATF_TC_HEAD(tc_console_ten_instances_dont_interfere, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "Ten independently created contexts each retain their own "
 	    "framebuffer, image, and callback slots with no cross-talk");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_ten_instances_dont_interfere, tc)
 {
@@ -501,7 +480,6 @@ ATF_TC_HEAD(tc_console_unregister_with_null_returns_einval, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_fb_unregister_ctx rejects a NULL context with EINVAL "
 	    "rather than dereferencing it");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_unregister_with_null_returns_einval, tc)
 {
@@ -514,7 +492,6 @@ ATF_TC_HEAD(tc_console_key_event_with_no_kbd_consumer_is_noop, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "If no keyboard callback is registered, console_key_event_ctx "
 	    "returns silently and does not crash");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_key_event_with_no_kbd_consumer_is_noop, tc)
 {
@@ -533,7 +510,6 @@ ATF_TC_HEAD(tc_console_get_image_consistent_across_lookups, tc)
 	atf_tc_set_md_var(tc, "descr",
 	    "console_get_image_ctx returns the same struct bhyvegc_image "
 	    "pointer across successive calls; the image is not reallocated");
-	EXPECT_T8B_FAIL(tc);
 }
 ATF_TC_BODY(tc_console_get_image_consistent_across_lookups, tc)
 {
