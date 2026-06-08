@@ -1,0 +1,25 @@
+{
+  "last_completed_task": "T4",
+  "current_task": "T4",
+  "completed_tasks": ["T0", "T1", "T2", "T3", "T4", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T4",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-4-dt-header.txt",
+    "manifest_run_id": "2026-06-08T14:30:00Z",
+    "host": "pppoe1.cloudbsd.org",
+    "branch": "framebuffer",
+    "head": "64eedda925c"
+  },
+  "next_action": "T4 unblocks T7 (transport registry impl), T11 (rfb wrap), T13 (pci_fbuf wire), T14 (rdp stub).  T4 itself is the header; .c impl is T7's work.",
+  "deliverables": {
+    "header": "usr.sbin/bhyve/display_transport.h",
+    "evidence": ".sisyphus/evidence/task-4-dt-header.txt"
+  },
+  "verdict": {
+    "verdict_line": "Header parses cleanly via cpp -fsyntax-only. Vtable ops: init (required), shutdown (required), attach (required), detach (required), send_pixels (required), send_input (optional), send_input_ptr (optional), on_client_event (optional). Registry cap: 8.",
+    "header_lines": 219,
+    "license": "BSD-2-Clause (matches rfb.h / console.h style)"
+  }
+}

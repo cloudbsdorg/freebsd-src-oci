@@ -1,0 +1,21 @@
+T0 PARTIAL PASS verdict
+======================
+The FreeBSD 16 build env on pppoe1.cloudbsd.org is sound.
+Toolchain detects cleanly; kmod build chain (cc+ld+objcopy) works; kyua
+installed; GENERIC config available; 6 CPUs; kernel + ZFS + FUSE + CUSE
+loaded.
+
+BLOCKED: 6 follow-up tasks filed.
+  T0.A - write tests/sys/env/verify_test_env.sh
+  T0.B - write tests/data/regenerate.sh
+  T0.C - write tests/data/users/setup-test-users.sh
+  T0.D - get root access (sudo or root VM) for kldload / jail / pw
+  T0.E - proper sysctl-registering kmod with sysctl_ctx_init in MOD_LOAD
+  T0.F - jail-param-registering kmod with osd_jail_*
+
+These are all small.  T0.A-C are the blocking ones for any T-task that
+sources verify_test_env.sh before code changes (per the plan's Test
+Procedure section 7.7).  T0.D is the blocking one for any actual kldload
+or jail-create test.
+
+Source: .sisyphus/drafts/t0-env-validation.md

@@ -1,0 +1,15 @@
+T0 Area 4 - kernel module build (bsd.kmod.mk)
+Host: pppoe1.cloudbsd.org
+
+PASS (build chain):
+  - cc -O2 -pipe -Werror -D_KERNEL -DKLD_MODULE -nostdinc ...
+      ... -std=gnu17 -c t0-smoke.c -o t0-smoke.o
+  - ld -m elf_x86_64_fbsd -warn-common --build-id=sha1
+        -T /usr/src/sys/conf/ldscript.kmod.amd64 -r -o t0-smoke.ko t0-smoke.o
+  - objcopy --strip-debug t0-smoke.ko
+  - t0-smoke.ko produced
+
+FAIL (load, needs root):
+  - kldload ./t0-smoke.ko: 'Operation not permitted' (mlapointe is non-root)
+
+T0.D follow-up: get root on the build host.

@@ -1,0 +1,26 @@
+{
+  "last_completed_task": "T3",
+  "current_task": "T3",
+  "completed_tasks": ["T0", "T1", "T2", "T3", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T3",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-3-jail-recipe.txt",
+    "manifest_run_id": "2026-06-08T14:25:00Z",
+    "host": "pppoe1.cloudbsd.org",
+    "branch": "framebuffer",
+    "head": "64eedda925c"
+  },
+  "next_action": "T3 unblocks T6 (fbuf jail param spec), T9 (jail param registration code), T10 (PRISON_FLAG_* work), T20 (gpu_resource design), T21 (gpu jail params + module).  T3 itself is recipe documentation only; no code changes.  T9 owns the actual implementation.",
+  "deliverables": {
+    "report": ".sisyphus/drafts/t3-jail-api-recipe.md",
+    "evidence": ".sisyphus/evidence/task-3-jail-recipe.txt"
+  },
+  "verdict": {
+    "verdict_line": "FreeBSD jail API supports allow.fbuf via prison_add_allow() (same as allow.vmm) and typed fbuf.* / gpu.* params via SYSCTL_JAIL_PARAM_* + OSD. fbuf.nokbd / fbuf.nomouse sub-flags don't fit the standard allow.X shape; recommend rename to allow.fbuf.nokbd.",
+    "recipe_count": 3,
+    "files_referenced": ["sys/sys/jail.h", "sys/kern/kern_jail.c", "sys/kern/kern_jailmeta.c", "sys/dev/vmm/vmm_dev.c", "lib/libjail/jail.c", "lib/libjail/jail.h", "usr.sbin/jail/jail.conf.5"],
+    "precedent": "allow.vmm / allow.vmm_ppt in sys/dev/vmm/vmm_dev.c:1213-1217"
+  }
+}

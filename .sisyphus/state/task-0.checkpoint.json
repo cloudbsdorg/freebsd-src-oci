@@ -1,0 +1,33 @@
+{
+  "last_completed_task": "T0",
+  "current_task": "T0",
+  "completed_tasks": ["T0", "T1", "T2", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T0",
+    "result": "PARTIAL PASS",
+    "evidence_files": [
+      ".sisyphus/evidence/task-0-shell-pattern-validation.txt",
+      ".sisyphus/evidence/task-0-build-pattern-validation.txt",
+      ".sisyphus/evidence/task-0-test-framework-validation.txt",
+      ".sisyphus/evidence/task-0-kmod-pattern-validation.txt",
+      ".sisyphus/evidence/task-0-sysctl-pattern-validation.txt",
+      ".sisyphus/evidence/task-0-jail-param-validation.txt",
+      ".sisyphus/evidence/task-0-summary.txt"
+    ],
+    "manifest_run_id": "2026-06-08T14:20:00Z",
+    "host": "pppoe1.cloudbsd.org (FreeBSD 16.0-CURRENT amd64)",
+    "branch": "framebuffer",
+    "head": "64eedda925c"
+  },
+  "next_action": "T0 filed 6 follow-up tasks. T0.A-C (write the 3 plan-referenced test scripts) and T0.D (root on the build host) are blocking for any T-task that needs kldload / jail / pw. T0.E/F are deferred sysctl/jail-param kmod validations. The build env is sound for the next 5 tasks (T3-T6 are source-reading or header authoring). T8 onwards will need T0.D root for the kldload work.",
+  "deliverables": {
+    "report": ".sisyphus/drafts/t0-env-validation.md",
+    "evidence_dir": ".sisyphus/evidence/task-0-*.txt"
+  },
+  "verdict": {
+    "verdict_line": "FreeBSD 16 build env on pppoe1.cloudbsd.org is sound for source reading and header authoring. Real kldload / jail / pw needs root. 3 plan-referenced test scripts must be written. PARTIAL PASS; 6 follow-up tasks filed.",
+    "passed_areas": ["shell patterns (POSIX, openssl, mktemp, pw syntax)", "build env toolchain detection (cc/ld match, no cross-bootstrap)", "test framework installed (kyua + /usr/tests)", "kmod build chain (cc+ld+objcopy works, .ko produced)"],
+    "failed_or_deferred": ["3 plan-referenced test scripts missing", "kldload needs root", "jail create needs root", "pw useradd needs root", "sysctl-registering kmod (Area 5) needs proper MOD_LOAD", "jail-param kmod (Area 6) needs OSD slot"]
+  }
+}

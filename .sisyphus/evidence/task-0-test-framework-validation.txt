@@ -1,0 +1,12 @@
+T0 Area 3 - test framework (kyua + ATF)
+Host: pppoe1.cloudbsd.org
+
+PASS:
+  - which kyua -> /usr/bin/kyua
+  - ls /usr/tests/Kyuafile -> /usr/tests/Kyuafile
+  - kyua syntax check (kyua help works; --version / --help do not work on this rev)
+
+DEFERRED:
+  - 3-line ATF C test parseable via cpp but the Kyuafile needs a Makefile
+    template too.  T0.A should ship a working minimal Makefile + Kyuafile
+    pair.

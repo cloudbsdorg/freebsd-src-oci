@@ -1,0 +1,3 @@
+T0 Area 5 - sysctl registration via kmod
+DEFERRED.  Needs sysctl_ctx_init in MOD_LOAD (not in static init).
+T0.E follow-up: write a proper 20-line kmod with kldload + sysctl -a | grep test.

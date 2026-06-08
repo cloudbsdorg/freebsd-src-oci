@@ -1,0 +1,40 @@
+T3 - jail API audit evidence
+Host: pppoe1.cloudbsd.org
+Date: 2026-06-08
+Source files inspected:
+  sys/sys/jail.h                                                  535 lines
+  sys/kern/kern_jail.c                                           5713 lines
+  sys/kern/kern_jailmeta.c                                        617 lines
+  sys/dev/vmm/vmm_dev.c                                        1263+ lines
+  lib/libjail/jail.c (kldload_param + noname)              lines 1199-1260
+  lib/libjail/jail.h (struct jailparam)                     lines 42-50
+  usr.sbin/jail/jail.conf.5                                     273 lines
+
+Key call sites:
+  sys/kern/kern_jail.c:226 - pr_flag_allow[] static table
+  sys/kern/kern_jail.c:256 - pr_allow_all = PR_ALLOW_ALL_STATIC
+  sys/kern/kern_jail.c:3919 - prison_set_allow() impl
+  sys/kern/kern_jail.c:3932 - prison_set_allow_locked() impl
+  sys/kern/kern_jail.c:5253 - prison_add_allow() impl (the dynamic API)
+  sys/kern/kern_jail.c:5371 - prison_add_allow('mount', fs, ...) usage
+  sys/sys/jail.h:206 - pr_allow field in struct prison
+  sys/sys/jail.h:256-274 - PR_ALLOW_* defines
+  sys/sys/jail.h:283 - PR_ALLOW_ALL_STATIC
+  sys/sys/jail.h:299 - PR_ALLOW_DIFFERENCES
+  sys/sys/jail.h:417-442 - SYSCTL_JAIL_PARAM_* macros
+  sys/sys/jail.h:524 - prison_add_allow() declaration
+  sys/dev/vmm/vmm_dev.c:96 - pr_allow_vmm_flag, pr_allow_vmm_ppt_flag
+  sys/dev/vmm/vmm_dev.c:120 - check: (ucred->cr_prison->pr_allow & flag) == 0
+  sys/dev/vmm/vmm_dev.c:466 - vmm_ppt check
+  sys/dev/vmm/vmm_dev.c:1213-1217 - PRECEDENT: vmmdev_init() registers flags
+  lib/libjail/jail.c:1199-1247 - kldload_param() and noname() helpers
+
+Verdict (from .sisyphus/drafts/t3-jail-api-recipe.md):
+  The FreeBSD jail API supports allow.fbuf (via prison_add_allow, same as
+  allow.vmm) and typed fbuf.* / gpu.* params (via SYSCTL_JAIL_PARAM_* + OSD).
+  The fbuf.nokbd / fbuf.nomouse sub-flags don't fit the standard allow.X
+  shape; recommend renaming to allow.fbuf.nokbd for the simplest fit.
+  No source code modified; recipe docs only.
+
+Files in deliverable:
+  .sisyphus/drafts/t3-jail-api-recipe.md  (10 sections, 3 recipes)

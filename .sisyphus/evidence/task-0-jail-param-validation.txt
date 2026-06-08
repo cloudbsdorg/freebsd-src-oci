@@ -1,0 +1,4 @@
+T0 Area 6 - jail param via osd_jail_*
+DEFERRED.  Needs OSD slot + kldload + jail create + jls -v.
+T0.F follow-up: requires root (T0.D).  T3 audit covers the surface (see
+.sisyphus/drafts/t3-jail-api-recipe.md).

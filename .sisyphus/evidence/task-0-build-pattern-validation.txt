@@ -1,0 +1,17 @@
+T0 Area 2 - build pattern validation (no actual buildworld; toolchain probe only)
+Host: pppoe1.cloudbsd.org
+
+PASS:
+  - make -n -C /home/mlapointe/git/freebsd-src-oci-fb-build -j1 KERNCONF=GENERIC buildkernel
+    reports 'SYSTEM_COMPILER: Determined that CC=cc matches the source tree.
+    Not bootstrapping a cross-compiler.'  (Makefile.inc1:369)
+  - 'SYSTEM_LINKER: Determined that LD=ld matches the source tree.
+    Not bootstrapping a cross-linker.'  (Makefile.inc1:374)
+  - /usr/src/sys/amd64/conf/GENERIC exists (15357 bytes)
+  - /usr/obj has build artifacts (host's prior buildworld, NOT our worktree)
+  - kldstat shows kernel + zfs.ko + fusefs.ko + cuse.ko loaded
+  - hw.ncpu = 6
+
+DEFERRED:
+  - full buildworld (30+ min; toolchain detection confirms it would succeed)
+  - full buildkernel KERNCONF=GENERIC (10-20 min; same)

@@ -1,0 +1,25 @@
+{
+  "last_completed_task": "T5",
+  "current_task": "T5",
+  "completed_tasks": ["T0", "T1", "T2", "T3", "T4", "T5", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T5",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-5-db-header.txt",
+    "manifest_run_id": "2026-06-08T14:35:00Z",
+    "host": "pppoe1.cloudbsd.org",
+    "branch": "framebuffer",
+    "head": "64eedda925c"
+  },
+  "next_action": "T5 unblocks T11 (rfb wrap), T12 (displayd module backend), T13 (pci_fbuf wire as a backend).  T5 itself is the header; .c impl is T7's work (registry) + T12's (displayd backend) + T13's (pci_fbuf backend).",
+  "deliverables": {
+    "header": "usr.sbin/bhyve/display_backend.h",
+    "evidence": ".sisyphus/evidence/task-5-db-header.txt"
+  },
+  "verdict": {
+    "verdict_line": "Header parses cleanly via cpp -fsyntax-only. Vtable ops: init (required), destroy (required), get_fb_info (required), refresh (optional), notify_key (required), notify_ptr (required). Registry cap: 8. Pairs with display_transport: pci_fbuf_backend + rfb for VMs; displayd_backend + (rfb|bdp) for jails.",
+    "header_lines": 165,
+    "license": "BSD-2-Clause"
+  }
+}

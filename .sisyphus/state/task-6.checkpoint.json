@@ -1,0 +1,26 @@
+{
+  "last_completed_task": "T6",
+  "current_task": "T6",
+  "completed_tasks": ["T0", "T1", "T2", "T3", "T4", "T5", "T6", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T6",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-6-fbuf-spec.txt",
+    "manifest_run_id": "2026-06-08T14:40:00Z",
+    "host": "pppoe1.cloudbsd.org",
+    "branch": "framebuffer",
+    "head": "64eedda925c"
+  },
+  "next_action": "T6 unblocks T9 (jail param registration code), T12 (displayd module consumer).  T6 itself is the spec; T9 owns the implementation.  T0.D (root) is needed for T9's kldload test.",
+  "deliverables": {
+    "spec": ".sisyphus/drafts/t6-fbuf-jail-param-spec.md",
+    "evidence": ".sisyphus/evidence/task-6-fbuf-spec.txt"
+  },
+  "verdict": {
+    "verdict_line": "Param set: allow.fbuf + allow.fbuf.nokbd + allow.fbuf.nomouse (3 booleans) + fbuf.width + fbuf.height + fbuf.transport (3 typed).  PRISON_FLAG_PRISON_FBUF is a misnomer; the right primitive is prison_add_allow() (same as allow.vmm).  fbuf.nokbd should rename to allow.fbuf.nokbd.",
+    "param_count": 6,
+    "deviations_flagged": ["PRISON_FLAG_PRISON_FBUF -> prison_add_allow()", "fbuf.nokbd -> allow.fbuf.nokbd"],
+    "test_cases_documented": 10
+  }
+}

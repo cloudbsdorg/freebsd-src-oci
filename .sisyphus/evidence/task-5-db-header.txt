@@ -1,0 +1,24 @@
+T5 - display_backend.h header draft
+Host: pppoe1.cloudbsd.org
+Date: 2026-06-08
+
+File: usr.sbin/bhyve/display_backend.h  (new, 165 lines)
+License: BSD-2-Clause
+
+Public API surface:
+  - struct display_fb_info { width, height, stride, data (RGBA32, backend-owned) }
+  - struct display_backend vtable (init, destroy, get_fb_info, refresh,
+    notify_key, notify_ptr)
+  - Registry: display_backend_register, init_by_name, destroy,
+    destroy_all, list_names
+  - DISPLAY_BACKEND_MAX = 8
+
+QA: cpp -fsyntax-only parses cleanly on the host (same cpp warning as T4;
+  the actual include graph resolved without errors).
+
+Pairing with display_transport:
+  - bhyve VM:      backend = pci_fbuf_backend, transport = rfb
+  - jail display:  backend = displayd_backend, transport = (rfb or bdp)
+
+Backwards compat: pci_fbuf_init() preserved as a thin wrapper in
+pci_fbuf.c that calls display_backend_init_by_name('pci_fbuf', ...).

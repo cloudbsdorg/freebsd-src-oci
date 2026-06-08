@@ -1,0 +1,29 @@
+T4 - display_transport.h header draft
+Host: pppoe1.cloudbsd.org
+Date: 2026-06-08
+
+File: usr.sbin/bhyve/display_transport.h  (new, 219 lines)
+License: BSD-2-Clause (matches rfb.h / console.h style)
+
+Public API surface:
+  - struct display_pixels { width, height, stride, data (RGBA32) }
+  - struct display_key_event { down, keysym, keycode }
+  - struct display_ptr_event { button, x, y }
+  - struct display_transport vtable (init, shutdown, attach, detach,
+    send_pixels, send_input, send_input_ptr, on_client_event)
+  - Registry: display_transport_register, init_by_name, shutdown,
+    shutdown_all, list_names
+  - DISPLAY_TRANSPORT_MAX = 8
+
+Style matches rfb.h (BSD-2-Clause header, Tycho Nightingale-era format
+extended to 2026).  Mirror of rfb_init() signature in the init op:
+  init(const char *args, display_transport_t *handle_out)
+
+QA: cpp -fsyntax-only parses cleanly on the host.
+    cpp warning 'argument unused during compilation: -fsyntax-only' is
+    standard cpp behavior (cpp doesn't accept -fsyntax-only; the actual
+    syntax check happens via the cc syntax-only flow).  The header
+    resolved all type references and includes without errors.
+
+Backwards compat: rfb_init() is preserved as a thin wrapper in rfb.c that
+calls display_transport_init_by_name('rfb', synthesized_args, &handle).

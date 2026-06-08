@@ -1,0 +1,41 @@
+T6 - fbuf jail param + PRISON_FLAG_PRISON_FBUF spec
+Host: pppoe1.cloudbsd.org
+Date: 2026-06-08
+
+Deliverable: .sisyphus/drafts/t6-fbuf-jail-param-spec.md  (10 sections)
+
+Param set (the fbuf jail interface contract):
+  allow.fbuf                   boolean  default off
+  allow.fbuf.nokbd             boolean  default off (opt-out)
+  allow.fbuf.nomouse           boolean  default off (opt-out)
+  fbuf.width                   int      default 1920
+  fbuf.height                  int      default 1080
+  fbuf.transport               string   default 'rfb'
+
+Verdict (deviations flagged):
+  - 'PRISON_FLAG_PRISON_FBUF' is a misnomer; the right primitive is
+    prison_add_allow() (dynamic, same as allow.vmm).  No new
+    PR_ALLOW_FBUF #define is needed.
+  - 'fbuf.nokbd' / 'fbuf.nomouse' (without the 'allow.' prefix) don't
+    fit the standard allow.X shape.  Recommend renaming to
+    'allow.fbuf.nokbd' / 'allow.fbuf.nomouse' for simplest fit.
+  - Files that will be touched (T9 / T12 implement, T6 spec only):
+      sys/modules/displayd/Makefile
+      sys/modules/displayd/displayd.c
+      sys/modules/displayd/displayd_params.c
+      sys/conf/files
+      usr.sbin/jail/jail.conf.5
+      (T12) usr.sbin/bhyve/displayd_consumer.c
+      (T12) sys/modules/displayd/devfs_rules.c
+
+Test cases (T6 acceptance) documented in spec section 7:
+  T6.1: allow.fbuf -> /dev/fb0 visible
+  T6.2: allow.fbuf.nokbd -> /dev/kbd0 absent
+  T6.3: allow.fbuf.nomouse -> /dev/ums0 absent
+  T6.4: both opt-outs -> only /dev/fb0
+  T6.5: no allow.fbuf -> no displayd devices
+  T6.6: fbuf.width/height applied
+  T6.7: fbuf.transport applied
+  T6.8: child jail inherits
+  T6.9: child without allow.fbuf sees nothing
+  T6.10: fbuf.transport=bogus -> EINVAL
