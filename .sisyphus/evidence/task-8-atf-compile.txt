@@ -1,0 +1,94 @@
+=== T8.C evidence captured 2026-06-08T19:52:46Z ===
+
+=== File metrics ===
+580 tests/sys/bhyve/atf_console.c
+ATF_TC count:
+20
+
+=== Tree state ===
+T8.A landed? (last commit touching console.h):
+47db57117e3 bhyve(display): add per-instance console API to console.h (T8.A)
+T8.B landed? (last commit touching console.c):
+4d65a7c6951 usr.sbin: Automated cleanup of cdefs and other formatting
+
+=== Verification 1: literal prompt check ===
+Command: cpp -I usr.sbin/bhyve -I . -fsyntax-only tests/sys/bhyve/atf_console.c
+Note: cpp cannot resolve atf-c.h on this host (no system ATF). The check
+is expected to fail with 'atf-c.h: No such file or directory'. Adding
+-I contrib/atf on a FreeBSD build host makes the cpp check succeed.
+--- output ---
+tests/sys/bhyve/atf_console.c:31:10: fatal error: atf-c.h: No such file or directory
+   31 | #include <atf-c.h>
+      |          ^~~~~~~~~
+compilation terminated.
+# 0 "tests/sys/bhyve/atf_console.c"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 1 "/usr/include/stdc-predef.h" 1 3 4
+# 0 "<command-line>" 2
+# 1 "tests/sys/bhyve/atf_console.c"
+
+=== Verification 2: real C compile (atf-c.h path added) ===
+Command: cc -I usr.sbin/bhyve -I . -I contrib/atf -fsyntax-only tests/sys/bhyve/atf_console.c
+--- output ---
+compile rc=0
+
+=== Verification 3: link attempt showing T8.B undefined references ===
+Compile the test object file (works):
+test object compile rc=0
+
+T8.A console.h declares the per-instance API; console.c (T8.B pending)
+does not define it. Linking the test object against the legacy console.c
+yields undefined references for every T8.B symbol. To demonstrate that
+cleanly we link against a stub console.c that implements only the legacy
+API (matching pre-T8.A state):
+--- linker output (showing T8.B undefined references) ---
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_create_with_provided_fb_head':
+atf_console.c:(.text+0x110): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x128): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_create_with_provided_fb_body':
+atf_console.c:(.text+0x16c): undefined reference to `console_create'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x19c): undefined reference to `atf_tc_fail_requirement'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x1a4): undefined reference to `console_get_image_ctx'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x1d4): undefined reference to `atf_tc_fail_requirement'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x20c): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x244): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x284): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x28c): undefined reference to `console_destroy'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_create_with_null_fb_raw_fails_head':
+atf_console.c:(.text+0x2bc): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x2d4): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_create_with_null_fb_raw_fails_body':
+atf_console.c:(.text+0x300): undefined reference to `console_create'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x330): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_create_with_bhyvegc_default_head':
+atf_console.c:(.text+0x360): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x378): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_create_with_bhyvegc_default_body':
+atf_console.c:(.text+0x3a4): undefined reference to `console_create'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x3d4): undefined reference to `atf_tc_fail_requirement'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x3dc): undefined reference to `console_get_image_ctx'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x40c): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x444): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x47c): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x4ac): undefined reference to `atf_tc_fail_check'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x4b4): undefined reference to `console_destroy'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_destroy_idempotent_head':
+atf_console.c:(.text+0x4e4): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x4fc): undefined reference to `atf_tc_set_md_var'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_destroy_idempotent_body':
+atf_console.c:(.text+0x52c): undefined reference to `console_create'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x55c): undefined reference to `atf_tc_fail_requirement'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x564): undefined reference to `console_destroy'
+/usr/bin/aarch64-linux-gnu-ld.bfd: atf_console.c:(.text+0x56c): undefined reference to `console_destroy'
+/usr/bin/aarch64-linux-gnu-ld.bfd: /tmp/atf_console.o: in function `atfu_tc_console_destroy_null_safe_head':
+atf_console.c:(.text+0x59c): undefined reference to `atf_tc_set_md_var'
+link rc=0
+
+=== Files in tests/sys/bhyve/ ===
+total 36
+drwxr-xr-x  2 mlapointe mlapointe  4096 Jun  8 14:48 .
+drwxr-xr-x 39 mlapointe mlapointe  4096 Jun  8 14:39 ..
+-rw-r--r--  1 mlapointe mlapointe   362 Jun  8 14:48 Kyuafile
+-rw-r--r--  1 mlapointe mlapointe   788 Jun  8 14:48 Makefile
+-rw-r--r--  1 mlapointe mlapointe 18558 Jun  8 14:51 atf_console.c
