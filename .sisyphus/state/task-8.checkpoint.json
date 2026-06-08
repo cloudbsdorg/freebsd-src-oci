@@ -1,0 +1,54 @@
+{
+  "last_completed_task": "T8",
+  "current_task": "T8",
+  "completed_tasks": ["T0", "T1", "T2", "T3", "T4", "T5", "T6", "T8", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T8",
+    "result": "PASS",
+    "evidence_files": [
+      ".sisyphus/evidence/task-8-header.txt",
+      ".sisyphus/evidence/task-8-atf.txt",
+      ".sisyphus/evidence/task-8-shell.txt",
+      ".sisyphus/evidence/task-8-bhyve-regression.txt"
+    ],
+    "manifest_run_id": "2026-06-08T15:40:00Z",
+    "host": "pppoe1.cloudbsd.org",
+    "branch": "framebuffer",
+    "head": "e1001cd259c"
+  },
+  "next_action": "T8 unblocks T11 (rfb wrap), T12 (displayd module consumer), T13 (pci_fbuf wire as a backend), T23 (preflight framework). T9 (jail param registration) needs T0.D root for kldload tests; T12 needs T0.D for /dev/fb0 cdev provisioning.",
+  "deliverables": {
+    "header": "usr.sbin/bhyve/console.h (T8.A)",
+    "impl": "usr.sbin/bhyve/console.c (T8.B)",
+    "bhyvegc_destroy": "usr.sbin/bhyve/bhyvegc.c + bhyvegc.h (T8.B)",
+    "atf_tests": "tests/sys/bhyve/atf_console.c + Makefile + Kyuafile (T8.C)",
+    "shell_tests": "tests/sys/vmm/console_multi_instance.sh + Kyuafile + Makefile (T8.D)"
+  },
+  "verdict": {
+    "verdict_line": "Console singleton -> per-instance refactor lands. 20/20 ATF cases PASS, 4/4 shell cases PASS, all 14 legacy call sites unmodified, bhyve binary rebuilds clean and runs.",
+    "atf_pass": 20,
+    "atf_total": 20,
+    "shell_pass": 4,
+    "shell_total": 4,
+    "legacy_call_sites_unchanged": 14,
+    "new_console_pieo_symbols": 23,
+    "loc_delta_console_c": "117 -> 399 lines (+282)",
+    "loc_delta_bhyvegc_c": "100 -> 138 lines (+38)",
+    "loc_delta_atf_console_c": "0 -> 580 lines (new)",
+    "loc_delta_console_multi_instance_sh": "0 -> 75 lines (new)"
+  },
+  "follow_ups": [
+    "T9 (jail param registration code) — needs T0.D root for kldload tests",
+    "T12 (displayd module) — needs T0.D root for /dev/fb0 cdev",
+    "T11 (rfb wrap) — T8 made console_create / console_destroy / per-instance ops available; T11 threads ctx through rfb_softc",
+    "T13 (pci_fbuf wire as a display_backend) — same as T11 for pci_fbuf_softc",
+    "T23 (preflight framework) — T8.A / T8.B done; T23 is a separate workstream"
+  ],
+  "honcho": {
+    "service": "MCP",
+    "session_id": "displayd-reconcile-wave1-t0-t6",
+    "peers": ["sisyphus", "mark", "displayd-build-agent"],
+    "note": "Honcho MCP used for cross-session context anchoring; not a CLI binary."
+  }
+}
