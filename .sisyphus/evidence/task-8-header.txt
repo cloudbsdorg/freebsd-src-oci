@@ -1,0 +1,74 @@
+cpp: warning: argument unused during compilation: '-fsyntax-only' [-Wunused-command-line-argument]
+# 1 "usr.sbin/bhyve/console.h"
+# 1 "<built-in>" 1
+# 1 "<built-in>" 3
+# 406 "<built-in>" 3
+# 1 "<command line>" 1
+# 1 "<built-in>" 2
+# 1 "usr.sbin/bhyve/console.h" 2
+# 32 "usr.sbin/bhyve/console.h"
+struct bhyvegc;
+
+typedef void (*fb_render_func_t)(struct bhyvegc *gc, void *arg);
+typedef void (*kbd_event_func_t)(int down, uint32_t keysym, uint32_t keycode, void *arg);
+typedef void (*ptr_event_func_t)(uint8_t mask, int x, int y, void *arg);
+
+# 1 "/usr/include/sys/queue.h" 1 3 4
+# 35 "/usr/include/sys/queue.h" 3 4
+# 1 "/usr/include/sys/cdefs.h" 1 3 4
+# 64 "/usr/include/sys/cdefs.h" 3 4
+# 1 "/usr/include/sys/_decls.h" 1 3 4
+# 65 "/usr/include/sys/cdefs.h" 2 3 4
+# 499 "/usr/include/sys/cdefs.h" 3 4
+# 1 "/usr/include/sys/_visible.h" 1 3 4
+# 500 "/usr/include/sys/cdefs.h" 2 3 4
+# 36 "/usr/include/sys/queue.h" 2 3 4
+# 39 "usr.sbin/bhyve/console.h" 2
+
+struct console_ctx;
+
+
+
+
+struct console_ctx *console_create(int w, int h, void *fbaddr, int flags);
+void console_destroy(struct console_ctx *ctx);
+struct console_ctx *console_get_default(void);
+
+void console_set_fbaddr_ctx(struct console_ctx *ctx, void *fbaddr);
+struct bhyvegc_image *console_get_image_ctx(struct console_ctx *ctx);
+
+void console_fb_register_ctx(struct console_ctx *ctx,
+                              fb_render_func_t render_cb, void *arg, int pri);
+int console_fb_unregister_ctx(struct console_ctx *ctx,
+                                fb_render_func_t render_cb);
+void console_refresh_ctx(struct console_ctx *ctx);
+
+void console_kbd_register_ctx(struct console_ctx *ctx,
+                               kbd_event_func_t event_cb, void *arg, int pri);
+int console_kbd_unregister_ctx(struct console_ctx *ctx,
+                                 kbd_event_func_t event_cb);
+void console_key_event_ctx(struct console_ctx *ctx,
+                             int down, uint32_t keysym, uint32_t keycode);
+
+void console_ptr_register_ctx(struct console_ctx *ctx,
+                               ptr_event_func_t event_cb, void *arg, int pri);
+int console_ptr_unregister_ctx(struct console_ctx *ctx,
+                                 ptr_event_func_t event_cb);
+void console_ptr_event_ctx(struct console_ctx *ctx,
+                             uint8_t button, int x, int y);
+
+void console_init(int w, int h, void *fbaddr);
+
+void console_set_fbaddr(void *fbaddr);
+
+struct bhyvegc_image *console_get_image(void);
+
+void console_fb_register(fb_render_func_t render_cb, void *arg);
+void console_refresh(void);
+
+void console_kbd_register(kbd_event_func_t event_cb, void *arg, int pri);
+void console_key_event(int down, uint32_t keysym, uint32_t keycode);
+
+void console_ptr_register(ptr_event_func_t event_cb, void *arg, int pri);
+void console_ptr_event(uint8_t button, int x, int y);
+EXIT=0
