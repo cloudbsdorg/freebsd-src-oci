@@ -43,3 +43,24 @@
 ### Documentation drift
 
 - The plan's T19 task body says "read `sys/dev/drm/` directory structure" — but the real path is `sys/dev/drm2/`. Future audit tasks should grep the tree for the actual location before quoting a path. The "linux-distribution" model of `sys/dev/drm/` is the upstream-Linux layout; the FreeBSD porting renames the directory but the content is the same.
+
+## T2 (2026-06-08) — Input fan-out audit issues
+
+### Testability / fitness gap
+
+- **PS/2 consumer path is amd64-only** (`usr.sbin/bhyve/amd64/{atkbdc,ps2kbd,ps2mouse}.c`). aarch64 and riscv bhyve have no i8042 emulation at all (verified: `atkbdc_init` is only called from `amd64/bhyverun_machdep.c:358`). Any multi-arch input design that depends on PS/2 will silently fail to register on non-x86.
+- **USB mouse consumer (`umouse_event`) is arch-agnostic in source** (`usr.sbin/bhyve/usb_mouse.c` is in the top-level dir, not `amd64/`), but `usb_mouse_init` is only invoked by the umouse USB-HID template which only attaches to emulated XHCI/EHCI, which is currently amd64-only in practice. Treat USB-HID input as amd64-only until a multi-arch HCI lands.
+- **`vm_isa_pulse_irq(sc->ctx, ...)` requires a bhyve `vmctx *`.** The `struct atkbdc_softc` always has a non-NULL `ctx` because `atkbdc_init(ctx)` requires one. Jails have no `vmctx`. Any code that lifts the PS/2 consumer into a jail context will panic.
+- **No `console_*_unregister` API exists.** T8 must add it. The "register once, never unregister" pattern is fine for the bhyve process lifetime but is a blocker for the per-jail displayd work (jail start = register, jail stop = unregister).
+- **The `gc_image->width / height` scaling in `umouse_event` (usb_mouse.c:287-288) is VNC-coordinate-specific.** A jail consumer that wants to scale jail-internal framebuffer coords to a different range must own its own scaling, not depend on the singleton `console.gc`.
+
+### Documentation drift
+
+- **Plan task body says "Output (in `usr.sbin/bhyve/input-fanout.md`)"** but the user-instructions convention (from T1) is `.sisyphus/drafts/t{N}-{slug}.md`. Followed the user-instruction convention. Worth flagging to the orchestrator: every Wave 1 audit's "Output" path in the plan is nominal; the live convention is `.sisyphus/drafts/`.
+- **Plan task body said the path is "VNC client → `rfb_recv_key_msg` (rfb.c:899) → `console_key_event` (rfb.c:909) → registered kbd consumer → ??? → guest"** but the consumer-to-guest step was underspecified. The audit fills in the chain: `ps2kbd_event` (ps2kbd.c:394) → `atkbdc_event(sc, 1)` (ps2kbd.c:409) → `atkbdc_kbd_poll` (atkbdc.c:505) → `atkbdc_assert_kbd_intr` (atkbdc.c:242) → `vm_isa_pulse_irq(sc->ctx, 1, 1)` (atkbdc.c:147). The "???" was an i8042 IRQ pulse on `sc->ctx`.
+
+### Honcho toolset quirks (worth knowing for the next agent)
+
+- **`add_peers_to_session` schema** wants the object form `[{peer_id: "sisyphus"}, {peer_id: "mark"}]`. Passing a plain string array gets auto-wrapped as `[{$text: "sisyphus"}, ...]` by the harness and rejected by the union validation. Use the object form.
+- **No `honcho` CLI binary exists** in this environment. Honcho is purely an MCP service. Any task body that says "use the honcho CLI" is misreading the toolset.
+- **Honcho session IDs are user-chosen** (e.g. `displayd-t2-input-fanout`); the session is created via `honcho_create_session` and persists across agent restarts. Cross-session context anchoring works via `honcho_chat(peer_id, query, session_id=...)`.

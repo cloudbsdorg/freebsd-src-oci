@@ -1,0 +1,41 @@
+{
+  "last_completed_task": "T2",
+  "current_task": "T2",
+  "completed_tasks": ["T1", "T2", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T2",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-2-input-fanout.txt",
+    "manifest_run_id": "2026-06-08T00:30:00Z"
+  },
+  "next_action": "T2 is read-only recon (no test runner). Verdict recorded in .sisyphus/drafts/t2-input-fanout.md: 'Existing bhyve path is sufficient for amd64 bhyve VMs, but is INSUFFICIENT for jails.' Unblocks T8 (console refactor -> per-instance), T11 (rfb wrap preserves dispatch sites), T12 (displayd module needs per-jail consumer), T13 (pci_fbuf wire). T8 cannot be worked until T3 (jail API audit) is reconciled -- T3 is marked [x] in the plan but has no deliverable.",
+  "deliverables": {
+    "report": ".sisyphus/drafts/t2-input-fanout.md",
+    "evidence": ".sisyphus/evidence/task-2-input-fanout.txt",
+    "commit": "(pending) audit(t2): input fan-out audit"
+  },
+  "verdict": {
+    "verdict_line": "Existing bhyve path is sufficient for amd64 bhyve VMs (PS/2 + USB mouse), and arch-agnostic at the transport + dispatcher level, but is INSUFFICIENT for jails: the consumer side (PS/2 i8042, USB HCI) is VM-specific.",
+    "registrant_count": 3,
+    "dispatcher_count": 3,
+    "registered_consumers": [
+      {"fn": "ps2kbd_event", "file": "usr.sbin/bhyve/amd64/ps2kbd.c:394", "pri": 1, "delivery": "atkbdc_event -> vm_isa_pulse_irq IRQ 1", "arch": "amd64"},
+      {"fn": "ps2mouse_event", "file": "usr.sbin/bhyve/amd64/ps2mouse.c:372", "pri": 1, "delivery": "atkbdc_event -> vm_isa_pulse_irq IRQ 12", "arch": "amd64"},
+      {"fn": "umouse_event", "file": "usr.sbin/bhyve/usb_mouse.c:257", "pri": 10, "delivery": "hci->hci_intr UMOUSE_INTR_ENDPT", "arch": "all (in source; only wired on amd64 in practice)"}
+    ],
+    "dispatch_sites": [
+      {"fn": "rfb_recv_key_msg", "file": "usr.sbin/bhyve/rfb.c:899", "call": "console_key_event rfb.c:909"},
+      {"fn": "rfb_recv_client_msg", "file": "usr.sbin/bhyve/rfb.c:916", "call": "console_key_event rfb.c:932 (RFB_CLIENTMSG_EXT_KEYEVENT)"},
+      {"fn": "rfb_recv_ptr_msg", "file": "usr.sbin/bhyve/rfb.c:940", "call": "console_ptr_event rfb.c:949"}
+    ],
+    "jail_fit": false,
+    "jail_fit_rationale": "vm_isa_pulse_irq requires a bhyve vmctx (not available in jails). USB HCI is attached to a VM's PCI bus (not a jail). No PS/2 / USB stack in jail userland. New consumer needed: per-jail displayd_kbd_event / displayd_ptr_event writing to displayd.ko's /dev/kbd0 / /dev/ums0."
+  },
+  "honcho": {
+    "service": "MCP",
+    "session_id": "displayd-t2-input-fanout",
+    "peers": ["sisyphus", "mark"],
+    "note": "Honcho is the MCP peer-memory service exposed in the agent toolset (honcho_create_session, honcho_add_messages_to_session, honcho_chat, etc.), NOT a CLI binary. There is no honcho command on PATH. The session anchors cross-session agent context per the plan's 'Agent Context Management' protocol."
+  }
+}

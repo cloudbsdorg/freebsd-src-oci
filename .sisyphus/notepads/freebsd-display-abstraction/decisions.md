@@ -43,3 +43,11 @@
 - **Per-jail GPU governance will reuse devfs rulesets for `/dev/dri/*` visibility, not a new mechanism.** `devfs.ruleset` + a `dri/*` glob + `mode/uid/gid` actions already solves the "what does a jail see" question. The framework's only new responsibility is **per-jail VRAM accounting** at the TTM choke point.
 
 - **No real hardware to test on in this base.** T20's design is un-testable on a real GPU. T18 (smoke) and T46 (broker e2e) can only validate the *path* through the framework, not its correctness on a real GPU. The framework must have a `gpu_backend_stub` so ATF cases can exercise the `prison_check_gpu` decision tree without a GPU.
+
+## T2 (2026-06-08) — Input fan-out audit decisions
+
+- **Output target**: `.sisyphus/drafts/t2-input-fanout.md` (per established user-instruction convention from T1), not `usr.sbin/bhyve/input-fanout.md` (per plan body).
+- **Honcho is the MCP service, not a CLI binary.** T2 used the MCP toolset (`honcho_create_session`, `honcho_create_peer`, `honcho_add_peers_to_session`, `honcho_add_messages_to_session`) with session `displayd-t2-input-fanout` and peers `sisyphus` + `mark`. The schema uses `{peer_id: "..."}` object form for `add_peers_to_session` (plain strings get auto-wrapped as `{$text: "..."}` and rejected by the validation union).
+- **Jail-fit verdict is NO.** The existing bhyve path is VM-specific at the consumer side (i8042 IRQ pulse, USB HCI interrupt). The transport + dispatcher layers are arch-agnostic and reusable; the consumers must be replaced for jails. T8 + T12 + a new per-jail consumer (`displayd_kbd_event` / `displayd_ptr_event`) are required.
+- **Did not modify or propose modifications to any source file.** Read-only as required. The plan's "Commit: NO" is correct for source; the user's request to commit the audit + evidence + notepad files is honoured.
+- **Plan checklist drift**: T2 was already marked `[x]` in the plan body when T2 work began (similar to T0/T1/T3/T4/T5/T6/T19). The audit fills in the deliverable gap.

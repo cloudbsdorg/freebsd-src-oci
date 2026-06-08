@@ -78,3 +78,34 @@
 - T19's path-correction list (§0 of the audit, §10 of this notepad) must be applied to T19/T20/T21/T22 acceptance criteria before they are worked.
 - T20's `prison_check_gpu` should be a 4-bit `PR_ALLOW_GPU_{OPEN,AUTH,MMAP,IOCTL}` family + 2 numeric params (`gpu.vram_cap`, `gpu.time_slice_us`).
 - T21's `gpu_resource` module must compile and be testable even when no GPU is present — via a `gpu_backend_stub` that returns synthesised numbers.
+
+## T2 (2026-06-08) — Input fan-out audit learnings
+
+### Patterns / conventions discovered
+
+- **The input path has a clean three-layer separation** that T8 / T12 can exploit: (1) **transport** (rfb.c reads bytes from the wire), (2) **dispatcher** (console.c:106,113 single-cb invocation), (3) **consumer** (ps2kbd_event, ps2mouse_event, umouse_event — the bhyve-side bridge to the guest). Layers 1 and 2 are arch-agnostic and reusable. Layer 3 is what changes for jails.
+- **The bhyve input path is "transport bytes → kernel pushes to guest via IRQ / endpoint"** (rfb → console → consumer → vm_isa_pulse_irq or hci_intr). The jail path is the opposite: "transport bytes → kernel writes to a per-jail buffer → jail's `/dev/kbd0` / `/dev/ums0` reads." T2 is the first task in the plan that explicitly identifies this direction reversal.
+- **All three input consumers register a single callback with a priority.** Strict `>` comparison means equal priorities keep the first registrant. The umouse at priority 10 wins over ps2mouse at priority 1 when both are registered. This is well-defined behaviour and not a bug, but it constrains the future design: a multi-instance refactor (T8) must keep the same priority semantics, just made per-instance.
+- **`input_detected` is a per-client RFB protocol flag** (rfb.c:910, 933, 950). It signals "the desktop is non-empty" to the VNC client, which prevents the client from suspending its frame requests. T11's rfb wrap must preserve this.
+- **The keysym → scancode translation happens inside `ps2kbd_event`** (ps2kbd.c:405 → ps2kbd_keysym_queue at ps2kbd.c:390). It is **bhyve-VM-specific** (PS/2 scancodes). A jail consumer that wants raw RFB keysyms (for text-input-aware jails) would not need this translation.
+- **`umouse_event` is the only consumer that reads `gc_image`** (usb_mouse.c:262, 287-288) to scale VNC pixel coords to the USB mouse's report range. The VNC coordinate scaling is specific to a single screen with a single client. A multi-display / per-jail consumer would need its own scaling.
+
+### Recurring file references for downstream tasks
+
+- `usr.sbin/bhyve/rfb.c:899,916,940` — `rfb_recv_key_msg`, `rfb_recv_client_msg`, `rfb_recv_ptr_msg` (the three transport-side dispatch sites; T11 wraps these)
+- `usr.sbin/bhyve/rfb.c:909,932,949` — `console_key_event` / `console_ptr_event` call sites; T11 must preserve these
+- `usr.sbin/bhyve/console.c:85-117` — the dispatcher + register functions; T8 owns the per-instance refactor here
+- `usr.sbin/bhyve/console.h:35-36,38-51` — the public API surface (kbd/ptr typedefs + register/event funcs); T8 extends this
+- `usr.sbin/bhyve/amd64/ps2kbd.c:394-410` — `ps2kbd_event` (the PS/2 kbd consumer; amd64-only)
+- `usr.sbin/bhyve/amd64/ps2mouse.c:372-399` — `ps2mouse_event` (the PS/2 mouse consumer; amd64-only)
+- `usr.sbin/bhyve/usb_mouse.c:256-295` — `umouse_event` (the USB mouse consumer; source is arch-agnostic but only wired on amd64 in practice)
+- `usr.sbin/bhyve/amd64/atkbdc.c:142-158,242,251,499-509,545-549` — `atkbdc_assert_kbd_intr` / `atkbdc_assert_aux_intr` / `atkbdc_event` (the bhyve-side bridge to guest IRQs 1 + 12)
+- `usr.sbin/bhyve/amd64/bhyverun_machdep.c:358` — the only call site of `atkbdc_init(ctx)` (amd64-only)
+
+### Cross-task flow
+
+- T2 verdict feeds T8 (console refactor → per-instance), T11 (rfb wrap → preserves dispatch sites), T12 (displayd module → needs per-jail consumer), T13 (pci_fbuf wire → does not need to touch input fan-out).
+- T8 cannot be worked until T3 (jail API audit) is reconciled: T3 is marked `[x]` in the plan but has no draft/evidence/checkpoint, so its actual completion state is unknown.
+- The T2 verdict **does not block T4 (transport vtable) or T5 (backend vtable)** — those can proceed because they wrap the existing dispatcher layer, which is reusable.
+- The T2 verdict **informs T12's design**: the new `displayd_kbd_event` / `displayd_ptr_event` consumers will register against the (post-T8) per-instance `console` API. The `arg` parameter will be a `struct displayd_jail_fb *` (or similar per-jail handle).
+- The T2 verdict **informs T38 (broker daemon)**: the broker will need a transport that delivers input to a per-jail consumer, not to a per-VM consumer. The transport layer (rfb.c / future bdp.c) is unchanged; the consumer layer is what changes.

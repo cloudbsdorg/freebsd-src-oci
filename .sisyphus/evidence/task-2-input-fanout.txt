@@ -1,0 +1,363 @@
+T2 Input fan-out audit - evidence (read-only recon, no source modified)
+Host: pppoe1.cloudbsd.org (FreeBSD 16.0-CURRENT src tree inspection)
+Repo: ~/git/freebsd-src-oci
+Branch: framebuffer
+Date: 2026-06-08
+Task: T2 from .sisyphus/plans/freebsd-display-abstraction.md (Wave 1, recon)
+Honcho session: displayd-t2-input-fanout  (Honcho = MCP peer-memory service)
+
+==============================================================================
+1. Branch + Honcho confirmation
+==============================================================================
+
+$ git rev-parse --abbrev-ref HEAD
+framebuffer
+
+$ git log --oneline -3
+7e4be06f5ee resume(displayd): sync T0/T1/T19 done + add notepads and checkpoints
+27610828760 audit(t19): GPU kernel subsystem recon
+8b5c92196df T1: bhyvegc API audit report
+
+==============================================================================
+2. Honcho session + peer setup (MCP service, not a CLI binary)
+==============================================================================
+
+$ command -v honcho
+(not on PATH -- the honcho "binary" is the MCP service exposed in the agent
+ toolset: honcho_create_session, honcho_create_peer, honcho_add_peers_to_session,
+ honcho_add_messages_to_session, honcho_chat, etc.  No CLI needed for T2.)
+
+Honcho session: displayd-t2-input-fanout  (created)
+Honcho peers: sisyphus, mark  (added to session)
+
+==============================================================================
+3. Registrant inventory (console_kbd_register / console_ptr_register)
+==============================================================================
+
+$ grep -rln "console_kbd_register\|console_ptr_register" usr.sbin/bhyve/
+usr.sbin/bhyve/amd64/ps2kbd.c
+usr.sbin/bhyve/amd64/ps2mouse.c
+usr.sbin/bhyve/console.c
+usr.sbin/bhyve/console.h
+usr.sbin/bhyve/usb_mouse.c
+
+$ grep -n "console_kbd_register\|console_ptr_register" \
+    usr.sbin/bhyve/amd64/ps2kbd.c \
+    usr.sbin/bhyve/amd64/ps2mouse.c \
+    usr.sbin/bhyve/usb_mouse.c
+usr.sbin/bhyve/amd64/ps2kbd.c:502:    console_kbd_register(ps2kbd_event, sc, 1);
+usr.sbin/bhyve/amd64/ps2mouse.c:415:   console_ptr_register(ps2mouse_event, sc, 1);
+usr.sbin/bhyve/usb_mouse.c:317:        console_ptr_register(umouse_event, sc, 10);
+
+Three registrants total.  ps2 at priority 1, usb_mouse at priority 10.
+Strict `>` comparison in console.c:88,98; equal-priority ties keep the FIRST
+registrant (second is silently dropped).
+
+==============================================================================
+4. Dispatcher inventory (who calls console_key_event / console_ptr_event?)
+==============================================================================
+
+$ grep -rln "console_key_event\|console_ptr_event" usr.sbin/bhyve/
+usr.sbin/bhyve/console.c
+usr.sbin/bhyve/console.h
+usr.sbin/bhyve/rfb.c
+
+$ grep -n "console_key_event\|console_ptr_event" usr.sbin/bhyve/rfb.c \
+                                                   usr.sbin/bhyve/console.c \
+                                                   usr.sbin/bhyve/console.h
+usr.sbin/bhyve/rfb.c:909:  console_key_event(key_msg.down, htonl(key_msg.sym), htonl(0));
+usr.sbin/bhyve/rfb.c:932:  console_key_event((int)extkey_msg.down, htonl(extkey_msg.sym), htonl(extkey_msg.code));
+usr.sbin/bhyve/rfb.c:949:  console_ptr_event(ptr_msg.button, htons(ptr_msg.x), htons(ptr_msg.y));
+usr.sbin/bhyve/console.c:106: console_key_event(int down, uint32_t keysym, uint32_t keycode)
+usr.sbin/bhyve/console.c:113: console_ptr_event(uint8_t button, int x, int y)
+usr.sbin/bhyve/console.h:48:  void console_key_event(int down, uint32_t keysym, uint32_t keycode);
+usr.sbin/bhyve/console.h:51:  void console_ptr_event(uint8_t button, int x, int y);
+
+Only the RFB transport produces input events.  No other transport in the
+tree emits console events.
+
+==============================================================================
+5. Console dispatcher implementation (file-static singleton state)
+==============================================================================
+
+$ sed -n '85,117p' usr.sbin/bhyve/console.c
+console_kbd_register(kbd_event_func_t event_cb, void *arg, int pri)
+{
+    if (pri > console.kbd_priority) {       // STRICT >, not >=
+        console.kbd_event_cb = event_cb;
+        console.kbd_arg = arg;
+        console.kbd_priority = pri;
+    }
+}
+
+console_ptr_register(ptr_event_func_t event_cb, void *arg, int pri)
+{
+    if (pri > console.ptr_priority) {       // STRICT >, not >=
+        console.ptr_event_cb = event_cb;
+        console.ptr_arg = arg;
+        console.ptr_priority = pri;
+    }
+}
+
+console_key_event(int down, uint32_t keysym, uint32_t keycode)
+{
+    if (console.kbd_event_cb)
+        (*console.kbd_event_cb)(down, keysym, keycode, console.kbd_arg);
+}
+
+console_ptr_event(uint8_t button, int x, int y)
+{
+    if (console.ptr_event_cb)
+        (*console.ptr_event_cb)(button, x, y, console.ptr_arg);
+}
+
+SINGLE-CONSUMER DISPATCH.  No fan-out.  No unregister.  No destroy.
+
+==============================================================================
+6. Consumer implementations (the 3 registered callbacks)
+==============================================================================
+
+--- ps2kbd_event (ps2kbd.c:393-410) ---
+static void
+ps2kbd_event(int down, uint32_t keysym, uint32_t keycode, void *arg)
+{
+    struct ps2kbd_softc *sc = arg;
+    int fifo_full;
+
+    pthread_mutex_lock(&sc->mtx);
+    if (!sc->enabled) {
+        pthread_mutex_unlock(&sc->mtx);
+        return;
+    }
+    fifo_full = sc->fifo.num == PS2KBD_FIFOSZ;
+    ps2kbd_keysym_queue(sc, down, keysym, keycode);   // -> fifo_put(sc, code)
+    pthread_mutex_unlock(&sc->mtx);
+
+    if (!fifo_full)
+        atkbdc_event(sc->atkbdc_sc, 1);                // -> vm_isa_pulse_irq IRQ 1
+}
+
+--- ps2mouse_event (ps2mouse.c:371-399) ---
+static void
+ps2mouse_event(uint8_t button, int x, int y, void *arg)
+{
+    struct ps2mouse_softc *sc = arg;
+
+    pthread_mutex_lock(&sc->mtx);
+    movement_update(sc, x, y);
+    sc->status &= ~(PS2M_STS_LEFT_BUTTON |
+        PS2M_STS_RIGHT_BUTTON | PS2M_STS_MID_BUTTON);
+    if (button & (1 << 0)) sc->status |= PS2M_STS_LEFT_BUTTON;
+    if (button & (1 << 1)) sc->status |= PS2M_STS_MID_BUTTON;
+    if (button & (1 << 2)) sc->status |= PS2M_STS_RIGHT_BUTTON;
+
+    if ((sc->status & PS2M_STS_ENABLE_DEV) == 0 || !sc->ctrlenable) {
+        pthread_mutex_unlock(&sc->mtx);
+        return;                                       // no data reporting
+    }
+
+    movement_get(sc);
+    pthread_mutex_unlock(&sc->mtx);
+
+    if (sc->fifo.num > 0)
+        atkbdc_event(sc->atkbdc_sc, 0);                // -> vm_isa_pulse_irq IRQ 12
+}
+
+--- umouse_event (usb_mouse.c:256-295) ---
+static void
+umouse_event(uint8_t button, int x, int y, void *arg)
+{
+    struct umouse_softc *sc;
+    struct bhyvegc_image *gc;
+
+    gc = console_get_image();
+    if (gc == NULL) return;                            // not ready
+
+    sc = arg;
+
+    pthread_mutex_lock(&sc->mtx);
+
+    sc->um_report.buttons = 0;
+    sc->um_report.z = 0;
+    if (button & 0x01) sc->um_report.buttons |= 0x01;  // left
+    if (button & 0x02) sc->um_report.buttons |= 0x04;  // middle
+    if (button & 0x04) sc->um_report.buttons |= 0x02;  // right
+    if (button & 0x8)  sc->um_report.z = 1;
+    if (button & 0x10) sc->um_report.z = -1;
+
+    sc->um_report.x = MOUSE_MAX_X * x / gc->width;     // scale to USB HID range
+    sc->um_report.y = MOUSE_MAX_Y * y / gc->height;
+    sc->newdata = 1;
+    pthread_mutex_unlock(&sc->mtx);
+
+    pthread_mutex_lock(&sc->ev_mtx);
+    sc->hci->hci_intr(sc->hci, UE_DIR_IN | UMOUSE_INTR_ENDPT);
+    pthread_mutex_unlock(&sc->ev_mtx);
+}
+
+==============================================================================
+7. atkbdc_event path (PS/2 -> i8042 IRQ)
+==============================================================================
+
+$ sed -n '499,509p' usr.sbin/bhyve/amd64/atkbdc.c
+void
+atkbdc_event(struct atkbdc_softc *sc, int iskbd)
+{
+    pthread_mutex_lock(&sc->mtx);
+
+    if (iskbd)
+        atkbdc_kbd_poll(sc);
+    else
+        atkbdc_aux_poll(sc);
+    pthread_mutex_unlock(&sc->mtx);
+}
+
+$ sed -n '142,158p' usr.sbin/bhyve/amd64/atkbdc.c
+atkbdc_assert_kbd_intr(struct atkbdc_softc *sc)
+{
+    if (!sc->kbd.irq_active) {
+        sc->kbd.irq_active = true;
+        vm_isa_pulse_irq(sc->ctx, sc->kbd.irq, sc->kbd.irq);
+    }
+}
+
+atkbdc_assert_aux_intr(struct atkbdc_softc *sc)
+{
+    if (!sc->aux.irq_active) {
+        sc->aux.irq_active = true;
+        vm_isa_pulse_irq(sc->ctx, sc->aux.irq, sc->aux.irq);
+    }
+}
+
+$ sed -n '60,65p' usr.sbin/bhyve/amd64/atkbdc.c
+#define KBD_DEV_IRQ   1
+#define AUX_DEV_IRQ   12
+
+# atkbdc_init reserves the IRQs:
+$ sed -n '545,550p' usr.sbin/bhyve/amd64/atkbdc.c
+pci_irq_reserve(KBD_DEV_IRQ);
+sc->kbd.irq = KBD_DEV_IRQ;
+pci_irq_reserve(AUX_DEV_IRQ);
+sc->aux.irq = AUX_DEV_IRQ;
+
+==============================================================================
+8. Architecture coverage (amd64 vs aarch64 vs riscv)
+==============================================================================
+
+$ find usr.sbin/bhyve -name "bhyverun_machdep.c"
+usr.sbin/bhyve/aarch64/bhyverun_machdep.c
+usr.sbin/bhyve/amd64/bhyverun_machdep.c
+usr.sbin/bhyve/riscv/bhyverun_machdep.c
+
+$ grep -n "atkbdc\|ps2\|usb_mouse" \
+    usr.sbin/bhyve/amd64/bhyverun_machdep.c \
+    usr.sbin/bhyve/aarch64/bhyverun_machdep.c \
+    usr.sbin/bhyve/riscv/bhyverun_machdep.c
+usr.sbin/bhyve/amd64/bhyverun_machdep.c:358:  atkbdc_init(ctx);
+
+=> Only amd64 initializes the i8042 PS/2 controller.  aarch64 and riscv
+   have no PS/2 emulation (bhyve on those arches relies on virtio-input
+   or guest-side drivers).
+=> The `atkbdc_event -> vm_isa_pulse_irq(sc->ctx, ...)` path requires a
+   bhyve VM context (struct vmctx *).  Jails have no vmctx.
+
+==============================================================================
+9. rfb.c transport dispatchers (the producers)
+==============================================================================
+
+$ sed -n '898,953p' usr.sbin/bhyve/rfb.c
+static int
+rfb_recv_key_msg(struct rfb_softc *rc, int cfd)
+{
+    struct rfb_key_msg key_msg;
+    int len;
+
+    len = stream_read(cfd, (uint8_t *)&key_msg + 1,
+        sizeof(key_msg) - 1);
+    if (len <= 0)
+        return (-1);
+
+    console_key_event(key_msg.down, htonl(key_msg.sym), htonl(0));
+    rc->input_detected = true;
+
+    return (0);
+}
+
+static int
+rfb_recv_client_msg(struct rfb_softc *rc, int cfd)
+{
+    ...
+    if (client_msg.subtype == RFB_CLIENTMSG_EXT_KEYEVENT) {
+        ...
+        console_key_event((int)extkey_msg.down, htonl(extkey_msg.sym),
+                          htonl(extkey_msg.code));
+        rc->input_detected = true;
+    }
+    return (0);
+}
+
+static int
+rfb_recv_ptr_msg(struct rfb_softc *rc, int cfd)
+{
+    struct rfb_ptr_msg ptr_msg;
+    int len;
+
+    len = stream_read(cfd, (uint8_t *)&ptr_msg + 1, sizeof(ptr_msg) - 1);
+    if (len <= 0)
+        return (-1);
+
+    console_ptr_event(ptr_msg.button, htons(ptr_msg.x), htons(ptr_msg.y));
+    rc->input_detected = true;
+
+    return (0);
+}
+
+Three dispatch sites, all in rfb.c.  All set rc->input_detected = true,
+which is the per-client "non-empty desktop" flag for the RFB protocol.
+
+==============================================================================
+10. console.h typedefs and public API
+==============================================================================
+
+$ sed -n '34,52p' usr.sbin/bhyve/console.h
+typedef void (*fb_render_func_t)(struct bhyvegc *gc, void *arg);
+typedef void (*kbd_event_func_t)(int down, uint32_t keysym, uint32_t keycode, void *arg);
+typedef void (*ptr_event_func_t)(uint8_t mask, int x, int y, void *arg);
+
+void console_init(int w, int h, void *fbaddr);
+void console_set_fbaddr(void *fbaddr);
+struct bhyvegc_image *console_get_image(void);
+
+void console_fb_register(fb_render_func_t render_cb, void *arg);
+void console_refresh(void);
+
+void console_kbd_register(kbd_event_func_t event_cb, void *arg, int pri);
+void console_key_event(int down, uint32_t keysym, uint32_t keycode);
+
+void console_ptr_register(ptr_event_func_t event_cb, void *arg, int pri);
+void console_ptr_event(uint8_t button, int x, int y);
+
+No console_destroy.  No console_*_unregister.  Singleton-only.
+
+==============================================================================
+11. Verdict
+==============================================================================
+
+Verdict (one line):
+  Existing bhyve path is sufficient for amd64 bhyve VMs (PS/2 + USB mouse),
+  and arch-agnostic at the transport + dispatcher level, but is INSUFFICIENT
+  for jails: the consumer side (PS/2 i8042, USB HCI) is VM-specific.  T8's
+  per-instance console refactor + T12's displayd module + a new per-jail
+  consumer registered against the instance are required to extend input to
+  jails.  The transport and dispatcher layers do not need to change.
+
+Function table (3 registered consumers):
+  ps2kbd_event      (ps2kbd.c:394,   pri 1)  -> atkbdc_event -> vm_isa_pulse_irq IRQ 1   (amd64)
+  ps2mouse_event    (ps2mouse.c:372, pri 1)  -> atkbdc_event -> vm_isa_pulse_irq IRQ 12  (amd64)
+  umouse_event      (usb_mouse.c:257, pri 10) -> hci->hci_intr(...) -> USB endpoint IRQ  (all arch)
+
+Jail-fit verdict: NO.  Existing path is bhyve-VM-specific.  See audit §6.
+
+Commit: NO (read-only).  Per request, commit the audit + evidence + notepad
+files only (no source-tree changes).  Commit message:
+  audit(t2): input fan-out audit
