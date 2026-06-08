@@ -1,0 +1,23 @@
+{
+  "last_completed_task": "T1",
+  "current_task": "T1",
+  "completed_tasks": ["T1"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T1",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-1-bhyvegc-audit.txt",
+    "manifest_run_id": "2026-06-06T00:36:00Z"
+  },
+  "next_action": "T1 is read-only recon (no test runner). Verdict recorded in .sisyphus/drafts/t1-bhyvegc-audit.md: 'bhyvegc is pure pixel manipulation, safe for non-VM use. 0 hidden couplings.' Unblocks T8 (console refactor).",
+  "deliverables": {
+    "report": ".sisyphus/drafts/t1-bhyvegc-audit.md",
+    "evidence": ".sisyphus/evidence/task-1-bhyvegc-audit.txt",
+    "commit": "8b5c92196df T1: bhyvegc API audit report (branch framebuffer, freebsd-src-oci)"
+  },
+  "verdict": {
+    "couplings_found": 0,
+    "verdict_line": "bhyvegc is pure pixel manipulation, safe for non-VM use.",
+    "function_table_entries": 13
+  }
+}

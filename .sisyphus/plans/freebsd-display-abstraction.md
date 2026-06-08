@@ -7659,7 +7659,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 > **The "test the templates first" task.** The plan documents 121 shell test files, 5+ major shell scripts, 80+ sysctls, 4 kernel modules, and many other templating patterns. If any of these templates don't work on FreeBSD 16, every task that uses them will fail. So before Wave 1, we validate the most foundational templates (shell patterns, build system, test framework) on a real FreeBSD 16 environment. This is the highest-ROI test in the plan — it catches mistakes once, at the start, rather than 126 times later.
 
-- [ ] 0. Validate FreeBSD shell + build + test patterns (template-first test)
+- [x] 0. Validate FreeBSD shell + build + test patterns (template-first test)
 
   **What to do**:
   1. **Shell pattern validation** (the user's concern). On a fresh FreeBSD 16 VM:
@@ -7802,7 +7802,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ### Wave 1 — Recon + design (all parallel)
 
-- [ ] 1. Audit bhyvegc for VMM coupling
+- [x] 1. Audit bhyvegc for VMM coupling
 
   **What to do**:
   - Read `usr.sbin/bhyve/bhyvegc.c` and `usr.sbin/bhyve/bhyvegc.h` end-to-end (430+ lines).
@@ -7878,7 +7878,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 2. Verify input fan-out (who consumes `console_key_event` / `console_ptr_event`?)
+- [x] 2. Verify input fan-out (who consumes `console_key_event` / `console_ptr_event`?)
 
   **What to do**:
   - Grep the entire tree for callers of `console_kbd_register` and `console_ptr_register`.
@@ -7956,7 +7956,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 3. Audit FreeBSD jail parameter API (the surface for `allow.fbuf` + `gpu.*`)
+- [x] 3. Audit FreeBSD jail parameter API (the surface for `allow.fbuf` + `gpu.*`)
 
   **What to do**:
   - Read `sys/kern/kern_jail.c` (4000+ lines) — the `kparams` table, the `osd_jail_register` call sites, the `PRISON_FLAG_*` defines, `prison_set_allow`, `prison_set_allow_locked`.
@@ -8036,7 +8036,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 4. Draft `display_transport.h` vtable
+- [x] 4. Draft `display_transport.h` vtable
 
   **What to do**:
   - Create `usr.sbin/bhyve/display_transport.h`.
@@ -8109,7 +8109,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 5. Draft `display_backend.h` vtable
+- [x] 5. Draft `display_backend.h` vtable
 
   **What to do**:
   - Create `usr.sbin/bhyve/display_backend.h`.
@@ -8177,7 +8177,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 6. Draft the `fbuf` jail param set + `PRISON_FLAG_PRISON_FBUF` spec
+- [x] 6. Draft the `fbuf` jail param set + `PRISON_FLAG_PRISON_FBUF` spec
 
   **What to do**:
   - Write `jail-fbuf-params.md` specifying:
@@ -8258,7 +8258,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 19. Audit GPU kernel subsystem (DRM, devfs, nvidia presence)
+- [x] 19. Audit GPU kernel subsystem (DRM, devfs, nvidia presence)
 
   **What to do**:
   - Read `sys/dev/drm/` directory structure. Identify `drm_open`, `drm_gem_mmap`, `drm_ioctl` as the hook points.
@@ -8336,7 +8336,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ### Wave 2 — Core abstraction (all parallel)
 
-- [ ] 7. Implement `display_transport.{h,c}` registry
+- [x] 7. Implement `display_transport.{h,c}` registry
 
   **What to do** (TDD first):
   1. **Write the test first**: `tests/sys/bhyve/atf_transport.c` — ATF test that registers two mock transports (`"mock-rfb"`, `"mock-rdp"`), looks each up by name, calls `init`, asserts the handle is non-NULL. Add a test for `display_transport_init_by_name("nonexistent")` returning `NULL`. Add a test for `display_transport_shutdown_all` calling each registered shutdown. Run `kyua test` — **must fail (no implementation yet)**.
@@ -8399,7 +8399,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 8. Refactor `console.{c,h}` to multi-instance + caller-provided fb
+- [x] 8. Refactor `console.{c,h}` to multi-instance + caller-provided fb
 
   **What to do** (TDD first):
   1. Write `tests/sys/bhyve/atf_console.c` — tests for: (a) creating a console with caller-provided `mmap`'d fb (no VMM coupling), (b) registering a render callback, (c) `console_get_image()` returns valid dimensions, (d) `console_set_fbaddr` swaps the fb pointer, (e) `console_fb_register` priority ordering, (f) two consoles coexist (multi-instance). Run tests — fail.
@@ -8558,7 +8558,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 9. Add `fbuf` jail param registration in `kern_jail.c`
+- [x] 9. Add `fbuf` jail param registration in `kern_jail.c`
 
   **What to do** (TDD first):
   1. Write `tests/sys/jail/atf_fbuf_params.c` — tests for: (a) `jail_set` with `allow.fbuf=1` succeeds when the kernel module is loaded, (b) `allow.fbuf=0` (default) leaves the flag unset in the prison struct, (c) `fbuf.nokbd=1` sets the nokbd bit, (d) `fbuf.nomouse=1` sets the nomouse bit, (d2) `fbuf.nohid=1` sets the nohid bit, (d3) `fbuf.allowhid=1` sets the allowhid bit (rejected with EINVAL when `allow.fbuf=0`), (e) `fbuf.width=800` records 800 in the prison, (f) `fbuf.height=600` records 600, (g) `fbuf.transport="rfb"` records "rfb", (h) `fbuf.nokbd=invalid` returns EINVAL, (i) unknown key `fbuf.bogus=1` returns EINVAL, (j) `fbuf.nohid=1` AND `fbuf.nokbd=0` produces no kbd (nohid is stricter). Run tests — fail.
@@ -8628,7 +8628,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 10. Add `PRISON_FLAG_PRISON_FBUF` + `prison_check_fbuf()` helper
+- [x] 10. Add `PRISON_FLAG_PRISON_FBUF` + `prison_check_fbuf()` helper
 
   **What to do** (TDD first):
   1. Write `tests/sys/jail/atf_fbuf_flag.c` — tests for: (a) `prison_check_fbuf(pr)` returns 0 when `allow.fbuf` is unset, (b) returns 1 when set, (c) the flag bit is preserved across `jail_set` / `jail_get` round-trips, (d) child jails inherit the flag from parent unless overridden. Run tests — fail.
@@ -8689,7 +8689,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 20. Design `gpu_resource` kernel framework
+- [x] 20. Design `gpu_resource` kernel framework
 
   **What to do**:
   1. Read `gpu-subsystem-audit.md` (T19) and `jail-param-recipe.md` (T3).
@@ -8748,7 +8748,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 22. Implement preflight check framework (built-in `sys/kern/subr_preflight.c` + loadable shim `sys/modules/preflight/`)
+- [x] 22. Implement preflight check framework (built-in `sys/kern/subr_preflight.c` + loadable shim `sys/modules/preflight/`)
 
   **What to do** (TDD first):
   1. Write `tests/sys/preflight/atf_preflight.c` — tests for: (a) `preflight_register("test.pass", ..., BLOCKING, NULL)` then `preflight_run_all` returns 0 and the report has the entry, (b) a check that returns an error code surfaces it in the report, (c) BLOCKING check failure short-circuits the runner with that error, (d) WARNING check failure logs but doesn't short-circuit, (e) deps are honored (B runs after A), (f) `preflight_unregister` removes a check, (g) duplicate name registration returns EEXIST, (h) `preflight_check_fbuf_allowhid_consistency` BLOCKING check: when `fbuf.allowhid=1` and `security.policy.fbuf.allowhid=0`, returns EINVAL with message "raw HID denied by host policy" (see §4.2 "HID-level controls"). Run tests — fail.
@@ -8821,7 +8821,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 24. Design transport security model + config keys
+- [x] 24. Design transport security model + config keys
 
   **What to do**:
   1. Read the "Transport security" section in this plan.
@@ -8880,7 +8880,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 27. Wire transport security into `display_transport_init` signature
+- [x] 27. Wire transport security into `display_transport_init` signature
 
   **What to do** (TDD first):
   1. Write `tests/sys/bhyve/atf_transport_security.c` — tests for: (a) `display_transport_init` with NULL `security` falls back to defaults (`tls_required`, all defaults), (b) `tls=disabled` skips TLS handshake, (c) `legacy=1` requires explicit opt-in, (d) `audit=0` silences audit logs, (e) `timeout.seconds=0` disables timeout. Run tests — fail.
@@ -8940,7 +8940,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ### Wave 3 — Wire-up (parallel where deps allow)
 
-- [ ] 11. Wrap `rfb.c` as a registered `display_transport`
+- [x] 11. Wrap `rfb.c` as a registered `display_transport`
 
   **What to do** (TDD first): write `tests/sys/bhyve/atf_rfb_transport.c` — register a mock RFB transport, call its `init`, assert handle + threading invariants. Run — fail. Wrap `rfb.c` internals: add `static const struct display_transport rfb_transport = { .name = "rfb", .init = rfb_transport_init, .shutdown = rfb_transport_shutdown };` and a constructor that calls `display_transport_register(&rfb_transport)` at module load. The old `rfb_init` becomes a thin shim that calls `display_transport_init_by_name("rfb", ...)` and discards the handle. Run — pass.
 
@@ -8983,7 +8983,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 12. Implement `sys/modules/displayd/` kernel module
+- [x] 12. Implement `sys/modules/displayd/` kernel module
 
   **What to do** (TDD first): write `tests/sys/jail/atf_displayd.c` — tests for: (a) creating a jail with `allow.fbuf` registers a `console` instance, (b) kbd/mouse auto-attached, (c) `fbuf.nokbd=1` skips kbd registration, (c2) `fbuf.nohid=1` skips BOTH kbd and mouse registration (nohid is stricter), (c3) `fbuf.allowhid=1` creates `/dev/uhid0` in the jail (and is rejected with EINVAL when `allow.fbuf=0`), (c4) `fbuf.allowhid=1` is denied when `security.fbuf.allowhid=0` (host policy wins), (d) console is destroyed on jail_remove, (e) the fb is kernel-managed (not VMM). Run — fail. Implement `sys/modules/displayd/displayd.c` (~400 lines): module init, `jail_attach` hook, `console_create` call, kbd/ptr registration via `console_kbd_register` / `console_ptr_register`, fb allocation (kmalloc + zero), HID policy: check `fbuf.allowhid` AND `security.fbuf.allowhid`; if both true, attach `/dev/uhid*` to jail's devfs (mode 0660, owner `root:_displayd`); teardown on jail_remove. Run — pass.
 
@@ -9089,7 +9089,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 13. Wire `pci_fbuf.c` to `display_transport_init` (with legacy `rfb=` compat)
+- [x] 13. Wire `pci_fbuf.c` to `display_transport_init` (with legacy `rfb=` compat)
 
   **What to do** (TDD first): write `tests/sys/bhyve/atf_pci_fbuf.c` — for each legacy config string (`rfb=127.0.0.1:5900`, `tcp=127.0.0.1:5900`, `unix:/tmp/v.sock`, `vga=on|io|off`, `w=800`, `h=600`, `password=foo`, `wait=true`), assert the parsed `struct display_transport_init_args` matches the expected form. Run — fail. Modify `pci_fbuf_parse_config`: if the `rfb=` (or `tcp=`) key is present, build the args as `transport="rfb", security=legacy, host=..., port=..., tls=optional` and log a `auth.notice` deprecation warning. If the `transport=` key is present, parse it directly (the new form). Run — pass.
 
@@ -9133,7 +9133,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 14. Add `rdp.c` stub + register
+- [x] 14. Add `rdp.c` stub + register
 
   **What to do**: create `usr.sbin/bhyve/rdp.{h,c}`. Define `static const struct display_transport rdp_transport = { .name = "rdp", .init = rdp_transport_init, .shutdown = rdp_transport_shutdown };`. `rdp_transport_init` returns `-ENOSYS` with `warnx("RDP transport not yet implemented; see omo-compat workstream")`. Add a constructor that calls `display_transport_register(&rdp_transport)`. Add `rdp.c` and `rdp.h` to `usr.sbin/bhyve/Makefile`. No TDD needed (the stub is a one-liner that always returns an error).
 
@@ -9176,7 +9176,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 15. Add jail-side example + `tests/sys/jail/fbuf/`
+- [x] 15. Add jail-side example + `tests/sys/jail/fbuf/`
 
   **What to do**: create `contrib/jail-console-example/` with a Makefile, a small C program that calls `console_create(1024, 768, malloc_fb(), CONSOLE_FB_RAW)`, registers a render callback, and exits. Add `tests/sys/jail/fbuf/` shell harness (ATF) that starts a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts the module is loaded, and tears down. The harness must cover **all fbuf param combinations** (default, `nokbd=1`, `nomouse=1`, `nohid=1`, `allowhid=1` with host policy on/off). Add a second example `contrib/jail-raw-hid-example/` showing a program that opens `/dev/uhid0` and writes a HID report (only works when `fbuf.allowhid=1` + `security.policy.fbuf.allowhid=1`). Add to `tests/sys/jail/Makefile`.
 
@@ -9220,7 +9220,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 21. Add gpu jail params + implement `gpu_resource` kernel module
+- [x] 21. Add gpu jail params + implement `gpu_resource` kernel module
 
   **What to do** (TDD first): write `tests/sys/gpu/atf_gpu_resource.c` — tests for: (a) percentage parser: `"50%"` → absolute, `"16384"` → 16384, `"200%"` → ERANGE, `"abc"` → EINVAL, (b) `gpu_resource_create(jid, device_id, ...)` initializes a resource, (c) strict mode returns ENXIO when no GPU, (d) override creates a no-backend resource, (e) `gpu.cores` is capped at `per_consumer_max`, (f) `host_gpu_quota` enforces `host_reserve`, (g) eager policy reserves VRAM at start, (h) lazy policy records without reserving, (i) the **stub backend** (`gpu_stub`) registers automatically when no real backend is present, returns configurable capacity (e.g. `stub_capacity=10496`), and the framework uses it for the tests. Run — fail. Implement `sys/modules/gpu_resource/gpu_resource.c` + `sys/sys/gpu_resource.h` per the T20 design. Register the `allow.gpu` jail param + `gpu.cores`, `gpu.memory`, `gpu.scheduler`, `gpu.memory.policy`, `allow.gpu.strict`. Hook `gpu_resource_create` into `kern_jail_set` after the param table is processed. **Mandatory**: include a stub backend at `sys/modules/gpu_resource/gpu_stub.c` that implements the `gpu_backend` vtable with `total_capacity`, `max_resolution`, `scheduler=wfq`, and a sysctl `hw.gpu.0.stub_capacity` (default 10496) so the framework is testable on the **VM (no real GPU)**. The stub is registered by default and unregistered when a real vendor backend registers. Run — pass.
 
@@ -9325,7 +9325,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 23. Add 11 shipped preflight checks
+- [x] 23. Add 11 shipped preflight checks
 
   **What to do** (TDD first): write `tests/sys/preflight/atf_shipped_checks.c` — for each of the 11 checks, a test that: (a) registers a mock backend / transport / device, (b) calls the check via the preflight runner, (c) asserts the expected PASS/FAIL/WARNING. Run — fail. Implement each check as `preflight_register("preflight.X.Y", check_fn, severity, deps)` per the table in the Preflight section. Run — pass.
 
@@ -9368,7 +9368,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 25. Implement VeNCrypt TLS in `rfb.c` (OpenSSL 1.1.1 LTS minimum, 3.0+ recommended; TLS 1.3 only by default)
+- [x] 25. Implement VeNCrypt TLS in `rfb.c` (OpenSSL 1.1.1 LTS minimum, 3.0+ recommended; TLS 1.3 only by default)
 
   **What to do** (TDD first): write `tests/sys/bhyve/atf_vencrypt.c` — tests for: (a) handshake with TLS-capable client succeeds, (b) handshake with plaintext-only client is refused when `tls=required`, (c) `legacy=1` accepts plaintext, (d) `tls=optional` accepts both, (e) self-signed cert is loaded and served, (f) certbot-discovered cert is loaded, (g) Capsicum rights are tightened after TLS handshake. Run — fail. Implement VeNCrypt (RFB security types 19, 20) in `rfb.c`. Use OpenSSL `SSL_CTX` + `BIO`. Add `START_TLS` after the version exchange. Run — pass.
 
@@ -9411,7 +9411,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 26. Add rate limiting + idle timeout + audit logging to `rfb.c`
+- [x] 26. Add rate limiting + idle timeout + audit logging to `rfb.c`
 
   **What to do** (TDD first): write `tests/sys/bhyve/atf_rfb_hardening.c` — tests for: (a) 6th auth attempt from the same IP within 60s is refused, (b) idle connection for > timeout.seconds is closed, (c) every connect / auth-fail / disconnect emits a syslog entry with structured fields. Run — fail. Implement: per-IP token bucket (or just a counter) in `rfb_thr`; `select` timeout for idle; `syslog(LOG_AUTH|LOG_NOTICE, ...)` with `%s %s %s` field formatting. Run — pass.
 
@@ -9454,7 +9454,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 28. Add transport security preflight checks
+- [x] 28. Add transport security preflight checks
 
   **What to do** (TDD first): write `tests/sys/preflight/atf_transport_preflight.c` — tests for: (a) `tls_cert_readable` passes when cert file exists and is 0600, (b) fails when file is 0644 world-readable, (c) `tls_key_permissions` fails when key is 0644, (d) `legacy_used` returns WARNING when `transport.legacy=1` is set, (e) the checks consult the host policy layer (T35) and apply stricter-wins. Run — fail. Implement the checks per the table in the Transport security section. Run — pass.
 
@@ -9495,7 +9495,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 30. Implement cert loader + discovery + self-signed auto-gen (PEM/DER/PKCS#12)
+- [x] 30. Implement cert loader + discovery + self-signed auto-gen (PEM/DER/PKCS#12)
 
   **What to do** (TDD first): write `tests/sys/bhyve/atf_cert_loader.c` — tests for each of the 6 self-signed auto-gen cases listed in the design section, plus format auto-detect (PEM, DER, PKCS#12), password prompt (mock), password file, password env var, password refused on CLI, dir discovery (`fullchain.pem` + `privkey.pem`), file-vs-dir heuristic, sibling key pairing. Run — fail. Implement `usr.sbin/bhyve/cert_loader.c` per the discovery policy in the design section. Use OpenSSL `PEM_read_bio_X509`, `d2i_X509_bio`, `PKCS12_parse`. Auto-gen uses `X509_new` + `EVP_PKEY_new` + `X509_set_pubkey` + `X509_sign`. Run — pass.
 
@@ -9538,7 +9538,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 31. Add kqueue hot-reload for certbot-style cert renewal
+- [x] 31. Add kqueue hot-reload for certbot-style cert renewal
 
   **What to do** (TDD first): write `tests/sys/bhyve/atf_cert_reload.c` — tests for: (a) `kqueue` watches the cert file path, (b) on `NOTE_ATTRIB` the loader re-parses the cert+key, (c) atomic swap of `SSL_CTX` doesn't drop in-flight connections, (d) `SIGHUP` triggers manual reload, (e) reload is logged with cert subject + issuer + expiry. Run — fail. Implement the watcher thread that `kqueue()`s the cert path. On `NOTE_ATTRIB`, re-parse + build new `SSL_CTX` + atomic swap. On `SIGHUP`, same. Run — pass.
 
@@ -9581,7 +9581,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 32. Add SNI support (`sni_dir`, `default_cert`, servername callback)
+- [x] 32. Add SNI support (`sni_dir`, `default_cert`, servername callback)
 
   **What to do** (TDD first): write `tests/sys/bhyve/atf_sni.c` — tests for: (a) `sni_dir` is scanned at startup, (b) each `<host>.pem` + `<host>.key` is loaded into a per-host `SSL_CTX`, (c) `SSL_CTX_set_tlsext_servername_callback` returns the right context for the requested hostname, (d) unknown hostname falls back to `default_cert`, (e) empty `sni_dir` triggers self-signed default cert (per T30). Run — fail. Implement the SNI callback. Run — pass.
 
@@ -9624,7 +9624,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 33. Add cert format/chain/expiry preflight checks
+- [x] 33. Add cert format/chain/expiry preflight checks
 
   **What to do** (TDD first): write `tests/sys/preflight/atf_cert_preflight.c` — tests for each of the 6 cert preflight checks (`tls_cert_format`, `tls_key_match`, `tls_chain_valid`, `tls_not_expired`, `tls_hostname`, `sni_files`). Run — fail. Implement them. Run — pass.
 
@@ -9666,7 +9666,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 35. Implement host policy sysctls + enforcement layer (creates `security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*` OID subtrees via `sysctl_ctx_init` / `SYSCTL_DECL`)
+- [x] 35. Implement host policy sysctls + enforcement layer (creates `security.policy.*`, `security.transport.*`, `security.preflight.*`, `security.display.*` OID subtrees via `sysctl_ctx_init` / `SYSCTL_DECL`)
 
   **What to do** (TDD first): write `tests/sys/policy/atf_host_policy.c` — tests for: (a) `security.policy.tls_required=1` blocks legacy plaintext, (b) `security.policy.legacy_allowed=0` blocks `transport.legacy=1`, (c) host rate_limit default overrides consumer's looser value, (d) host `self_signed_allowed=0` makes preflight `tls_self_signed_in_use` BLOCKING, (e) policy precedence: host > consumer (stricter wins), (f) sysctl can be changed at runtime and takes effect on next start, (g) `policy_quickstart` manpage parses example sysctl commands. Run — fail. Add sysctls under `security.policy.*` and `security.transport.*` per the table. Add a `policy_resolve(host, consumer)` helper in `sys/kern/`. Hook into T22, T28, T33. Run — pass.
 
@@ -9778,7 +9778,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ### Wave 4 — Build wiring, docs, smoke
 
-- [ ] 16. Build wiring (Makefiles)
+- [x] 16. Build wiring (Makefiles)
 
   **What to do**: update `usr.sbin/bhyve/Makefile` to add `display_transport.c`, `display_backend.c`, `rdp.c`, `cert_loader.c`. Update `sys/modules/Makefile` to add `displayd`, `preflight`, `gpu_resource`. Update `sys/conf/files` to pull in `subr_preflight.c`, `gpu_resource.c`. Verify each builds clean.
 
@@ -9821,7 +9821,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 17. Documentation (`jail.conf.5`, `bhyve.8`, `display-abstraction.md`)
+- [x] 17. Documentation (`jail.conf.5`, `bhyve.8`, `display-abstraction.md`)
 
   **What to do**: update `share/man/man5/jail.conf.5` with the new params (`allow.fbuf`, `fbuf.nokbd`, `fbuf.nomouse`, `fbuf.nohid`, `fbuf.allowhid`, `fbuf.width`, `fbuf.height`, `fbuf.transport`, `allow.gpu`, `allow.gpu.strict`, `gpu.cores`, `gpu.memory`, `gpu.scheduler`, `gpu.memory.policy`). Each HID param must include: (1) a 1-paragraph description, (2) default value, (3) example jail.conf snippet, (4) cross-reference to `security.policy.fbuf.allowhid` host sysctl for `fbuf.allowhid`. Update `share/man/man8/bhyve.8` and `bhyve_config.5` with the new `transport=` form and the deprecation notice for `rfb=`. Write `display-abstraction.md` (architecture overview). Write `policy-quickstart(7)`. Write the migration guide section (backcompat) per the backcompat section above. Write `display_transport_security(7)` (covers TLS, auth, audit, cert formats, hot-reload, SNI, self-signed, host policy). Write `gpu_resource(9)` (kernel API for jail consumers). Run `mandoc -Tlint` on all man pages to catch warnings.
 
@@ -9865,7 +9865,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 18. Smoke test (build, boot, regression, jail fbuf live test, transport TLS)
+- [x] 18. Smoke test (build, boot, regression, jail fbuf live test, transport TLS)
 
   **What to do**: write `tests/sys/vmm/fbuf_variants.sh` — boots a bhyve VM with each of: `rfb=127.0.0.1:5900` (legacy), `tcp=127.0.0.1:5900` (legacy), `unix:/tmp/v.sock` (legacy), `transport=rfb` (self-signed TLS), `transport=rfb,tls.cert=/etc/letsencrypt/live/.../` (certbot), `transport=rdp` (refused). Verifies VNC handshake via `nc` / `openssl s_client` / RDP probe. Write `tests/sys/jail/fbuf/load.sh` — creates a jail with `allow.fbuf`, runs `kldstat -n displayd` inside, asserts loaded. The harness also covers **all fbuf param combinations** (default, `nokbd=1`, `nomouse=1`, `nohid=1`, `allowhid=1` with host policy on/off) and asserts that `/dev/uhid*` only appears when both `fbuf.allowhid=1` AND `security.policy.fbuf.allowhid=1`. Write `tests/sys/policy/host_policy.sh` — sets `security.policy.legacy_allowed=0` then attempts legacy bhyve start, asserts refused. Also sets `security.policy.fbuf.allowhid=0` and verifies a jail with `fbuf.allowhid=1` is BLOCKED by preflight. Write `tests/sys/gpu/stub_backend.sh` — verifies the `gpu_stub` backend is registered by default, sets `hw.gpu.0.stub_capacity=10496` (or 6144 for an AMD-like stub), creates a jail with `allow.gpu=0,gpu.cores=50%`, asserts the resolved cores = 5248 (or 3072). **Write `tests/sys/policy/sysctl_conf_integration.sh` — backs up `/etc/sysctl.conf`, appends `sysctl.conf.snippet` from `share/examples/security/policy-quickstart/`, runs `sysctl -f /etc/sysctl.conf`, asserts every `security.policy.*` / `security.transport.*` value is set (including the new `security.policy.fbuf.allowhid=0` default), then restores the original `/etc/sysctl.conf`. Verifies the existing ZFS / panic / powercycle settings (e.g. `vfs.zfs.vdev.min_auto_ashift=12`, `kern.powercycle_on_panic=1`) are preserved untouched.** Run all on the FreeBSD VM (Phase 1) using the stub backend. The nvidia box (Phase 2) runs an additional suite with a real backend. Add to `tests/sys/vmm/Makefile` and `tests/sys/jail/Makefile`.
 
@@ -9910,7 +9910,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 29. Document transport security (`display_transport_security(7)`)
+- [x] 29. Document transport security (`display_transport_security(7)`)
 
   **What to do**: write the `display_transport_security(7)` man page covering: threat model, default policy (`tls_required` with auto self-signed fallback), legacy opt-in (loud warning), config keys (`transport.tls.*`, `transport.auth`, `transport.timeout.seconds`, `transport.rate_limit.attempts`, `transport.audit`, `transport.legacy`), cert formats (PEM, DER, PKCS#12), discovery policy, hot-reload, SNI, OCSP stapling, password handling (never on CLI), self-signed auto-gen, host policy precedence, OpenSSL version requirements, certbot recipe, hardening cookbook (one-time sysctl setup), audit log format, the strict/override semantics, the rate limit + idle timeout behavior, the Capsicum handshake ordering, what the framework does NOT protect against (malicious client, malicious guest).
 
@@ -9951,7 +9951,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 34. Write the **migration guide** (`display-abstraction-migration.7`) — a separate document from the per-feature man pages
+- [x] 34. Write the **migration guide** (`display-abstraction-migration.7`) — a separate document from the per-feature man pages
 
   **What to do**:
   1. Write `share/man/man7/display-abstraction-migration.7` as a single operator-focused walkthrough for users upgrading from a pre-framebuffer bhyve/jail setup. Sections:
@@ -10032,7 +10032,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 36. Examples directory (`share/examples/security/policy-quickstart/` + 6 sibling example sets)
+- [x] 36. Examples directory (`share/examples/security/policy-quickstart/` + 6 sibling example sets)
 
   **What to do**:
   1. Find or create the FreeBSD examples directory tree. The standard location is `share/examples/` (used by `make -C share/examples install`). Create `share/examples/security/policy-quickstart/`.
@@ -10149,7 +10149,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 37. End user guide (`display-enduser.7` — the canonical name; no deprecated stub man page — that name is current, not old)
+- [x] 37. End user guide (`display-enduser.7` — the canonical name; no deprecated stub man page — that name is current, not old)
 
   **What to do**:
   1. Write `share/man/man7/display-enduser.7` — the **end user perspective** doc. The user asked: "think about what an end user would need to know, especially how to access, and how to secure." Sections:
@@ -10233,7 +10233,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 38. Generic display broker daemon (`displayd`)
+- [x] 38. Generic display broker daemon (`displayd`)
 
   **What to do**:
   1. Create `usr.sbin/displayd/` (new generic home) with `Makefile`, `main.c`, `broker.c`, `broker_session.c`, `broker_auth.c`, `broker_acl.c`, `broker_audit.c`, `broker_registry.c`, `broker_bridge.c`, `broker_config.c`.
@@ -10422,7 +10422,7 @@ The Wave numbering for T53-T60 in v1's Wave 5: T53 → T54 → T55 → T56 (para
 
 ---
 
-- [ ] 39. BDP wire protocol (`bdp(7)` + frame encoder/decoder)
+- [x] 39. BDP wire protocol (`bdp(7)` + frame encoder/decoder)
 
   **What to do**:
   1. Define `bdp(7)` — the wire protocol spec in `share/man/man7/bdp.7`. Cover: framing, message types, auth methods, ACL semantics, error codes, multicast extension, max frame size.

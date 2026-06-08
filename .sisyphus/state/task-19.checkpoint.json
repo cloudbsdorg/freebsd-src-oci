@@ -1,0 +1,45 @@
+{
+  "last_completed_task": "T19",
+  "current_task": "T19",
+  "completed_tasks": ["T1", "T19"],
+  "in_progress": null,
+  "last_test_result": {
+    "task": "T19",
+    "result": "PASS",
+    "evidence_file": ".sisyphus/evidence/task-19-gpu-audit.txt",
+    "manifest_run_id": "2026-06-06T01:05:00Z"
+  },
+  "next_action": "T19 is read-only recon (no test runner). Verdict recorded in .sisyphus/drafts/t19-gpu-audit.md: 'DRI is the right abstraction; DRM2 hooks available at open/mmap/ioctl, but the actual KMS drivers (i915kms, amdgpu, radeonkms, nvidia.ko) are NOT in this base tree.' Unblocks T20 (gpu_resource design) and T21 (gpu jail params + module). F1/planner should correct the 4 plan-path discrepancies documented in §0 of the audit before T20/T21/T22 are worked.",
+  "deliverables": {
+    "report": ".sisyphus/drafts/t19-gpu-audit.md",
+    "evidence": ".sisyphus/evidence/task-19-gpu-audit.txt",
+    "commit": "audit(t19): GPU kernel subsystem recon (branch framebuffer, freebsd-src-oci)"
+  },
+  "verdict": {
+    "verdict_line": "DRI is the right abstraction; DRM2 hooks available at open/mmap/ioctl, but the actual KMS drivers (i915kms, amdgpu, radeonkms, nvidia.ko) are NOT in this base tree.",
+    "hook_points": [
+      "sys/dev/drm2/drm_fops.c:120 drm_open",
+      "sys/dev/drm2/drm_fops.c:176 drm_open_helper",
+      "sys/dev/drm2/drm_fops.c:491 drm_read",
+      "sys/dev/drm2/drm_fops.c:550 drm_poll",
+      "sys/dev/drm2/drm_fops.c:581 drm_mmap_single",
+      "sys/dev/drm2/drm_drv.c:355 drm_ioctl",
+      "sys/dev/drm2/drm_gem.c:456 drm_gem_mmap_single",
+      "sys/dev/drm2/ttm/ttm_bo.c:1229 ttm_mem_global_alloc"
+    ],
+    "cdevsw_location": "sys/dev/drm2/drm_stub.c:73-82",
+    "drm_dev_defaults": "root:video 0660 (drmP.h:1594-1596)",
+    "devfs_rule_api": "ioctl-based (DEVFSIO_RADD on devfs mount fd), not function-call-based",
+    "nvidia_ko_in_base": false,
+    "kms_drivers_in_base": false,
+    "cgroup_framework_in_base": false,
+    "min_viable_hook_set": ["drm_open", "drm_ioctl", "ttm_mem_global_alloc"],
+    "plan_path_corrections": [
+      "sys/dev/drm/ -> sys/dev/drm2/",
+      "sys/modules/drm/ -> (absent; DRM2 is statically compiled)",
+      "compat/nvidia/ -> (absent in src; nvidia.ko is out-of-tree tarball)",
+      "sys/kern/kern_cgroup.c -> sys/kern/subr_racct.c (racct is the FreeBSD analog)",
+      "devfs_rule_add() -> DEVFSIO_RADD ioctl"
+    ]
+  }
+}
