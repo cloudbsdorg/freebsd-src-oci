@@ -1,0 +1,20 @@
+usr.sbin/bhyve/amd64/ps2kbd.c:502:	console_kbd_register(ps2kbd_event, sc, 1);
+usr.sbin/bhyve/amd64/ps2mouse.c:415:	console_ptr_register(ps2mouse_event, sc, 1);
+usr.sbin/bhyve/amd64/vga.c:1287:	sc->gc_image = console_get_image();
+usr.sbin/bhyve/pci_fbuf.c:444:	console_init(sc->memregs.width, sc->memregs.height, sc->fb_base);
+usr.sbin/bhyve/pci_fbuf.c:445:	console_fb_register(pci_fbuf_render, sc);
+usr.sbin/bhyve/pci_fbuf.c:449:	sc->gc_image = console_get_image();
+usr.sbin/bhyve/rfb.c:274:	gc_image = console_get_image();
+usr.sbin/bhyve/rfb.c:721:	console_refresh();
+usr.sbin/bhyve/rfb.c:722:	gc_image = console_get_image();
+usr.sbin/bhyve/rfb.c:909:	console_key_event(key_msg.down, htonl(key_msg.sym), htonl(0));
+usr.sbin/bhyve/rfb.c:932:		console_key_event((int)extkey_msg.down, htonl(extkey_msg.sym), htonl(extkey_msg.code));
+usr.sbin/bhyve/rfb.c:949:	console_ptr_event(ptr_msg.button, htons(ptr_msg.x), htons(ptr_msg.y));
+usr.sbin/bhyve/usb_mouse.c:262:	gc = console_get_image();
+usr.sbin/bhyve/usb_mouse.c:317:	console_ptr_register(umouse_event, sc, 10);
+=== bhyve -h smoke (T8.F) ===
+zsh:5: no such file or directory: ./bhyve
+=== bhyve -h smoke (T8.F) ===
+Usage: bhyve [-aCDeHhPSuWwxY]
+             [-c [[cpus=]numcpus][,sockets=n][,cores=n][,threads=n]]
+             [-G port] [-k config_file] [-l lpc] [-m mem] [-o var=value]

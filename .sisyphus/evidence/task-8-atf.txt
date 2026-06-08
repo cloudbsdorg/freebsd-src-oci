@@ -1,0 +1,24 @@
+atf_console:tc_console_create_with_bhyvegc_default  ->  passed  [0.004s]
+atf_console:tc_console_create_with_null_fb_raw_fails  ->  passed  [0.004s]
+atf_console:tc_console_create_with_provided_fb  ->  passed  [0.004s]
+atf_console:tc_console_destroy_idempotent  ->  passed  [0.004s]
+atf_console:tc_console_destroy_null_safe  ->  passed  [0.003s]
+atf_console:tc_console_get_image_consistent_across_lookups  ->  passed  [0.003s]
+atf_console:tc_console_get_image_returns_null_after_destroy  ->  passed  [0.004s]
+atf_console:tc_console_kbd_register_priority_higher_wins  ->  passed  [0.003s]
+atf_console:tc_console_kbd_register_same_pri_first_wins  ->  passed  [0.003s]
+atf_console:tc_console_kbd_unregister_missing_returns_enoent  ->  passed  [0.003s]
+atf_console:tc_console_kbd_unregister_returns_zero  ->  passed  [0.003s]
+atf_console:tc_console_key_event_with_no_kbd_consumer_is_noop  ->  passed  [0.003s]
+atf_console:tc_console_legacy_init_creates_default_ctx  ->  passed  [0.003s]
+atf_console:tc_console_ptr_event_dispatches_to_registered  ->  passed  [0.003s]
+atf_console:tc_console_ptr_register_priority_higher_wins  ->  passed  [0.004s]
+atf_console:tc_console_refresh_with_no_fb_cb_is_noop  ->  passed  [0.004s]
+atf_console:tc_console_set_fbaddr_ctx_swaps_pointer  ->  passed  [0.003s]
+atf_console:tc_console_ten_instances_dont_interfere  ->  passed  [0.003s]
+atf_console:tc_console_two_instances_independent  ->  passed  [0.003s]
+atf_console:tc_console_unregister_with_null_returns_einval  ->  passed  [0.004s]
+
+Results saved to /tmp/kyua-evidence
+
+20/20 passed (0 broken, 0 failed, 0 skipped)
