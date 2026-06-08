@@ -39,6 +39,7 @@ struct bhyvegc_image {
 };
 
 struct bhyvegc *bhyvegc_init(int width, int height, void *fbaddr);
+void bhyvegc_destroy(struct bhyvegc *gc);
 void bhyvegc_set_fbaddr(struct bhyvegc *gc, void *fbaddr);
 void bhyvegc_resize(struct bhyvegc *gc, int width, int height);
 struct bhyvegc_image *bhyvegc_get_image(struct bhyvegc *gc);

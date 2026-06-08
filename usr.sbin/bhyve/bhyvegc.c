@@ -64,12 +64,50 @@ bhyvegc_init(int width, int height, void *fbaddr)
 }
 
 void
+bhyvegc_destroy(struct bhyvegc *gc)
+{
+	if (gc == NULL)
+		return;
+
+	/*
+	 * If raw == 0, the pixel buffer was calloc'd by bhyvegc_init and
+	 * is owned by us.  If raw == 1, the caller supplied the buffer
+	 * (e.g. an mmap'd fbuf region) and we must not free it.
+	 */
+	if (gc->gc_image != NULL) {
+		if (gc->raw == 0 && gc->gc_image->data != NULL)
+			free(gc->gc_image->data);
+		free(gc->gc_image);
+	}
+	free(gc);
+}
+
+void
 bhyvegc_set_fbaddr(struct bhyvegc *gc, void *fbaddr)
 {
-	gc->raw = 1;
-	if (gc->gc_image->data && gc->gc_image->data != fbaddr)
+
+	if (gc == NULL || gc->gc_image == NULL)
+		return;
+
+	/*
+	 * Ownership rules:
+	 *   - raw == 0 (calloc'd by us): we own the buffer; free it before
+	 *     taking a new one.  After this call, raw is 1 (caller owns).
+	 *   - raw == 1 (caller-supplied): the buffer is the caller's; do
+	 *     NOT free it.  Just swap the pointer.
+	 *
+	 * The previous impl always freed the old data, which corrupted
+	 * the raw==1 -> raw==1 case (the caller's memory was freed).
+	 * The T8.C test tc_console_set_fbaddr_ctx_swaps_pointer covers
+	 * this.
+	 */
+	if (gc->raw == 0 && gc->gc_image->data != NULL &&
+	    gc->gc_image->data != fbaddr) {
 		free(gc->gc_image->data);
+		gc->gc_image->data = NULL;
+	}
 	gc->gc_image->data = fbaddr;
+	gc->raw = 1;
 }
 
 void
