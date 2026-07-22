@@ -77,7 +77,7 @@ create_start_kill_delete_body()
 
 	# create (prints container id on stdout)
 	atf_check -s exit:0 -e ignore -o save:create.out \
-	    "${bin}" create "${bundle}" --name "${name}"
+	    "${bin}" create --name "${name}" "${bundle}"
 	cid=$(tr -d ' \t\r\n' < create.out)
 	if ! expr "${cid}" : '[0-9a-f]\{64\}$' >/dev/null 2>&1; then
 		atf_fail "create did not print a 64-hex id (got: ${cid})"

@@ -112,13 +112,16 @@ cmd_create(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "n:h", longopts, NULL)) != -1) {
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+n:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			name = optarg;
 			break;
 		case 'h':
-			usage(argv[0], "create <bundle> [--name <name>]");
+			usage(argv[0], "create [--name name] <bundle>");
 			return (0);
 		default:
 			usage(argv[0], "create");
@@ -131,7 +134,7 @@ cmd_create(int argc, char **argv)
 
 	if (argc < 1) {
 		fprintf(stderr, "error: bundle path required\n");
-		usage(argv[-optind], "create");
+		usage("ocifbsd", "create");
 		return (1);
 	}
 
@@ -193,7 +196,9 @@ cmd_start(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "start <container-id>");
@@ -256,7 +261,9 @@ cmd_kill(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "s:h", longopts, NULL)) != -1) {
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+s:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's':
 			/* Convert signal name to number */
@@ -330,7 +337,9 @@ cmd_delete(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "fh", longopts, NULL)) != -1) {
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+fh", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'f':
 			force = true;
@@ -400,7 +409,9 @@ cmd_state(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "state <container-id>");
@@ -450,7 +461,9 @@ cmd_list(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "list");
@@ -502,7 +515,9 @@ cmd_inspect(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "inspect <container-id>");
@@ -565,7 +580,9 @@ cmd_run(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "n:h", longopts, NULL)) != -1) {
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+n:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			name = optarg;
@@ -677,7 +694,13 @@ main(int argc, char **argv)
 	};
 
 	int ch;
-	while ((ch = getopt_long(argc, argv, "vhV", longopts, NULL)) != -1) {
+	/*
+	 * Leading '+' is POSIXLY_CORRECT: stop at the first non-option so
+	 * subcommands keep their own flags (e.g. create --name ...).
+	 */
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+vhV", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'v':
 			verbose = true;
