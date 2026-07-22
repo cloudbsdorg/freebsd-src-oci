@@ -1011,8 +1011,6 @@ verify_layer(const char *path, const char *expected_digest)
 	char *actual_digest;
 	int ret;
 
-	/* Extract algorithm prefix (e.g., "sha256:") */
-	const char *algo = expected_digest;
 	const char *hex = strchr(expected_digest, ':');
 	if (hex == NULL) {
 		fprintf(stderr, "error: invalid digest format\n");
