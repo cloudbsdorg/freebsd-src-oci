@@ -14,7 +14,9 @@
 #include <string.h>
 
 #include "image/pull.h"
+#include "image/zfs_store.h"
 #include "image/reference.c"
+#include "image/paths.c"
 
 ATF_TC(ref_docker_hub_short);
 ATF_TC_HEAD(ref_docker_hub_short, tc)
@@ -132,6 +134,35 @@ ATF_TC_BODY(ref_canonical, tc)
 	free(c);
 }
 
+ATF_TC(zfs_paths);
+ATF_TC_HEAD(zfs_paths, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "zfs_image/layer/volume_path under /var/lib/ocifbsd");
+}
+ATF_TC_BODY(zfs_paths, tc)
+{
+	char *p;
+
+	p = zfs_image_path("ghcr.io", "cloudbsd/ocifbsd", "latest");
+	ATF_REQUIRE(p != NULL);
+	ATF_CHECK_STREQ(p, "/var/lib/ocifbsd/ghcr.io/cloudbsd/ocifbsd/latest");
+	free(p);
+
+	p = zfs_layer_path("sha256:deadbeef");
+	ATF_REQUIRE(p != NULL);
+	ATF_CHECK_STREQ(p, "/var/lib/ocifbsd/layers/sha256:deadbeef");
+	free(p);
+
+	p = zfs_volume_path("data");
+	ATF_REQUIRE(p != NULL);
+	ATF_CHECK_STREQ(p, "/var/lib/ocifbsd/volumes/data");
+	free(p);
+
+	ATF_CHECK(zfs_image_path(NULL, "a", "b") == NULL);
+	ATF_CHECK(zfs_layer_path(NULL) == NULL);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, ref_docker_hub_short);
@@ -140,5 +171,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ref_null);
 	ATF_TP_ADD_TC(tp, ref_default_tag);
 	ATF_TP_ADD_TC(tp, ref_canonical);
+	ATF_TP_ADD_TC(tp, zfs_paths);
 	return (atf_no_error());
 }

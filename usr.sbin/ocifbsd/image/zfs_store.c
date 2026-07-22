@@ -259,64 +259,7 @@ zfs_get_volumes_dataset(void)
 	return (buf);
 }
 
-char *
-zfs_image_path(const char *registry, const char *repo, const char *tag)
-{
-	char *path;
-	size_t len;
-
-	len = strlen(mountpoint_base) + 1 +
-	    strlen(registry) + 1 +
-	    strlen(repo) + 1 +
-	    strlen(tag) + 1;
-
-	path = malloc(len);
-	if (path == NULL)
-		return (NULL);
-
-	snprintf(path, len, "%s/%s/%s/%s", mountpoint_base,
-	    registry, repo, tag);
-
-	return (path);
-}
-
-char *
-zfs_layer_path(const char *digest)
-{
-	char *path;
-	size_t len;
-
-	len = strlen(mountpoint_base) + 1 +
-	    strlen("layers") + 1 +
-	    strlen(digest) + 1;
-
-	path = malloc(len);
-	if (path == NULL)
-		return (NULL);
-
-	snprintf(path, len, "%s/layers/%s", mountpoint_base, digest);
-
-	return (path);
-}
-
-char *
-zfs_volume_path(const char *name)
-{
-	char *path;
-	size_t len;
-
-	len = strlen(mountpoint_base) + 1 +
-	    strlen("volumes") + 1 +
-	    strlen(name) + 1;
-
-	path = malloc(len);
-	if (path == NULL)
-		return (NULL);
-
-	snprintf(path, len, "%s/volumes/%s", mountpoint_base, name);
-
-	return (path);
-}
+/* zfs_image_path / zfs_layer_path / zfs_volume_path live in paths.c */
 
 int
 zfs_set_property(const char *dataset, const char *property, const char *value)
