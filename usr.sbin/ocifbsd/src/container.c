@@ -42,6 +42,7 @@
 #include <fcntl.h>
 #include <jail.h>
 #include <libutil.h>
+#include <limits.h>
 #include <paths.h>
 #include <pthread.h>
 #include <signal.h>
@@ -225,6 +226,8 @@ container_get_by_jid(int jid)
 void
 container_free(struct ocifbsd_container *c)
 {
+	int i;
+
 	if (c == NULL)
 		return;
 
@@ -235,10 +238,238 @@ container_free(struct ocifbsd_container *c)
 	free(c->config_path);
 	free(c->log_path);
 
+	if (c->applied_mounts != NULL) {
+		for (i = 0; i < c->n_applied_mounts; i++)
+			free(c->applied_mounts[i]);
+		free(c->applied_mounts);
+	}
+
 	if (c->spec != NULL)
 		oci_free_spec(c->spec);
 
 	free(c);
+}
+
+/*
+ * Run /sbin/mount or /sbin/umount and wait. Returns 0 on success.
+ */
+static int
+run_mount_cmd(char *const argv[])
+{
+	pid_t pid;
+	int status;
+
+	pid = fork();
+	if (pid < 0)
+		return (-1);
+	if (pid == 0) {
+		execv(argv[0], argv);
+		_exit(127);
+	}
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		errno = EIO;
+		return (-1);
+	}
+	return (0);
+}
+
+/*
+ * Map OCI mount type names to FreeBSD vfs types. Returns NULL to skip
+ * Linux-only filesystems we do not implement.
+ */
+static const char *
+oci_mount_type_to_fbsd(const char *type)
+{
+	if (type == NULL)
+		return (NULL);
+	if (strcmp(type, "nullfs") == 0 || strcmp(type, "bind") == 0)
+		return ("nullfs");
+	if (strcmp(type, "devfs") == 0 || strcmp(type, "dev") == 0)
+		return ("devfs");
+	if (strcmp(type, "procfs") == 0 || strcmp(type, "proc") == 0)
+		return ("procfs");
+	if (strcmp(type, "fdescfs") == 0)
+		return ("fdescfs");
+	if (strcmp(type, "tmpfs") == 0)
+		return ("tmpfs");
+	/* Explicit FreeBSD alias used in some configs */
+	if (strcmp(type, "linprocfs") == 0)
+		return ("linprocfs");
+	return (NULL);
+}
+
+static int
+record_applied_mount(struct ocifbsd_container *c, const char *target)
+{
+	char **nm;
+	char *copy;
+
+	copy = strdup(target);
+	if (copy == NULL)
+		return (-1);
+	nm = realloc(c->applied_mounts,
+	    (size_t)(c->n_applied_mounts + 1) * sizeof(char *));
+	if (nm == NULL) {
+		free(copy);
+		return (-1);
+	}
+	c->applied_mounts = nm;
+	c->applied_mounts[c->n_applied_mounts++] = copy;
+	return (0);
+}
+
+/*
+ * Apply OCI mounts into the container rootfs (host-side, before start).
+ * Unsupported Linux types are skipped with a warning.
+ */
+int
+container_apply_mounts(struct ocifbsd_container *c)
+{
+	struct oci_runtime_spec *spec;
+	int i;
+
+	if (c == NULL || c->rootfs == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+	spec = c->spec;
+	if (spec == NULL || spec->n_mounts <= 0 || spec->mounts == NULL)
+		return (0);
+
+	for (i = 0; i < spec->n_mounts; i++) {
+		struct oci_mount *m = &spec->mounts[i];
+		const char *fstype;
+		char dest[PATH_MAX];
+		char *argv[10];
+		int argc = 0;
+		const char *source;
+		char opts[256];
+		struct stat sb;
+
+		if (m->destination == NULL || m->destination[0] == '\0')
+			continue;
+
+		fstype = oci_mount_type_to_fbsd(m->type);
+		if (fstype == NULL) {
+			fprintf(stderr,
+			    "warning: skipping unsupported mount type '%s' -> %s\n",
+			    m->type ? m->type : "(null)", m->destination);
+			continue;
+		}
+
+		if (m->destination[0] == '/')
+			snprintf(dest, sizeof(dest), "%s%s", c->rootfs,
+			    m->destination);
+		else
+			snprintf(dest, sizeof(dest), "%s/%s", c->rootfs,
+			    m->destination);
+
+		if (stat(dest, &sb) != 0) {
+			if (ensure_directory(dest, 0755) != 0) {
+				fprintf(stderr,
+				    "warning: cannot create mount point %s: %s\n",
+				    dest, strerror(errno));
+				continue;
+			}
+		}
+
+		/* Build -o options: readonly flag + any options string */
+		opts[0] = '\0';
+		if (m->readonly)
+			strlcpy(opts, "ro", sizeof(opts));
+		if (m->options != NULL && m->options[0] != '\0') {
+			if (opts[0] != '\0')
+				strlcat(opts, ",", sizeof(opts));
+			strlcat(opts, m->options, sizeof(opts));
+		}
+		/* jail-friendly default for devfs */
+		if (strcmp(fstype, "devfs") == 0 && opts[0] == '\0')
+			strlcpy(opts, "ruleset=4", sizeof(opts));
+
+		if (strcmp(fstype, "nullfs") == 0) {
+			source = m->source != NULL ? m->source : "";
+			if (source[0] == '\0') {
+				fprintf(stderr,
+				    "warning: nullfs mount missing source for %s\n",
+				    dest);
+				continue;
+			}
+		} else if (strcmp(fstype, "tmpfs") == 0) {
+			source = m->source != NULL && m->source[0] != '\0' ?
+			    m->source : "tmpfs";
+		} else {
+			/* pseudo-fs: source is conventionally the type name */
+			source = m->source != NULL && m->source[0] != '\0' ?
+			    m->source : fstype;
+		}
+
+		argv[argc++] = __DECONST(char *, "/sbin/mount");
+		argv[argc++] = __DECONST(char *, "-t");
+		argv[argc++] = __DECONST(char *, fstype);
+		if (opts[0] != '\0') {
+			argv[argc++] = __DECONST(char *, "-o");
+			argv[argc++] = opts;
+		}
+		argv[argc++] = __DECONST(char *, source);
+		argv[argc++] = dest;
+		argv[argc] = NULL;
+
+		if (run_mount_cmd(argv) != 0) {
+			fprintf(stderr,
+			    "warning: mount -t %s %s %s failed: %s\n",
+			    fstype, source, dest, strerror(errno));
+			continue;
+		}
+		if (record_applied_mount(c, dest) != 0) {
+			/* best-effort unmount if we cannot track */
+			char *uargv[3];
+
+			uargv[0] = __DECONST(char *, "/sbin/umount");
+			uargv[1] = dest;
+			uargv[2] = NULL;
+			(void)run_mount_cmd(uargv);
+			errno = ENOMEM;
+			return (-1);
+		}
+	}
+
+	return (0);
+}
+
+/*
+ * Unmount previously applied mounts in reverse order.
+ */
+int
+container_unmount_all(struct ocifbsd_container *c)
+{
+	int i;
+
+	if (c == NULL)
+		return (0);
+
+	for (i = c->n_applied_mounts - 1; i >= 0; i--) {
+		char *argv[4];
+
+		if (c->applied_mounts[i] == NULL)
+			continue;
+		argv[0] = __DECONST(char *, "/sbin/umount");
+		argv[1] = __DECONST(char *, "-f");
+		argv[2] = c->applied_mounts[i];
+		argv[3] = NULL;
+		if (run_mount_cmd(argv) != 0) {
+			fprintf(stderr,
+			    "warning: umount %s failed: %s\n",
+			    c->applied_mounts[i], strerror(errno));
+		}
+		free(c->applied_mounts[i]);
+		c->applied_mounts[i] = NULL;
+	}
+	free(c->applied_mounts);
+	c->applied_mounts = NULL;
+	c->n_applied_mounts = 0;
+	return (0);
 }
 
 /*
@@ -460,6 +691,17 @@ container_start(struct ocifbsd_container *c)
 		return (-1);
 	}
 
+	/*
+	 * Host-side mounts into rootfs before the init process attaches.
+	 * Failures of individual mounts are warned; only ENOMEM from
+	 * tracking aborts start.
+	 */
+	if (container_apply_mounts(c) != 0 && errno == ENOMEM) {
+		fprintf(stderr, "error: failed to track mounts for %s\n",
+		    c->id);
+		return (-1);
+	}
+
 	/* Run prestart hooks */
 	hooks_run_prestart(c);
 
@@ -583,7 +825,10 @@ container_start(struct ocifbsd_container *c)
 }
 
 /*
- * Send signal to container init process
+ * Send signal to container init process.
+ *
+ * Idempotent: already-stopped/created containers, missing init pid, or
+ * kill(2) returning ESRCH (dead init) succeed so delete --force is simple.
  */
 int
 container_kill(struct ocifbsd_container *c, int sig)
@@ -594,16 +839,28 @@ container_kill(struct ocifbsd_container *c, int sig)
 	}
 
 	if (c->state != OCIFBSD_STATE_RUNNING) {
+		if (c->state == OCIFBSD_STATE_STOPPED ||
+		    c->state == OCIFBSD_STATE_CREATED)
+			return (0);
 		errno = EINVAL;
 		return (-1);
 	}
 
 	if (c->init_pid <= 0) {
-		errno = ESRCH;
-		return (-1);
+		c->state = OCIFBSD_STATE_STOPPED;
+		c->finished_at = time(NULL);
+		state_save(c);
+		return (0);
 	}
 
 	if (kill(c->init_pid, sig) != 0) {
+		if (errno == ESRCH) {
+			c->state = OCIFBSD_STATE_STOPPED;
+			c->finished_at = time(NULL);
+			c->init_pid = 0;
+			state_save(c);
+			return (0);
+		}
 		return (-1);
 	}
 
@@ -633,6 +890,9 @@ container_delete(struct ocifbsd_container *c)
 			waitpid(c->init_pid, NULL, 0);
 		}
 	}
+
+	/* Drop host-side mounts before removing the jail */
+	(void)container_unmount_all(c);
 
 	/* Remove jail */
 	if (c->jid > 0) {

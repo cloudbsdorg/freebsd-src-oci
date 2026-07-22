@@ -205,6 +205,7 @@ int
 ensure_directory(const char *path, mode_t mode)
 {
 	struct stat sb;
+	char *copy, *p;
 
 	if (path == NULL)
 		return (-1);
@@ -219,7 +220,22 @@ ensure_directory(const char *path, mode_t mode)
 	if (errno != ENOENT)
 		return (-1);
 
-	/* Create directory with parents */
+	/* Create missing parents then the leaf (mkdir -p semantics). */
+	copy = strdup(path);
+	if (copy == NULL)
+		return (-1);
+	for (p = copy + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(copy, mode) != 0 && errno != EEXIST) {
+			free(copy);
+			return (-1);
+		}
+		*p = '/';
+	}
+	free(copy);
+
 	if (mkdir(path, mode) != 0) {
 		if (errno == EEXIST)
 			return (0);

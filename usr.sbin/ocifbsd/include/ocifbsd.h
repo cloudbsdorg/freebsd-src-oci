@@ -76,6 +76,8 @@ struct ocifbsd_container {
 	int			exit_code;	/* Exit code */
 	char			*config_path;	/* Path to config.json */
 	char			*log_path;	/* Path to container log */
+	char			**applied_mounts; /* Absolute mount targets we mounted */
+	int			n_applied_mounts;
 };
 
 /* OCI Runtime Specification structures */
@@ -169,6 +171,8 @@ int	container_pause(struct ocifbsd_container *c);
 int	container_resume(struct ocifbsd_container *c);
 int	container_wait(struct ocifbsd_container *c);
 int	container_inspect(struct ocifbsd_container *c, char **json_out);
+int	container_apply_mounts(struct ocifbsd_container *c);
+int	container_unmount_all(struct ocifbsd_container *c);
 struct ocifbsd_container *container_get_by_id(const char *id);
 struct ocifbsd_container *container_get_by_name(const char *name);
 struct ocifbsd_container *container_get_by_jid(int jid);

@@ -182,7 +182,52 @@ parse_freebsd_ext(struct json_object *val)
 }
 
 /*
- * Parse OCI mounts array
+ * Join a JSON string array with commas (for OCI mount options).
+ */
+static char *
+json_join_string_array(struct json_object *arr)
+{
+	size_t i, n, len = 0;
+	char *out, *p;
+
+	if (arr == NULL || json_object_get_type(arr) != json_type_array)
+		return (NULL);
+
+	n = json_object_array_length(arr);
+	if (n == 0)
+		return (strdup(""));
+
+	for (i = 0; i < n; i++) {
+		struct json_object *elem = json_object_array_get_idx(arr, i);
+
+		if (elem != NULL &&
+		    json_object_get_type(elem) == json_type_string)
+			len += strlen(json_object_get_string(elem)) + 1;
+	}
+	out = malloc(len + 1);
+	if (out == NULL)
+		return (NULL);
+	p = out;
+	*p = '\0';
+	for (i = 0; i < n; i++) {
+		struct json_object *elem = json_object_array_get_idx(arr, i);
+		const char *s;
+
+		if (elem == NULL ||
+		    json_object_get_type(elem) != json_type_string)
+			continue;
+		s = json_object_get_string(elem);
+		if (p != out)
+			*p++ = ',';
+		while (*s != '\0')
+			*p++ = *s++;
+		*p = '\0';
+	}
+	return (out);
+}
+
+/*
+ * Parse OCI mounts array. options may be a string or string array.
  */
 static struct oci_mount *
 parse_mounts(struct json_object *val, int *n_mounts)
@@ -190,6 +235,7 @@ parse_mounts(struct json_object *val, int *n_mounts)
 	struct json_object *obj;
 	struct json_object *arr;
 	struct json_object *elem;
+	struct json_object *opt;
 	struct oci_mount *mounts;
 	struct oci_mount *m;
 	size_t i;
@@ -222,8 +268,20 @@ parse_mounts(struct json_object *val, int *n_mounts)
 		m->source = json_get_string(elem, "source");
 		m->destination = json_get_string(elem, "destination");
 		m->type = json_get_string(elem, "type");
-		m->options = json_get_string(elem, "options");
+		opt = json_object_object_get(elem, "options");
+		if (opt != NULL &&
+		    json_object_get_type(opt) == json_type_string)
+			m->options = strdup(json_object_get_string(opt));
+		else if (opt != NULL &&
+		    json_object_get_type(opt) == json_type_array)
+			m->options = json_join_string_array(opt);
+		else
+			m->options = NULL;
 		m->readonly = json_get_bool(elem, "readonly", false);
+		/* OCI often encodes ro in options rather than readonly */
+		if (!m->readonly && m->options != NULL &&
+		    (strstr(m->options, "ro") != NULL))
+			m->readonly = true;
 	}
 	*n_mounts = (int)json_object_array_length(arr);
 
@@ -397,15 +455,38 @@ oci_parse_config(const char *config_path)
 	/* Parse process */
 	struct json_object *proc_val = json_object_object_get(obj, "process");
 	if (proc_val != NULL && json_object_get_type(proc_val) == json_type_object) {
+		int nargs = 0, nenv = 0;
+		struct json_object *user_val;
+
 		spec->process.cwd = json_get_string(proc_val, "cwd");
 		spec->process.tty = json_get_bool(proc_val, "tty", 0);
 		spec->process.terminal = json_get_bool(proc_val, "terminal", 0);
 		spec->process.args = json_get_string_array(proc_val, "args",
-		    &(int){0});
+		    &nargs);
 		spec->process.env = json_get_string_array(proc_val, "env",
-		    &(int){0});
-		spec->process.uid = json_get_int(proc_val, "user", 0);
-		spec->process.gid = json_get_int(proc_val, "user", 0);
+		    &nenv);
+		/*
+		 * OCI process.user is an object { "uid": N, "gid": N }.
+		 * Also accept a bare integer as uid=gid for robustness.
+		 */
+		user_val = json_object_object_get(proc_val, "user");
+		if (user_val != NULL &&
+		    json_object_get_type(user_val) == json_type_object) {
+			spec->process.uid = (uid_t)json_get_int(user_val,
+			    "uid", 0);
+			spec->process.gid = (gid_t)json_get_int(user_val,
+			    "gid", 0);
+		} else if (user_val != NULL &&
+		    json_object_get_type(user_val) == json_type_int) {
+			spec->process.uid =
+			    (uid_t)json_object_get_int(user_val);
+			spec->process.gid = (gid_t)spec->process.uid;
+		} else {
+			spec->process.uid = 0;
+			spec->process.gid = 0;
+		}
+		(void)nargs;
+		(void)nenv;
 	}
 
 	/* Parse hostname */
