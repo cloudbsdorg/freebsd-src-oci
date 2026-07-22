@@ -16,12 +16,6 @@
 
 static const char *mountpoint_base = "/var/lib/ocifbsd";
 
-const char *
-zfs_paths_mountpoint_base(void)
-{
-	return (mountpoint_base);
-}
-
 char *
 zfs_image_path(const char *registry, const char *repo, const char *tag)
 {
