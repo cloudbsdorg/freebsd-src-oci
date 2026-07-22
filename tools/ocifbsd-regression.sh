@@ -66,12 +66,32 @@ export MAKEOBJDIRPREFIX="${OBJ}"
 	if [ -z "${TESTOBJ}" ] || [ ! -f "${TESTOBJ}/Kyuafile" ]; then
 		TESTOBJ=$(pwd)
 	fi
+	# lifecycle_test resolves ocifbsd relative to src tree
+	BINOBJ=$(make -C "${REPO}/usr.sbin/ocifbsd" -V .OBJDIR 2>/dev/null || true)
+	if [ -n "${BINOBJ}" ] && [ -x "${BINOBJ}/ocifbsd" ]; then
+		ln -sf "${BINOBJ}/ocifbsd" "${REPO}/usr.sbin/ocifbsd/ocifbsd"
+	fi
 	echo "==== kyua test (dir=${TESTOBJ}) ===="
 	cd "${TESTOBJ}"
-	ls -la Kyuafile utils_test cli_test parser_test k8s_test 2>&1 || true
+	ls -la Kyuafile utils_test cli_test parser_test k8s_test oci2jail_test 2>&1 || true
 	kyua test -k Kyuafile 2>&1 | tee "${OUT}/kyua-test.txt"
 	kyua report --verbose -r LATEST --output="${OUT}/kyua-report.txt" || true
 	kyua report-junit -r LATEST --output="${OUT}/kyua-junit.xml" || true
+
+	# Root lifecycle when doas is available (Phase 1 acceptance)
+	if command -v doas >/dev/null 2>&1; then
+		echo "==== kyua lifecycle as root (doas) ===="
+		doas env PATH="${PATH}" \
+		    sh -c "cd \"${TESTOBJ}\" && kyua test -k Kyuafile lifecycle_test" \
+		    2>&1 | tee "${OUT}/kyua-lifecycle-root.txt" || true
+	elif [ "$(id -u)" -eq 0 ]; then
+		echo "==== kyua lifecycle as root ===="
+		kyua test -k Kyuafile lifecycle_test \
+		    2>&1 | tee "${OUT}/kyua-lifecycle-root.txt" || true
+	else
+		echo "==== skip root lifecycle (no doas / not root) ====" |
+		    tee "${OUT}/kyua-lifecycle-root.txt"
+	fi
 )
 
 # summary for agents

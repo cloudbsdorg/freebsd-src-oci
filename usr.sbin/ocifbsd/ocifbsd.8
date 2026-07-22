@@ -23,12 +23,12 @@
 .\" DAMAGE.
 .\"
 .\" $FreeBSD$
-.Dd April 30, 2026
+.Dd July 22, 2026
 .Dt OCIFBSD 8
 .Os
 .Sh NAME
 .Nm ocifbsd
-.Nd FreeBSD Native OCI Runtime
+.Nd FreeBSD native OCI runtime
 .Sh SYNOPSIS
 .Nm
 .Op Fl vhV
@@ -36,33 +36,47 @@
 .Op Ar arguments
 .Sh DESCRIPTION
 .Nm
-is the FreeBSD native OCI (Open Container Initiative) runtime that provides
-container isolation using FreeBSD jails.
+is a FreeBSD-native OCI (Open Container Initiative) runtime.
+It maps OCI bundles to
+.Xr jail 8
+parameters, manages container lifecycle state under
+.Pa /var/run/ocifbsd ,
+and applies host-side mounts (nullfs, devfs, procfs, tmpfs, fdescfs)
+into the container rootfs on start.
 .Pp
 The following commands are available:
-.Bl -tag -width ".Cm run"
-.It Cm create Ar bundle Op Fl n Ar name
+.Bl -tag -width indent
+.It Cm create Oo Fl n Ar name Oc Ar bundle
 Create a container from an OCI bundle.
+The jail is created with
+.Cm persist
+so it remains until
+.Cm start
+or
+.Cm delete .
+Prints the 64-hex container id on stdout.
 .It Cm start Ar container-id
-Start a created container.
+Start a created container (attach init process, apply mounts).
 .It Cm kill Ar container-id Op Fl s Ar signal
-Send a signal to a running container.
-The default signal is SIGTERM.
+Send a signal to the container init process.
+Default is SIGTERM.
+Idempotent for already-stopped or never-started containers.
 .It Cm delete Ar container-id Op Fl f
-Delete a container.
+Delete a container and unmount applied mounts.
 Use
 .Fl f
 to force deletion of a running container.
 .It Cm state Ar container-id
 Show the current state of a container.
 .It Cm list
-List all containers.
+List known containers from the state directory.
 .It Cm inspect Ar container-id
-Show detailed information about a container.
-.It Cm run Ar bundle Op Fl n Ar name
+Show detailed container metadata as JSON.
+.It Cm run Oo Fl n Ar name Oc Ar bundle
 Create and start a container in one command.
 .El
 .Sh OPTIONS
+Global options (before the command):
 .Bl -tag -width ".Fl v"
 .It Fl v , -verbose
 Enable verbose output.
@@ -71,41 +85,63 @@ Show help message and exit.
 .It Fl V , -version
 Show version information and exit.
 .El
+.Pp
+Subcommand options:
+.Bl -tag -width indent
+.It Fl n Ar name , -name Ar name
+Human-readable name for
+.Cm create
+and
+.Cm run
+(also used in jail naming).
+.It Fl s Ar signal , -signal Ar signal
+Signal for
+.Cm kill
+(number or name).
+.It Fl f , -force
+Force
+.Cm delete
+of a running container.
+.El
 .Sh EXAMPLES
 Create a container from an OCI bundle:
 .Bd -literal
-ocifbsd create /path/to/bundle --name my-container
+ocifbsd create --name my-container /path/to/bundle
 .Ed
 .Pp
-Start the container:
+Start, inspect state, signal, and delete:
 .Bd -literal
-ocifbsd start my-container-id
+ocifbsd start <id>
+ocifbsd state <id>
+ocifbsd kill <id>
+ocifbsd delete --force <id>
 .Ed
 .Pp
 Create and run in one command:
 .Bd -literal
-ocifbsd run /path/to/bundle --name web
-.Ed
-.Pp
-Delete a container:
-.Bd -literal
-ocifbsd delete my-container-id
+ocifbsd run --name web /path/to/bundle
 .Ed
 .Sh FILES
 .Bl -tag -width ".Pa /var/run/ocifbsd" -compact
 .It Pa /var/run/ocifbsd/
-Runtime state directory
+Runtime state directory (per-container JSON)
 .It Pa /var/lib/ocifbsd/
-Image and volume data directory
+Image and volume data directory (future image store)
 .It Pa /etc/ocifbsd/
-Configuration directory
+Configuration directory (reserved)
 .El
 .Sh SEE ALSO
 .Xr jail 8 ,
-.Xr jail 3
+.Xr jail 3 ,
+.Xr mount 8 ,
+.Xr rctl 8
 .Sh HISTORY
 .Nm
 was developed to provide native OCI runtime support for FreeBSD.
+Phase 1 acceptance covers create/start/state/kill/delete with ATF
+unit and root integration tests on FreeBSD lab hosts.
 .Sh AUTHORS
 .Nm
-was developed by Klara, Inc. under sponsorship from the FreeBSD Foundation.
+was developed by Klara, Inc. under sponsorship from the FreeBSD Foundation,
+with CloudBSD lifecycle and test work on
+.Li feature/oci-bootstrap .
