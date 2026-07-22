@@ -1025,16 +1025,20 @@ verify_layer(const char *path, const char *expected_digest)
 	if (ret != 0)
 		return (-1);
 
-	/* Compare */
-	if (strcasecmp(algo, "sha256:") == 0 &&
-	    strcmp(actual_digest + 7, hex) == 0) { /* Skip "sha256:" prefix in actual */
+	/*
+	 * compute_digest() returns raw hex without a "sha256:" prefix.
+	 * expected is typically "sha256:<hex>".
+	 */
+	if (strncasecmp(expected_digest, "sha256:", 7) == 0 &&
+	    strcasecmp(actual_digest, hex) == 0) {
 		ret = 0;
 	} else {
 		fprintf(stderr, "error: digest mismatch\n");
 		fprintf(stderr, "  expected: %s\n", expected_digest);
-		fprintf(stderr, "  actual: sha256:%s\n", actual_digest + 7);
+		fprintf(stderr, "  actual: sha256:%s\n", actual_digest);
 		ret = -1;
 	}
+	(void)algo;
 
 	free(actual_digest);
 	return (ret);
