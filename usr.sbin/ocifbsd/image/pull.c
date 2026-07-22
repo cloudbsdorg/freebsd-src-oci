@@ -50,6 +50,7 @@
 #include <zlib.h>
 
 #include "pull.h"
+#include "unpack.h"
 #include "zfs_store.h"
 
 /*
@@ -69,17 +70,41 @@ struct progress_data {
 	off_t		total;
 };
 
+/*
+ * Download state: write body to FILE and optionally report progress.
+ */
+struct download_state {
+	FILE		*out;
+	progress_cb	cb;
+	void		*opaque;
+	const char	*what;
+	off_t		total;
+	off_t		written;
+};
+
+static size_t
+download_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	struct download_state *ds = userdata;
+	size_t realsize = size * nmemb;
+	size_t n;
+
+	if (ds == NULL || ds->out == NULL)
+		return (0);
+	n = fwrite(ptr, 1, realsize, ds->out);
+	if (n > 0) {
+		ds->written += (off_t)n;
+		if (ds->cb != NULL)
+			ds->cb(ds->opaque, ds->what, ds->written, ds->total);
+	}
+	return (n);
+}
+
+/* Legacy name used by setup_curl for FILE* bodies */
 static size_t
 write_callback(void *ptr, size_t size, size_t nmemb, void *stream)
 {
-	size_t realsize = size * nmemb;
-	struct progress_data *p = (struct progress_data *)stream;
-
-	if (p->cb != NULL) {
-		p->cb(p->opaque, p->what, p->total, realsize);
-	}
-
-	return (realsize);
+	return (fwrite(ptr, size, nmemb, (FILE *)stream));
 }
 
 static size_t
@@ -151,6 +176,16 @@ registry_init(struct registry *reg, const char *reference)
 		return (-1);
 	}
 
+	/*
+	 * Docker Hub API host is registry-1.docker.io; token service is
+	 * registry.docker.io. References still use docker.io as the name.
+	 */
+	if (strcmp(registry, "docker.io") == 0 ||
+	    strcmp(registry, "index.docker.io") == 0) {
+		free(registry);
+		registry = strdup("registry-1.docker.io");
+	}
+
 	reg->host = registry;
 	reg->port = REGISTRY_DEFAULT_PORT;
 	reg->path_prefix = strdup(REGISTRY_API_PREFIX);
@@ -163,6 +198,8 @@ registry_init(struct registry *reg, const char *reference)
 
 	reg->auth->type = AUTH_ANONYMOUS;
 	reg->auth->registry = strdup(registry);
+	if (strcmp(registry, "registry-1.docker.io") == 0)
+		reg->auth->service = strdup("registry.docker.io");
 
 	free(digest);
 
@@ -298,11 +335,16 @@ setup_curl(struct registry *reg, const char *url, FILE *out)
 		curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
 		free(userpwd);
 	} else if (reg->auth->type == AUTH_BEARER) {
-		char header[512];
-		snprintf(header, sizeof(header),
-		    "Authorization: Bearer %s", reg->auth->password);
-		struct curl_slist *list = curl_slist_append(NULL, header);
-		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
+		char *header = NULL;
+		struct curl_slist *list;
+
+		if (asprintf(&header, "Authorization: Bearer %s",
+		    reg->auth->password) >= 0) {
+			list = curl_slist_append(NULL, header);
+			free(header);
+			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
+			/* note: header list is not freed here (setup_curl caller) */
+		}
 	}
 
 	return (curl);
@@ -416,188 +458,499 @@ registry_check_api(struct registry *reg)
 }
 
 /*
- * Authenticate with registry
+ * Capture WWW-Authenticate header into a growable string.
+ */
+static size_t
+www_auth_header_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	size_t n = size * nmemb;
+	char **acc = userdata;
+	char *line, *np;
+	size_t old;
+
+	line = malloc(n + 1);
+	if (line == NULL)
+		return (0);
+	memcpy(line, ptr, n);
+	line[n] = '\0';
+
+	if (strncasecmp(line, "WWW-Authenticate:", 17) == 0 ||
+	    strncasecmp(line, "Www-Authenticate:", 17) == 0) {
+		old = (*acc != NULL) ? strlen(*acc) : 0;
+		np = realloc(*acc, old + n + 1);
+		if (np == NULL) {
+			free(line);
+			return (0);
+		}
+		*acc = np;
+		memcpy(*acc + old, line, n + 1);
+	}
+	free(line);
+	return (n);
+}
+
+static void
+parse_www_authenticate(const char *hdr, char *realm, size_t realm_sz,
+    char *service, size_t service_sz)
+{
+	const char *p, *end;
+	size_t n;
+
+	realm[0] = '\0';
+	service[0] = '\0';
+	if (hdr == NULL)
+		return;
+
+	p = strstr(hdr, "realm=\"");
+	if (p != NULL) {
+		p += 7;
+		end = strchr(p, '"');
+		if (end != NULL) {
+			n = (size_t)(end - p);
+			if (n >= realm_sz)
+				n = realm_sz - 1;
+			memcpy(realm, p, n);
+			realm[n] = '\0';
+		}
+	}
+	p = strstr(hdr, "service=\"");
+	if (p != NULL) {
+		p += 9;
+		end = strchr(p, '"');
+		if (end != NULL) {
+			n = (size_t)(end - p);
+			if (n >= service_sz)
+				n = service_sz - 1;
+			memcpy(service, p, n);
+			service[n] = '\0';
+		}
+	}
+}
+
+static struct curl_slist *
+auth_headers(struct registry *reg, struct curl_slist *headers)
+{
+	char *hdr = NULL;
+
+	if (reg->auth != NULL && reg->auth->type == AUTH_BEARER &&
+	    reg->auth->password != NULL) {
+		/*
+		 * Docker Hub JWTs are often >2KB. A fixed 1KB buffer
+		 * truncates the token and yields HTTP 401 on manifests.
+		 */
+		if (asprintf(&hdr, "Authorization: Bearer %s",
+		    reg->auth->password) < 0)
+			return (headers);
+		headers = curl_slist_append(headers, hdr);
+		free(hdr);
+	}
+	return (headers);
+}
+
+/*
+ * Authenticate with registry (Docker Hub token flow supported).
+ * scope is the repository name (e.g. library/hello-world); we build
+ * repository:<name>:pull for the token request.
  */
 int
 authenticate(struct registry *reg, const char *scope)
 {
-	char *url;
-	char *response = NULL;
-	char *auth_header = NULL;
-	char realm[256];
+	char *url = NULL;
+	char *www = NULL;
+	char realm[512];
+	char service[256];
+	char scope_q[512];
+	struct MemoryStruct chunk = { 0 };
+	long response_code = 0;
+	CURLcode res;
+	CURL *curl;
 	char *p, *end;
 	int ret = -1;
 
-	realm[0] = '\0';
+	if (reg == NULL || reg->auth == NULL)
+		return (-1);
 
-	/* Build token URL */
-	if (reg->auth->type == AUTH_ANONYMOUS) {
-		long response_code = 0;
-		CURLcode res;
-		CURL *curl;
-
-		/* Probe /v2/ — connection failure is hard error */
-		url = build_url(reg, "/v2/");
-		if (url == NULL)
-			return (-1);
-
-		curl = curl_easy_init();
-		if (curl == NULL) {
-			free(url);
-			return (-1);
-		}
-		curl_easy_setopt(curl, CURLOPT_URL, url);
-		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-		curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
-		curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
-		curl_easy_setopt(curl, CURLOPT_HEADERDATA, &auth_header);
-		res = curl_easy_perform(curl);
-		if (res == CURLE_OK)
-			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,
-			    &response_code);
-		curl_easy_cleanup(curl);
-		free(url);
-
-		if (res != CURLE_OK) {
-			fprintf(stderr, "error: cannot reach registry %s: %s\n",
-			    reg->host, curl_easy_strerror(res));
-			return (-1);
-		}
-
-		if (auth_header != NULL &&
-		    strstr(auth_header, "Www-Authenticate") != NULL) {
-			/* Parse realm= from Www-Authenticate (best-effort) */
-			p = strstr(auth_header, "realm=\"");
-			if (p != NULL) {
-				p += 7;
-				end = strchr(p, '"');
-				if (end != NULL) {
-					size_t n = (size_t)(end - p);
-
-					if (n >= sizeof(realm))
-						n = sizeof(realm) - 1;
-					memcpy(realm, p, n);
-					realm[n] = '\0';
-				}
-			}
-		}
-
-		/*
-		 * 200/401 without realm: continue (anonymous or later 401).
-		 * Unreachable hosts already returned above.
-		 */
-		if (realm[0] == '\0')
-			return (0);
-	} else {
-		/* Basic auth preconfigured */
+	if (reg->auth->type == AUTH_BASIC)
 		return (0);
-	}
 
-	/* Build token request URL */
-	url = malloc(1024);
+	/* Already have a bearer token */
+	if (reg->auth->type == AUTH_BEARER && reg->auth->password != NULL)
+		return (0);
+
+	url = build_url(reg, "/v2/");
 	if (url == NULL)
 		return (-1);
 
-	snprintf(url, 1024, "%s?service=%s&scope=%s", realm,
-	    reg->auth->service ? reg->auth->service : reg->host,
-	    scope ? scope : "");
-
-	/* Fetch token */
-	CURL *curl = curl_easy_init();
+	curl = curl_easy_init();
+	if (curl == NULL) {
+		free(url);
+		return (-1);
+	}
 	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+	curl_easy_setopt(curl, CURLOPT_NOBODY, 0L);
+	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, www_auth_header_cb);
+	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &www);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &chunk);
+	res = curl_easy_perform(curl);
+	if (res == CURLE_OK)
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+	curl_easy_cleanup(curl);
+	free(url);
+	free(chunk.memory);
+	chunk.memory = NULL;
+	chunk.size = 0;
 
-	if (reg->auth->type == AUTH_BASIC) {
-		char *userpwd;
-		asprintf(&userpwd, "%s:%s", reg->auth->username,
-		    reg->auth->password);
-		curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-		curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-		free(userpwd);
+	if (res != CURLE_OK) {
+		fprintf(stderr, "error: cannot reach registry %s: %s\n",
+		    reg->host, curl_easy_strerror(res));
+		free(www);
+		return (-1);
 	}
 
-	curl_easy_perform(curl);
+	/* 200 with no auth challenge — anonymous OK */
+	if (response_code == 200) {
+		free(www);
+		return (0);
+	}
+
+	parse_www_authenticate(www, realm, sizeof(realm), service,
+	    sizeof(service));
+	if (realm[0] == '\0' && www != NULL) {
+		/*
+		 * Some curl builds deliver the challenge only as a bare
+		 * Bearer line; also try the raw header blob.
+		 */
+		parse_www_authenticate(www, realm, sizeof(realm), service,
+		    sizeof(service));
+	}
+	if (realm[0] == '\0' && response_code == 401) {
+		/*
+		 * Docker Hub always challenges on /v2/. Fall back to the
+		 * well-known token endpoint when the header is missing.
+		 */
+		if (strcmp(reg->host, "registry-1.docker.io") == 0 ||
+		    strcmp(reg->host, "registry.docker.io") == 0) {
+			strlcpy(realm, "https://auth.docker.io/token",
+			    sizeof(realm));
+			if (service[0] == '\0')
+				strlcpy(service, "registry.docker.io",
+				    sizeof(service));
+		}
+	}
+	free(www);
+
+	if (realm[0] == '\0') {
+		/* No realm; allow caller to try without token only if not 401 */
+		if (response_code == 401) {
+			fprintf(stderr,
+			    "error: registry %s returned 401 without realm\n",
+			    reg->host);
+			return (-1);
+		}
+		return (0);
+	}
+
+	if (service[0] != '\0') {
+		free(reg->auth->service);
+		reg->auth->service = strdup(service);
+	}
+
+	/* scope: repository:NAME:pull */
+	if (scope != NULL && scope[0] != '\0')
+		snprintf(scope_q, sizeof(scope_q),
+		    "repository:%s:pull", scope);
+	else if (reg->repository != NULL)
+		snprintf(scope_q, sizeof(scope_q),
+		    "repository:%s:pull", reg->repository);
+	else
+		scope_q[0] = '\0';
+
+	if (asprintf(&url, "%s?service=%s&scope=%s", realm,
+	    reg->auth->service != NULL ? reg->auth->service : reg->host,
+	    scope_q) < 0)
+		return (-1);
+
+	curl = curl_easy_init();
+	if (curl == NULL) {
+		free(url);
+		return (-1);
+	}
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &chunk);
+	res = curl_easy_perform(curl);
+	if (res == CURLE_OK)
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
 	curl_easy_cleanup(curl);
 	free(url);
 
-	/* Parse token response */
-	if (response != NULL) {
-		/* Simple JSON parsing for token */
-		p = strstr(response, "\"token\":\"");
-		if (p) {
-			p += 8;
-			end = strchr(p, '"');
-			if (end) {
-				*end = '\0';
-				reg->auth->type = AUTH_BEARER;
-				reg->auth->password = strdup(p);
-				ret = 0;
-			}
-		}
-		free(response);
+	if (res != CURLE_OK || response_code != 200 || chunk.memory == NULL) {
+		fprintf(stderr, "error: token request failed (HTTP %ld)\n",
+		    response_code);
+		free(chunk.memory);
+		return (-1);
 	}
 
+	/* Prefer "token", fall back to "access_token" */
+	p = strstr(chunk.memory, "\"token\":\"");
+	if (p != NULL)
+		p += 9;
+	else {
+		p = strstr(chunk.memory, "\"access_token\":\"");
+		if (p != NULL)
+			p += 16;
+	}
+	if (p != NULL) {
+		end = strchr(p, '"');
+		if (end != NULL) {
+			*end = '\0';
+			free(reg->auth->password);
+			reg->auth->password = strdup(p);
+			reg->auth->type = AUTH_BEARER;
+			ret = 0;
+		}
+	}
+	free(chunk.memory);
+	if (ret != 0)
+		fprintf(stderr, "error: no token in auth response\n");
 	return (ret);
 }
 
 /*
- * Fetch manifest for a repository:tag
+ * True if JSON is a multi-arch index / manifest list (not an image manifest).
  */
-int
-fetch_manifest(struct registry *reg, const char *repo, const char *tag,
-    struct oci_manifest **manifest)
+static int
+manifest_json_is_index(const char *json, const struct oci_manifest *m)
+{
+	if (m != NULL && m->media_type != NULL) {
+		if (strstr(m->media_type, "manifest.list") != NULL ||
+		    strstr(m->media_type, "image.index") != NULL)
+			return (1);
+	}
+	if (m != NULL && m->nlayers == 0 && json != NULL &&
+	    strstr(json, "\"manifests\"") != NULL)
+		return (1);
+	return (0);
+}
+
+/*
+ * Pick a platform-specific manifest digest from an OCI index.
+ * Prefer freebsd/amd64, then linux/amd64, then any amd64, then first entry.
+ */
+static int
+select_platform_digest(const char *json, char *out, size_t outsz)
+{
+	json_object *obj, *manifests, *entry, *platform, *os_o, *arch_o;
+	json_object *digest_o;
+	int i, n, best_score = -1;
+	const char *best = NULL;
+
+	if (json == NULL || out == NULL || outsz == 0)
+		return (-1);
+	out[0] = '\0';
+
+	obj = json_tokener_parse(json);
+	if (obj == NULL)
+		return (-1);
+	if (!json_object_object_get_ex(obj, "manifests", &manifests) ||
+	    !json_object_is_type(manifests, json_type_array)) {
+		json_object_put(obj);
+		return (-1);
+	}
+
+	n = json_object_array_length(manifests);
+	for (i = 0; i < n; i++) {
+		const char *os_s = "";
+		const char *arch_s = "";
+		int score = 1;
+
+		entry = json_object_array_get_idx(manifests, i);
+		if (entry == NULL)
+			continue;
+		if (json_object_object_get_ex(entry, "platform", &platform) &&
+		    platform != NULL) {
+			if (json_object_object_get_ex(platform, "os", &os_o))
+				os_s = json_object_get_string(os_o);
+			if (json_object_object_get_ex(platform, "architecture",
+			    &arch_o))
+				arch_s = json_object_get_string(arch_o);
+		}
+		if (os_s == NULL)
+			os_s = "";
+		if (arch_s == NULL)
+			arch_s = "";
+
+		if (strcmp(arch_s, "amd64") == 0 ||
+		    strcmp(arch_s, "x86_64") == 0)
+			score += 10;
+		if (strcmp(os_s, "freebsd") == 0)
+			score += 100;
+		else if (strcmp(os_s, "linux") == 0)
+			score += 50;
+
+		if (score > best_score &&
+		    json_object_object_get_ex(entry, "digest", &digest_o)) {
+			best = json_object_get_string(digest_o);
+			best_score = score;
+		}
+	}
+
+	if (best == NULL || best[0] == '\0') {
+		json_object_put(obj);
+		return (-1);
+	}
+	strlcpy(out, best, outsz);
+	json_object_put(obj);
+	return (0);
+}
+
+/*
+ * Fetch a single manifest document (no index resolution).
+ */
+static int
+fetch_manifest_once(struct registry *reg, const char *repo, const char *ref,
+    char **out_json, size_t *out_len)
 {
 	char *url;
 	char *path;
+	struct MemoryStruct chunk = { .memory = NULL, .size = 0 };
+	struct curl_slist *headers = NULL;
+	CURL *curl;
+	CURLcode res;
+	long response_code = 0;
 	int ret = -1;
 
-	/* Build manifest path */
-	if (asprintf(&path, "/v2/%s/manifests/%s", repo, tag) == -1)
+	if (asprintf(&path, "/v2/%s/manifests/%s", repo, ref) == -1)
 		return (-1);
-
 	url = build_url(reg, path);
 	free(path);
 	if (url == NULL)
 		return (-1);
 
-	/* Fetch manifest */
-	CURL *curl = curl_easy_init();
-	struct MemoryStruct chunk = { .memory = NULL, .size = 0 };
+	curl = curl_easy_init();
+	if (curl == NULL) {
+		free(url);
+		return (-1);
+	}
 
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-
-	/* Accept OCI and Docker manifests */
-	struct curl_slist *headers = NULL;
 	headers = curl_slist_append(headers,
 	    "Accept: application/vnd.oci.image.manifest.v1+json");
 	headers = curl_slist_append(headers,
 	    "Accept: application/vnd.docker.distribution.manifest.v2+json");
 	headers = curl_slist_append(headers,
-	    "Accept: application/vnd.docker.distribution.manifest.v1+json");
+	    "Accept: application/vnd.oci.image.index.v1+json");
+	headers = curl_slist_append(headers,
+	    "Accept: application/vnd.docker.distribution.manifest.list.v2+json");
+	headers = auth_headers(reg, headers);
+
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
 
-	CURLcode res = curl_easy_perform(curl);
-
-	if (res == CURLE_OK) {
-		long response_code;
+	res = curl_easy_perform(curl);
+	if (res == CURLE_OK)
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-		if (response_code == 200) {
-			ret = parse_manifest(chunk.memory, chunk.size, manifest);
-		}
+
+	if (res == CURLE_OK && response_code == 200 && chunk.memory != NULL) {
+		*out_json = chunk.memory;
+		*out_len = chunk.size;
+		chunk.memory = NULL;
+		ret = 0;
+	} else if (res != CURLE_OK) {
+		fprintf(stderr, "error: fetch manifest: %s\n",
+		    curl_easy_strerror(res));
+	} else {
+		fprintf(stderr,
+		    "error: fetch manifest HTTP %ld for %s:%s\n",
+		    response_code, repo, ref);
 	}
 
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 	free(url);
 	free(chunk.memory);
-
 	return (ret);
+}
+
+/*
+ * Fetch manifest for a repository:tag (resolves multi-arch indexes).
+ */
+int
+fetch_manifest(struct registry *reg, const char *repo, const char *tag,
+    struct oci_manifest **manifest)
+{
+	char *json = NULL;
+	size_t len = 0;
+	char plat_digest[128];
+	int ret = -1;
+
+	if (manifest == NULL)
+		return (-1);
+	*manifest = NULL;
+
+	if (fetch_manifest_once(reg, repo, tag, &json, &len) != 0)
+		return (-1);
+
+	ret = parse_manifest(json, len, manifest);
+	if (ret != 0) {
+		free(json);
+		return (-1);
+	}
+
+	/* Multi-arch index: pick platform and re-fetch image manifest */
+	if (manifest_json_is_index(json, *manifest)) {
+		if (select_platform_digest(json, plat_digest,
+		    sizeof(plat_digest)) != 0) {
+			fprintf(stderr,
+			    "error: multi-arch index has no usable platform\n");
+			free_manifest(*manifest);
+			*manifest = NULL;
+			free(json);
+			return (-1);
+		}
+		fprintf(stderr, "resolving multi-arch index -> %s\n",
+		    plat_digest);
+		free_manifest(*manifest);
+		*manifest = NULL;
+		free(json);
+		json = NULL;
+		len = 0;
+
+		if (fetch_manifest_once(reg, repo, plat_digest, &json,
+		    &len) != 0)
+			return (-1);
+		ret = parse_manifest(json, len, manifest);
+		if (ret != 0) {
+			free(json);
+			return (-1);
+		}
+		if (manifest_json_is_index(json, *manifest)) {
+			fprintf(stderr,
+			    "error: nested multi-arch index not supported\n");
+			free_manifest(*manifest);
+			*manifest = NULL;
+			free(json);
+			return (-1);
+		}
+	}
+
+	if (*manifest != NULL)
+		(*manifest)->raw = json;
+	else
+		free(json);
+
+	return (0);
 }
 
 /*
@@ -734,6 +1087,7 @@ fetch_config(struct registry *reg, const char *repo, const char *digest,
 {
 	char *url;
 	char *path;
+	struct curl_slist *headers = NULL;
 	int ret = -1;
 
 	if (asprintf(&path, "/v2/%s/blobs/%s", repo, digest) == -1)
@@ -747,21 +1101,41 @@ fetch_config(struct registry *reg, const char *repo, const char *digest,
 	CURL *curl = curl_easy_init();
 	struct MemoryStruct chunk = { .memory = NULL, .size = 0 };
 
+	if (curl == NULL) {
+		free(url);
+		return (-1);
+	}
+
+	headers = auth_headers(reg, headers);
+
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+	if (headers != NULL)
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
 	CURLcode res = curl_easy_perform(curl);
 
 	if (res == CURLE_OK) {
 		long response_code;
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-		if (response_code == 200) {
+		if (response_code == 200 && chunk.memory != NULL) {
 			ret = parse_config(chunk.memory, chunk.size, config);
+		} else {
+			fprintf(stderr,
+			    "error: fetch config HTTP %ld for %s\n",
+			    response_code, digest);
 		}
+	} else {
+		fprintf(stderr, "error: fetch config: %s\n",
+		    curl_easy_strerror(res));
 	}
 
+	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 	free(url);
 	free(chunk.memory);
@@ -811,27 +1185,151 @@ parse_config(const char *json, size_t len, struct oci_config **config)
 
 	/* Parse config section */
 	if (json_object_object_get_ex(obj, "config", &config_obj)) {
-		json_object *env, *workingDir, *user;
+		json_object *env, *workingDir, *user, *ep, *cmd;
+		int i, nep = 0, ncmd = 0, n, ai;
 
-		if (json_object_object_get_ex(config_obj, "Env", &env)) {
-			int i, n = json_object_array_length(env);
-			cfg->env = calloc(n + 1, sizeof(char *));
-			for (i = 0; i < n; i++)
-				cfg->env[i] = strdup(
-				    json_object_get_string(
-					json_object_array_get_idx(env, i)));
+		if (json_object_object_get_ex(config_obj, "Env", &env) &&
+		    json_object_is_type(env, json_type_array)) {
+			n = json_object_array_length(env);
+			cfg->env = calloc((size_t)n + 1, sizeof(char *));
+			if (cfg->env != NULL) {
+				for (i = 0; i < n; i++)
+					cfg->env[i] = strdup(
+					    json_object_get_string(
+						json_object_array_get_idx(
+						    env, i)));
+			}
 		}
 
-		if (json_object_object_get_ex(config_obj, "WorkingDir", &workingDir))
-			cfg->workdir = strdup(json_object_get_string(workingDir));
+		if (json_object_object_get_ex(config_obj, "WorkingDir",
+		    &workingDir))
+			cfg->workdir = strdup(
+			    json_object_get_string(workingDir));
 
 		if (json_object_object_get_ex(config_obj, "User", &user))
 			cfg->user = strdup(json_object_get_string(user));
+
+		/*
+		 * Entrypoint + Cmd → process.args for OCI runtime config.
+		 * Order: entrypoint elements then cmd elements.
+		 */
+		if (json_object_object_get_ex(config_obj, "Entrypoint", &ep) &&
+		    json_object_is_type(ep, json_type_array))
+			nep = json_object_array_length(ep);
+		if (json_object_object_get_ex(config_obj, "Cmd", &cmd) &&
+		    json_object_is_type(cmd, json_type_array))
+			ncmd = json_object_array_length(cmd);
+		n = nep + ncmd;
+		if (n > 0) {
+			cfg->cmd = calloc((size_t)n + 1, sizeof(char *));
+			if (cfg->cmd != NULL) {
+				ai = 0;
+				for (i = 0; i < nep; i++)
+					cfg->cmd[ai++] = strdup(
+					    json_object_get_string(
+						json_object_array_get_idx(
+						    ep, i)));
+				for (i = 0; i < ncmd; i++)
+					cfg->cmd[ai++] = strdup(
+					    json_object_get_string(
+						json_object_array_get_idx(
+						    cmd, i)));
+			}
+		}
 	}
 
 	json_object_put(obj);
 
 	*config = cfg;
+	return (0);
+}
+
+/*
+ * Write image-config.json (registry blob) and OCI runtime config.json
+ * so the image store directory is a usable bundle for create/run.
+ */
+static int
+write_runtime_config(const char *destdir, struct oci_config *cfg)
+{
+	char path[PATH_MAX];
+	FILE *f;
+	int i;
+
+	if (destdir == NULL)
+		return (-1);
+
+	/* Preserve raw image config separately from runtime config */
+	if (cfg != NULL && cfg->config != NULL) {
+		snprintf(path, sizeof(path), "%s/image-config.json", destdir);
+		f = fopen(path, "w");
+		if (f != NULL) {
+			fprintf(f, "%s\n", cfg->config);
+			fclose(f);
+		}
+	}
+
+	snprintf(path, sizeof(path), "%s/config.json", destdir);
+	f = fopen(path, "w");
+	if (f == NULL)
+		return (-1);
+
+	fprintf(f, "{\n");
+	fprintf(f, "  \"ociVersion\": \"1.0.2\",\n");
+	fprintf(f, "  \"hostname\": \"ocifbsd\",\n");
+	fprintf(f, "  \"process\": {\n");
+	fprintf(f, "    \"terminal\": false,\n");
+	fprintf(f, "    \"user\": { \"uid\": 0, \"gid\": 0 },\n");
+	fprintf(f, "    \"args\": [");
+	if (cfg != NULL && cfg->cmd != NULL && cfg->cmd[0] != NULL) {
+		for (i = 0; cfg->cmd[i] != NULL; i++) {
+			if (i > 0)
+				fprintf(f, ", ");
+			/* Minimal JSON string escape for common paths */
+			fprintf(f, "\"");
+			{
+				const char *p;
+				for (p = cfg->cmd[i]; *p != '\0'; p++) {
+					if (*p == '"' || *p == '\\')
+						fputc('\\', f);
+					fputc(*p, f);
+				}
+			}
+			fprintf(f, "\"");
+		}
+	} else {
+		fprintf(f, "\"/bin/sh\"");
+	}
+	fprintf(f, "],\n");
+	fprintf(f, "    \"env\": [");
+	if (cfg != NULL && cfg->env != NULL && cfg->env[0] != NULL) {
+		for (i = 0; cfg->env[i] != NULL; i++) {
+			if (i > 0)
+				fprintf(f, ", ");
+			fprintf(f, "\"");
+			{
+				const char *p;
+				for (p = cfg->env[i]; *p != '\0'; p++) {
+					if (*p == '"' || *p == '\\')
+						fputc('\\', f);
+					fputc(*p, f);
+				}
+			}
+			fprintf(f, "\"");
+		}
+	} else {
+		fprintf(f, "\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"");
+	}
+	fprintf(f, "],\n");
+	fprintf(f, "    \"cwd\": \"%s\"\n",
+	    (cfg != NULL && cfg->workdir != NULL && cfg->workdir[0] != '\0') ?
+	    cfg->workdir : "/");
+	fprintf(f, "  },\n");
+	fprintf(f, "  \"root\": {\n");
+	fprintf(f, "    \"path\": \"rootfs\",\n");
+	fprintf(f, "    \"readonly\": false\n");
+	fprintf(f, "  }\n");
+	fprintf(f, "}\n");
+	fclose(f);
 	return (0);
 }
 
@@ -879,8 +1377,12 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 	char *path;
 	FILE *out;
 	char filename[PATH_MAX];
-	struct progress_data pd = { cb, opaque, layer->digest, layer->size };
+	struct download_state ds;
+	struct curl_slist *headers = NULL;
 	int ret = -1;
+
+	if (layer == NULL || layer->digest == NULL)
+		return (-1);
 
 	if (layer->url == NULL) {
 		const char *repo = reg->repository != NULL ? reg->repository :
@@ -899,7 +1401,7 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 	if (url == NULL)
 		return (-1);
 
-	/* Create output file */
+	/* Create output file (digest may contain ':') */
 	snprintf(filename, sizeof(filename), "%s/%s.layer",
 	    destdir, layer->digest);
 	out = fopen(filename, "wb");
@@ -908,22 +1410,32 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 		return (-1);
 	}
 
+	memset(&ds, 0, sizeof(ds));
+	ds.out = out;
+	ds.cb = cb;
+	ds.opaque = opaque;
+	ds.what = layer->digest;
+	ds.total = (off_t)layer->size;
+	ds.written = 0;
+
 	CURL *curl = curl_easy_init();
+	if (curl == NULL) {
+		fclose(out);
+		free(url);
+		return (-1);
+	}
+
+	headers = auth_headers(reg, headers);
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
-	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
-	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &pd);
-
-	/* Set progress */
-	if (cb != NULL) {
-		curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-	}
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_cb);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ds);
+	if (headers != NULL)
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
 	CURLcode res = curl_easy_perform(curl);
 
@@ -936,8 +1448,12 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 			fprintf(stderr, "error: HTTP %ld for layer %s\n",
 			    response_code, layer->digest);
 		}
+	} else {
+		fprintf(stderr, "error: layer download: %s\n",
+		    curl_easy_strerror(res));
 	}
 
+	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 	free(url);
 	fclose(out);
@@ -950,6 +1466,8 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 			unlink(filename);
 			ret = -1;
 		}
+	} else {
+		unlink(filename);
 	}
 
 	return (ret);
@@ -1038,19 +1556,47 @@ registry_pull(struct registry *reg, const char *reference,
 	    "%s/manifest.json", destdir);
 	FILE *mf = fopen(manifest_path, "w");
 	if (mf) {
-		fprintf(mf, "%s\n", manifest->raw);
+		if (manifest->raw != NULL)
+			fprintf(mf, "%s\n", manifest->raw);
 		fclose(mf);
 	}
 
-	/* Save config */
-	char config_path[PATH_MAX];
-	snprintf(config_path, sizeof(config_path),
-	    "%s/config.json", destdir);
-	FILE *cfg = fopen(config_path, "w");
-	if (cfg) {
-		if (config)
-			fprintf(cfg, "%s\n", config->config);
-		fclose(cfg);
+	/*
+	 * Apply layers in order into destdir/rootfs (merged OCI rootfs).
+	 * Failures are reported but do not fail the pull of blobs/manifest.
+	 */
+	if (manifest->nlayers > 0) {
+		char rootfs[PATH_MAX];
+		char layer_path[PATH_MAX];
+
+		snprintf(rootfs, sizeof(rootfs), "%s/rootfs", destdir);
+		if (mkdirp_path(rootfs, 0755) != 0) {
+			fprintf(stderr,
+			    "warning: cannot create rootfs %s: %s\n",
+			    rootfs, strerror(errno));
+		} else {
+			for (i = 0; i < manifest->nlayers; i++) {
+				snprintf(layer_path, sizeof(layer_path),
+				    "%s/layers/%s.layer", destdir,
+				    manifest->layers[i]->digest);
+				if (unpack_layer(layer_path, rootfs,
+				    NULL) != 0) {
+					fprintf(stderr,
+					    "warning: unpack layer %d failed\n",
+					    i);
+				}
+			}
+		}
+	}
+
+	/*
+	 * Write image-config.json + OCI runtime config.json so destdir is a
+	 * valid create/run bundle (root.path = rootfs).
+	 */
+	if (write_runtime_config(destdir, config) != 0) {
+		fprintf(stderr,
+		    "warning: failed to write runtime config under %s\n",
+		    destdir);
 	}
 
 	ret = 0;

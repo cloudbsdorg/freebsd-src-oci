@@ -336,8 +336,15 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 
 	switch (archive_entry_filetype(entry)) {
 	case AE_IFREG: {
-		/* Create parent directory */
-		char *parent = dirname(path);
+		/*
+		 * dirname(3) may modify its argument in place — copy first
+		 * so we do not clobber the full destination path.
+		 */
+		char path_copy[PATH_MAX];
+		char *parent;
+
+		strlcpy(path_copy, path, sizeof(path_copy));
+		parent = dirname(path_copy);
 		if (mkdirp(parent, 0755) != 0 && errno != EEXIST) {
 			fprintf(stderr, "error: cannot create directory: %s\n",
 			    parent);
@@ -347,7 +354,8 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 		fd = open(path, O_CREAT | O_WRONLY | O_TRUNC,
 		    archive_entry_mode(entry));
 		if (fd < 0) {
-			fprintf(stderr, "error: cannot create file: %s\n", path);
+			fprintf(stderr, "error: cannot create file: %s: %s\n",
+			    path, strerror(errno));
 			return (-1);
 		}
 
@@ -391,11 +399,15 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 	case AE_IFLNK:
 		{
 		const char *link = archive_entry_symlink(entry);
+		char path_copy[PATH_MAX];
+		char *parent;
+
 		if (link == NULL)
 			break;
 
-		/* Create parent directory */
-		char *parent = dirname(path);
+		/* dirname(3) mutates its argument — copy first */
+		strlcpy(path_copy, path, sizeof(path_copy));
+		parent = dirname(path_copy);
 		if (mkdirp(parent, 0755) != 0 && errno != EEXIST) {
 			fprintf(stderr, "error: cannot create directory: %s\n",
 			    parent);

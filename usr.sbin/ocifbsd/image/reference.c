@@ -133,6 +133,22 @@ parse_reference(const char *ref, char **registry, char **repo,
 		}
 	}
 
+	/*
+	 * Docker Hub official images: single path component maps to
+	 * library/<name> (e.g. hello-world -> library/hello-world).
+	 */
+	if (*repo != NULL && strchr(*repo, '/') == NULL &&
+	    (strcmp(*registry, "docker.io") == 0 ||
+	    strcmp(*registry, "index.docker.io") == 0 ||
+	    strcmp(*registry, "registry-1.docker.io") == 0)) {
+		char *librepo;
+
+		if (asprintf(&librepo, "library/%s", *repo) < 0)
+			return (-1);
+		free(*repo);
+		*repo = librepo;
+	}
+
 	return (0);
 }
 

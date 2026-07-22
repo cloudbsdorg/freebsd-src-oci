@@ -23,7 +23,7 @@ help_lists_commands_body()
 	# usage is printed on stderr
 	atf_check -s exit:0 -e match:"create" -e match:"start" \
 	    -e match:"kill" -e match:"delete" -e match:"state" \
-	    -e match:"pull" -e match:"images" \
+	    -e match:"pull" -e match:"images" -e match:"rmi" \
 	    "${bin}" --help
 }
 
@@ -140,6 +140,71 @@ pull_real_unreachable_body()
 	    "${bin}" pull not-a-real-registry.invalid/ocifbsd/test:latest
 }
 
+atf_test_case rmi_missing_fails
+rmi_missing_fails_head()
+{
+	atf_set "descr" "rmi fails when image is not in the local store"
+}
+rmi_missing_fails_body()
+{
+	local bin store
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	store=$(pwd)/imgstore-rmi
+	mkdir -p "${store}"
+	atf_check -s not-exit:0 -e ignore \
+	    env OCIFBSD_DATA_DIR="${store}" \
+	    "${bin}" rmi ghcr.io/cloudbsd/does-not-exist:latest
+}
+
+atf_test_case rmi_removes_store
+rmi_removes_store_head()
+{
+	atf_set "descr" "rmi deletes a local image store directory"
+}
+rmi_removes_store_body()
+{
+	local bin store img
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	store=$(pwd)/imgstore-rmi2
+	img="${store}/ghcr.io/cloudbsd/demo/latest"
+	mkdir -p "${img}/rootfs"
+	echo '{}' > "${img}/config.json"
+	atf_check -s exit:0 -o match:"deleted=" \
+	    env OCIFBSD_DATA_DIR="${store}" \
+	    "${bin}" rmi ghcr.io/cloudbsd/demo:latest
+	if [ -d "${img}" ]; then
+		atf_fail "image store still present after rmi"
+	fi
+}
+
+atf_test_case create_image_missing_fails
+create_image_missing_fails_head()
+{
+	atf_set "descr" "create --image fails when store is not ready"
+}
+create_image_missing_fails_body()
+{
+	local bin store
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	store=$(pwd)/imgstore-create
+	mkdir -p "${store}"
+	atf_check -s not-exit:0 -e match:"image not ready" \
+	    env OCIFBSD_DATA_DIR="${store}" \
+	    "${bin}" create --image ghcr.io/cloudbsd/missing:latest
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case help_lists_commands
@@ -149,4 +214,7 @@ atf_init_test_cases()
 	atf_add_test_case images_empty_ok
 	atf_add_test_case pull_invalid_ref
 	atf_add_test_case pull_real_unreachable
+	atf_add_test_case rmi_missing_fails
+	atf_add_test_case rmi_removes_store
+	atf_add_test_case create_image_missing_fails
 }

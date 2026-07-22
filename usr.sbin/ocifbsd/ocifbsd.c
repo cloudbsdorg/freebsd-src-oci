@@ -37,6 +37,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fts.h>
 #include <getopt.h>
 #include <limits.h>
 #include <stdio.h>
@@ -75,16 +76,17 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "  -h, --help       Show this help message\n");
 		fprintf(stderr, "  -V, --version    Show version information\n");
 		fprintf(stderr, "\nCommands:\n");
-		fprintf(stderr, "  create <bundle> [--name <name>]  Create a container\n");
+		fprintf(stderr, "  create [--name N] [--image REF|bundle]  Create a container\n");
 		fprintf(stderr, "  start <container-id>              Start a created container\n");
 		fprintf(stderr, "  kill <container-id> [signal]      Send signal to container\n");
 		fprintf(stderr, "  delete <container-id> [--force]   Delete a container\n");
 		fprintf(stderr, "  state <container-id>              Show container state\n");
 		fprintf(stderr, "  list                               List containers\n");
 		fprintf(stderr, "  inspect <container-id>            Show container details\n");
-		fprintf(stderr, "  run <bundle> [--name <name>]      Create and start in one command\n");
+		fprintf(stderr, "  run [--name N] [--image REF|bundle]     Create and start\n");
 		fprintf(stderr, "  pull <reference> [--dry-run]      Resolve/pull OCI image reference\n");
 		fprintf(stderr, "  images                            List local image store paths\n");
+		fprintf(stderr, "  rmi <reference>                   Remove a local image store\n");
 		fprintf(stderr, "\nRun '%s help <command>' for more information on a command.\n",
 		    prog);
 	} else {
@@ -99,35 +101,139 @@ version(void)
 	printf("FreeBSD OCI Runtime - %s\n", OCIFBSD_NAME);
 }
 
+/*
+ * Resolve an image reference to a local store path (OCIFBSD_DATA_DIR layout).
+ */
+static char *
+resolve_image_store(const char *ref)
+{
+	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
+	char *path = NULL;
+
+	if (ref == NULL || ref[0] == '\0')
+		return (NULL);
+	if (parse_reference(ref, &registry, &repo, &tag, &digest) != 0)
+		return (NULL);
+	path = zfs_image_path(registry, repo, tag);
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+	return (path);
+}
+
+/*
+ * Ensure a pulled/local image store can be used as an OCI bundle.
+ */
+static int
+image_store_ready(const char *store)
+{
+	char path[PATH_MAX];
+	struct stat st;
+
+	if (store == NULL)
+		return (0);
+	snprintf(path, sizeof(path), "%s/config.json", store);
+	if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
+		return (0);
+	snprintf(path, sizeof(path), "%s/rootfs", store);
+	if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+		return (0);
+	return (1);
+}
+
+/* Recursive remove for rmi (depth-first). */
+static int
+rm_rf(const char *path)
+{
+	char *paths[2];
+	char *path_copy;
+	FTS *fts;
+	FTSENT *ent;
+	int ret = 0;
+
+	if (path == NULL || path[0] == '\0' || strcmp(path, "/") == 0) {
+		errno = EINVAL;
+		return (-1);
+	}
+	path_copy = strdup(path);
+	if (path_copy == NULL)
+		return (-1);
+	paths[0] = path_copy;
+	paths[1] = NULL;
+	fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR | FTS_XDEV, NULL);
+	if (fts == NULL) {
+		free(path_copy);
+		return (-1);
+	}
+	while ((ent = fts_read(fts)) != NULL) {
+		switch (ent->fts_info) {
+		case FTS_D:
+			break;
+		case FTS_DP:
+		case FTS_F:
+		case FTS_SL:
+		case FTS_SLNONE:
+		case FTS_DEFAULT:
+		case FTS_NSOK:
+			if (remove(ent->fts_accpath) != 0 && errno != ENOENT) {
+				fprintf(stderr, "error: cannot remove %s: %s\n",
+				    ent->fts_accpath, strerror(errno));
+				ret = -1;
+			}
+			break;
+		case FTS_ERR:
+		case FTS_NS:
+			fprintf(stderr, "error: %s: %s\n", ent->fts_path,
+			    strerror(ent->fts_errno));
+			ret = -1;
+			break;
+		default:
+			break;
+		}
+	}
+	fts_close(fts);
+	free(path_copy);
+	return (ret);
+}
+
 /* Command handlers */
 static int
 cmd_create(int argc, char **argv)
 {
 	const char *bundle = NULL;
 	const char *name = NULL;
+	const char *image_ref = NULL;
 	struct ocifbsd_container *c;
-	char *bundle_path;
+	char *bundle_path = NULL;
 	char *cname;
 	int ret;
+	int from_image = 0;
 
 	/* Parse create-specific options */
 	static struct option longopts[] = {
-		{ "name", required_argument, NULL, 'n' },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL, 0, NULL, 0 }
+		{ "name",	required_argument,	NULL, 'n' },
+		{ "image",	required_argument,	NULL, 'i' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
 	};
 
 	int ch;
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+n:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "+n:i:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			name = optarg;
 			break;
+		case 'i':
+			image_ref = optarg;
+			from_image = 1;
+			break;
 		case 'h':
-			usage(argv[0], "create [--name name] <bundle>");
+			usage(argv[0],
+			    "create [--name name] [--image ref | <bundle>]");
 			return (0);
 		default:
 			usage(argv[0], "create");
@@ -138,26 +244,42 @@ cmd_create(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if (argc < 1) {
-		fprintf(stderr, "error: bundle path required\n");
-		usage("ocifbsd", "create");
-		return (1);
-	}
-
-	bundle = argv[0];
-
-	/* Resolve bundle path */
-	bundle_path = resolve_bundle_path(bundle);
-	if (bundle_path == NULL) {
-		fprintf(stderr, "error: invalid bundle path: %s\n", bundle);
-		return (1);
+	if (from_image) {
+		bundle_path = resolve_image_store(image_ref);
+		if (bundle_path == NULL) {
+			fprintf(stderr, "error: invalid image reference: %s\n",
+			    image_ref);
+			return (1);
+		}
+		if (!image_store_ready(bundle_path)) {
+			fprintf(stderr,
+			    "error: image not ready (pull first): %s\n"
+			    "  store=%s\n", image_ref, bundle_path);
+			free(bundle_path);
+			return (1);
+		}
+	} else {
+		if (argc < 1) {
+			fprintf(stderr,
+			    "error: bundle path or --image required\n");
+			usage("ocifbsd", "create");
+			return (1);
+		}
+		bundle = argv[0];
+		bundle_path = resolve_bundle_path(bundle);
+		if (bundle_path == NULL) {
+			fprintf(stderr, "error: invalid bundle path: %s\n",
+			    bundle);
+			return (1);
+		}
 	}
 
 	/* Canonicalize name if provided */
 	if (name != NULL) {
 		cname = canonical_name(name);
 		if (cname == NULL) {
-			fprintf(stderr, "error: invalid container name: %s\n", name);
+			fprintf(stderr, "error: invalid container name: %s\n",
+			    name);
 			free(bundle_path);
 			return (1);
 		}
@@ -167,7 +289,8 @@ cmd_create(int argc, char **argv)
 
 	/* Create container */
 	if (verbose) {
-		fprintf(stderr, "Creating container from bundle: %s\n", bundle_path);
+		fprintf(stderr, "Creating container from %s: %s\n",
+		    from_image ? "image" : "bundle", bundle_path);
 		if (cname)
 			fprintf(stderr, "Container name: %s\n", cname);
 	}
@@ -573,28 +696,36 @@ cmd_run(int argc, char **argv)
 {
 	const char *bundle = NULL;
 	const char *name = NULL;
+	const char *image_ref = NULL;
 	struct ocifbsd_container *c;
-	char *bundle_path;
+	char *bundle_path = NULL;
 	char *cname;
 	int ret;
+	int from_image = 0;
 
 	/* Parse run-specific options */
 	static struct option longopts[] = {
-		{ "name", required_argument, NULL, 'n' },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL, 0, NULL, 0 }
+		{ "name",	required_argument,	NULL, 'n' },
+		{ "image",	required_argument,	NULL, 'i' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
 	};
 
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+n:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "+n:i:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			name = optarg;
 			break;
+		case 'i':
+			image_ref = optarg;
+			from_image = 1;
+			break;
 		case 'h':
-			usage(argv[0], "run <bundle> [--name <name>]");
+			usage(argv[0],
+			    "run [--name name] [--image ref | <bundle>]");
 			return (0);
 		default:
 			usage(argv[0], "run");
@@ -605,26 +736,42 @@ cmd_run(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	if (argc < 1) {
-		fprintf(stderr, "error: bundle path required\n");
-		usage(argv[-optind], "run");
-		return (1);
-	}
-
-	bundle = argv[0];
-
-	/* Resolve bundle path */
-	bundle_path = resolve_bundle_path(bundle);
-	if (bundle_path == NULL) {
-		fprintf(stderr, "error: invalid bundle path: %s\n", bundle);
-		return (1);
+	if (from_image) {
+		bundle_path = resolve_image_store(image_ref);
+		if (bundle_path == NULL) {
+			fprintf(stderr, "error: invalid image reference: %s\n",
+			    image_ref);
+			return (1);
+		}
+		if (!image_store_ready(bundle_path)) {
+			fprintf(stderr,
+			    "error: image not ready (pull first): %s\n"
+			    "  store=%s\n", image_ref, bundle_path);
+			free(bundle_path);
+			return (1);
+		}
+	} else {
+		if (argc < 1) {
+			fprintf(stderr,
+			    "error: bundle path or --image required\n");
+			usage("ocifbsd", "run");
+			return (1);
+		}
+		bundle = argv[0];
+		bundle_path = resolve_bundle_path(bundle);
+		if (bundle_path == NULL) {
+			fprintf(stderr, "error: invalid bundle path: %s\n",
+			    bundle);
+			return (1);
+		}
 	}
 
 	/* Canonicalize name if provided */
 	if (name != NULL) {
 		cname = canonical_name(name);
 		if (cname == NULL) {
-			fprintf(stderr, "error: invalid container name: %s\n", name);
+			fprintf(stderr, "error: invalid container name: %s\n",
+			    name);
 			free(bundle_path);
 			return (1);
 		}
@@ -634,7 +781,8 @@ cmd_run(int argc, char **argv)
 
 	/* Create container */
 	if (verbose) {
-		fprintf(stderr, "Creating container from bundle: %s\n", bundle_path);
+		fprintf(stderr, "Creating container from %s: %s\n",
+		    from_image ? "image" : "bundle", bundle_path);
 		if (cname)
 			fprintf(stderr, "Container name: %s\n", cname);
 	}
@@ -770,12 +918,16 @@ cmd_images(int argc, char **argv)
 {
 	DIR *dir;
 	struct dirent *ent;
-	const char *base = OCIFBSD_DATA_DIR;
+	const char *base;
 	char path[PATH_MAX];
 	int found = 0;
 
 	(void)argc;
 	(void)argv;
+
+	base = getenv("OCIFBSD_DATA_DIR");
+	if (base == NULL || base[0] == '\0')
+		base = OCIFBSD_DATA_DIR;
 
 	/*
 	 * Image store layout (paths.c): /var/lib/ocifbsd/<registry>/...
@@ -810,6 +962,71 @@ cmd_images(int argc, char **argv)
 	return (0);
 }
 
+/*
+ * rmi — remove a local image store directory for a reference.
+ */
+static int
+cmd_rmi(int argc, char **argv)
+{
+	const char *ref = NULL;
+	char *store_path = NULL;
+	struct stat st;
+	int ch;
+
+	static struct option longopts[] = {
+		{ "help",	no_argument,	NULL, 'h' },
+		{ NULL,		0,		NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'h':
+			usage(argv[0], "rmi <reference>");
+			return (0);
+		default:
+			usage(argv[0], "rmi");
+			return (1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+	if (argc < 1) {
+		usage("ocifbsd", "rmi <reference>");
+		return (1);
+	}
+	ref = argv[0];
+
+	store_path = resolve_image_store(ref);
+	if (store_path == NULL) {
+		fprintf(stderr, "error: invalid image reference: %s\n", ref);
+		return (1);
+	}
+	if (stat(store_path, &st) != 0) {
+		fprintf(stderr, "error: image not found: %s\n", ref);
+		free(store_path);
+		return (1);
+	}
+	if (!S_ISDIR(st.st_mode)) {
+		fprintf(stderr, "error: not an image store: %s\n", store_path);
+		free(store_path);
+		return (1);
+	}
+
+	if (verbose)
+		fprintf(stderr, "removing image store %s\n", store_path);
+
+	if (rm_rf(store_path) != 0) {
+		fprintf(stderr, "error: failed to remove %s\n", store_path);
+		free(store_path);
+		return (1);
+	}
+	printf("deleted=%s\n", store_path);
+	free(store_path);
+	return (0);
+}
+
 /* Command table */
 struct command {
 	const char *name;
@@ -828,6 +1045,7 @@ static struct command commands[] = {
 	{ "run",	cmd_run,	"Create and start container" },
 	{ "pull",	cmd_pull,	"Resolve or pull an OCI image" },
 	{ "images",	cmd_images,	"List local image store" },
+	{ "rmi",	cmd_rmi,	"Remove a local image" },
 	{ NULL,		NULL,		NULL },
 };
 

@@ -134,6 +134,35 @@ ATF_TC_BODY(ref_canonical, tc)
 	free(c);
 }
 
+ATF_TC(ref_docker_hub_official);
+ATF_TC_HEAD(ref_docker_hub_official, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "single-component docker.io name maps to library/");
+}
+ATF_TC_BODY(ref_docker_hub_official, tc)
+{
+	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
+
+	ATF_REQUIRE_EQ(parse_reference("hello-world:latest",
+	    &registry, &repo, &tag, &digest), 0);
+	ATF_CHECK_STREQ(registry, "docker.io");
+	ATF_CHECK_STREQ(repo, "library/hello-world");
+	ATF_CHECK_STREQ(tag, "latest");
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+
+	ATF_REQUIRE_EQ(parse_reference("docker.io/alpine",
+	    &registry, &repo, &tag, &digest), 0);
+	ATF_CHECK_STREQ(repo, "library/alpine");
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+}
+
 ATF_TC(zfs_paths);
 ATF_TC_HEAD(zfs_paths, tc)
 {
@@ -180,6 +209,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ref_null);
 	ATF_TP_ADD_TC(tp, ref_default_tag);
 	ATF_TP_ADD_TC(tp, ref_canonical);
+	ATF_TP_ADD_TC(tp, ref_docker_hub_official);
 	ATF_TP_ADD_TC(tp, zfs_paths);
 	return (atf_no_error());
 }
