@@ -210,17 +210,22 @@ EOF
 }
 create_start_with_nullfs_cleanup()
 {
-	local bin
+	local bin mp
 
 	bin=$(ocifbsd_bin) || return 0
 	for j in $(jls -q name 2>/dev/null | grep '^ocifbsd-'); do
 		"${bin}" delete --force "${j#ocifbsd-}" 2>/dev/null || true
 		jail -r "${j}" 2>/dev/null || true
 	done
-	# leftover mounts from failed runs
-	mount | awk '/rootfs\\/data/ {print $3}' | while read -r mp; do
+	# leftover mounts from failed runs (any nullfs under work dir)
+	mount -p 2>/dev/null | awk '$2 ~ /rootfs\/data$/ { print $2 }' |
+	    while read -r mp; do
 		umount -f "${mp}" 2>/dev/null || true
 	done
+	# also try the atf work directory path if still mounted
+	if [ -d "$(pwd)/bundle/rootfs/data" ]; then
+		umount -f "$(pwd)/bundle/rootfs/data" 2>/dev/null || true
+	fi
 }
 
 atf_init_test_cases()

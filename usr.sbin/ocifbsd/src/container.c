@@ -439,7 +439,36 @@ container_apply_mounts(struct ocifbsd_container *c)
 }
 
 /*
+ * Unmount a single absolute path (best-effort).
+ */
+static void
+umount_path(const char *target)
+{
+	char *argv[4];
+
+	if (target == NULL || target[0] == '\0')
+		return;
+	argv[0] = __DECONST(char *, "/sbin/umount");
+	argv[1] = __DECONST(char *, "-f");
+	argv[2] = __DECONST(char *, target);
+	argv[3] = NULL;
+	if (run_mount_cmd(argv) != 0) {
+		/*
+		 * EINVAL/ENOENT mean nothing was mounted — ignore.
+		 * Other errors: warn and continue.
+		 */
+		if (errno != EINVAL && errno != ENOENT)
+			fprintf(stderr, "warning: umount %s failed: %s\n",
+			    target, strerror(errno));
+	}
+}
+
+/*
  * Unmount previously applied mounts in reverse order.
+ *
+ * applied_mounts is process-local (not in state.json). After a separate
+ * CLI process reloads the container, rebuild targets from the OCI spec
+ * so delete still tears mounts down.
  */
 int
 container_unmount_all(struct ocifbsd_container *c)
@@ -449,26 +478,43 @@ container_unmount_all(struct ocifbsd_container *c)
 	if (c == NULL)
 		return (0);
 
-	for (i = c->n_applied_mounts - 1; i >= 0; i--) {
-		char *argv[4];
-
-		if (c->applied_mounts[i] == NULL)
-			continue;
-		argv[0] = __DECONST(char *, "/sbin/umount");
-		argv[1] = __DECONST(char *, "-f");
-		argv[2] = c->applied_mounts[i];
-		argv[3] = NULL;
-		if (run_mount_cmd(argv) != 0) {
-			fprintf(stderr,
-			    "warning: umount %s failed: %s\n",
-			    c->applied_mounts[i], strerror(errno));
+	if (c->n_applied_mounts > 0 && c->applied_mounts != NULL) {
+		for (i = c->n_applied_mounts - 1; i >= 0; i--) {
+			umount_path(c->applied_mounts[i]);
+			free(c->applied_mounts[i]);
+			c->applied_mounts[i] = NULL;
 		}
-		free(c->applied_mounts[i]);
-		c->applied_mounts[i] = NULL;
+		free(c->applied_mounts);
+		c->applied_mounts = NULL;
+		c->n_applied_mounts = 0;
+		return (0);
 	}
-	free(c->applied_mounts);
-	c->applied_mounts = NULL;
-	c->n_applied_mounts = 0;
+
+	/* Derive from spec when this process did not apply the mounts. */
+	if (c->spec == NULL && c->config_path != NULL)
+		c->spec = oci_parse_config(c->config_path);
+	if (c->spec != NULL && c->rootfs != NULL &&
+	    c->spec->mounts != NULL && c->spec->n_mounts > 0) {
+		for (i = c->spec->n_mounts - 1; i >= 0; i--) {
+			char dest[PATH_MAX];
+			struct oci_mount *m = &c->spec->mounts[i];
+			const char *fstype;
+
+			if (m->destination == NULL || m->destination[0] == '\0')
+				continue;
+			fstype = oci_mount_type_to_fbsd(m->type);
+			if (fstype == NULL)
+				continue;
+			if (m->destination[0] == '/')
+				snprintf(dest, sizeof(dest), "%s%s", c->rootfs,
+				    m->destination);
+			else
+				snprintf(dest, sizeof(dest), "%s/%s", c->rootfs,
+				    m->destination);
+			umount_path(dest);
+		}
+	}
+
 	return (0);
 }
 
