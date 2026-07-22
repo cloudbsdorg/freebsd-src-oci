@@ -592,7 +592,19 @@ oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
 		ADD_PARAM("allow.chflags", "1");
 	}
 
-	/* Name parameter (used by jail(8)) */
+	/*
+	 * Persist without processes so create→start works as two steps.
+	 * Without this, JAIL_CREATE with no attached process does not keep
+	 * a usable jail for a later container_start().
+	 */
+	ADD_PARAM("persist", "true");
+
+	/*
+	 * Jail name is set by the caller via jailparam after this helper
+	 * when a unique name is known. Default here is only a placeholder;
+	 * container_create overrides "name" after generating the container
+	 * id. Keep a stable default for direct unit tests of this helper.
+	 */
 	ADD_PARAM("name", "ocifbsd-container");
 
 #undef ADD_PARAM

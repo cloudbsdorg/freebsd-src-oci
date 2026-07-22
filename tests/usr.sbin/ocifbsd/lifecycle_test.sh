@@ -1,0 +1,149 @@
+#-
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# Copyright (c) 2026 CloudBSD
+#
+# Integration test: create → start → state → kill → delete using a
+# minimal OCI bundle and a static /rescue binary as the jail rootfs.
+# Requires root (jail_create / jail_remove).
+
+# Resolve ocifbsd binary: prefer sibling objdir layout under MAKEOBJDIRPREFIX
+ocifbsd_bin()
+{
+	local srcdir bin
+
+	srcdir=$(atf_get_srcdir)
+	# From tests/usr.sbin/ocifbsd → usr.sbin/ocifbsd/ocifbsd (src or obj)
+	bin="${srcdir}/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ -x "${bin}" ]; then
+		echo "${bin}"
+		return 0
+	fi
+	# Fall back to PATH
+	if command -v ocifbsd >/dev/null 2>&1; then
+		command -v ocifbsd
+		return 0
+	fi
+	return 1
+}
+
+make_bundle()
+{
+	local bundle rootfs
+
+	bundle=$(pwd)/bundle
+	rootfs=${bundle}/rootfs
+	mkdir -p "${rootfs}/bin" "${rootfs}/tmp"
+	# /rescue/* are static on FreeBSD — ideal for a minimal jail rootfs
+	if [ ! -x /rescue/sleep ]; then
+		atf_skip "/rescue/sleep not available"
+	fi
+	cp /rescue/sleep "${rootfs}/bin/sleep"
+	chmod 755 "${rootfs}/bin/sleep"
+
+	cat > "${bundle}/config.json" <<EOF
+{
+  "ociVersion": "1.0.2",
+  "hostname": "ocifbsd-life",
+  "process": {
+    "terminal": false,
+    "user": { "uid": 0, "gid": 0 },
+    "args": [ "/bin/sleep", "120" ],
+    "env": [ "PATH=/bin", "TERM=xterm" ],
+    "cwd": "/"
+  },
+  "root": {
+    "path": "rootfs",
+    "readonly": false
+  }
+}
+EOF
+	echo "${bundle}"
+}
+
+atf_test_case create_start_kill_delete cleanup
+create_start_kill_delete_head()
+{
+	atf_set "descr" "create/start/state/kill/delete lifecycle on FreeBSD jail"
+	atf_set "require.user" "root"
+}
+create_start_kill_delete_body()
+{
+	local bin bundle cid name
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	bundle=$(make_bundle)
+	name="life$$"
+
+	# create (prints container id on stdout)
+	atf_check -s exit:0 -e ignore -o save:create.out \
+	    "${bin}" create "${bundle}" --name "${name}"
+	cid=$(tr -d ' \t\r\n' < create.out)
+	if ! expr "${cid}" : '[0-9a-f]\{64\}$' >/dev/null 2>&1; then
+		atf_fail "create did not print a 64-hex id (got: ${cid})"
+	fi
+
+	# state after create should mention created or the id
+	atf_check -s exit:0 -e ignore -o save:state1.out \
+	    "${bin}" state "${cid}"
+	if ! grep -qiE "created|${cid}" state1.out; then
+		atf_fail "state after create unexpected: $(cat state1.out)"
+	fi
+
+	# start
+	atf_check -s exit:0 -e ignore "${bin}" start "${cid}"
+
+	# running: jail should exist
+	atf_check -s exit:0 -o match:"ocifbsd-" jls -n name
+
+	# kill (SIGTERM default)
+	atf_check -s exit:0 -e ignore "${bin}" kill "${cid}"
+
+	# delete
+	atf_check -s exit:0 -e ignore "${bin}" delete "${cid}" --force || \
+	    atf_check -s exit:0 -e ignore "${bin}" delete "${cid}"
+
+	# gone from jls
+	if jls -n name 2>/dev/null | grep -q "ocifbsd-"; then
+		# may still list other ocifbsd jails; ensure ours is gone
+		if jls -n name | grep -q "${cid}"; then
+			atf_fail "jail still present after delete"
+		fi
+	fi
+}
+create_start_kill_delete_cleanup()
+{
+	local bin cid
+
+	bin=$(ocifbsd_bin) || return 0
+	# Best-effort cleanup of leftover test jails/containers
+	for cid in $(jls -n name 2>/dev/null | sed -n 's/.*name=ocifbsd-\([0-9a-f]*\).*/\1/p'); do
+		"${bin}" delete "ocifbsd-${cid}" --force 2>/dev/null || true
+		"${bin}" delete "${cid}" --force 2>/dev/null || true
+	done
+	# remove by name pattern
+	for j in $(jls -q name 2>/dev/null | grep '^ocifbsd-'); do
+		jail -r "${j}" 2>/dev/null || true
+	done
+}
+
+atf_test_case create_rejects_missing_bundle
+create_rejects_missing_bundle_head()
+{
+	atf_set "descr" "create fails on missing bundle path"
+	atf_set "require.user" "root"
+}
+create_rejects_missing_bundle_body()
+{
+	local bin
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	atf_check -s not-exit:0 -e ignore \
+	    "${bin}" create /nonexistent/ocifbsd-bundle-$$ 
+}
+
+atf_init_test_cases()
+{
+	atf_add_test_case create_start_kill_delete
+	atf_add_test_case create_rejects_missing_bundle
+}

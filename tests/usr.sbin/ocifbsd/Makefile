@@ -11,7 +11,7 @@
 # APIs that never landed.
 
 ATF_TESTS_C=	parser_test k8s_test utils_test
-ATF_TESTS_SH=	cli_test
+ATF_TESTS_SH=	cli_test lifecycle_test
 
 # convert/ sources compile at WARNS=3; match for #include tests
 WARNS=		3

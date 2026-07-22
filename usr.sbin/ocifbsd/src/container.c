@@ -297,6 +297,30 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		return (-1);
 	}
 
+	/*
+	 * Resolve relative root.path against the bundle directory so
+	 * jail(8) receives an absolute path (required).
+	 */
+	if (spec->root.path != NULL && spec->root.path[0] != '/') {
+		char abspath[PATH_MAX];
+		char *resolved;
+
+		snprintf(abspath, sizeof(abspath), "%s/%s", bundle_path,
+		    spec->root.path);
+		resolved = realpath(abspath, NULL);
+		if (resolved == NULL) {
+			/* keep joined path even if rootfs not yet fully present */
+			resolved = strdup(abspath);
+		}
+		if (resolved == NULL) {
+			oci_free_spec(spec);
+			errno = ENOMEM;
+			return (-1);
+		}
+		free(spec->root.path);
+		spec->root.path = resolved;
+	}
+
 	/* Validate spec */
 	if (oci_validate_spec(spec) != 0) {
 		oci_free_spec(spec);
@@ -354,7 +378,26 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		return (-1);
 	}
 
-	/* Create jail */
+	/*
+	 * Give the jail a unique name (container id prefix). The helper
+	 * seeds a placeholder "name" param; replace it in place.
+	 */
+	{
+		size_t pi;
+		char jname[64];
+
+		snprintf(jname, sizeof(jname), "ocifbsd-%.12s", c->id);
+		for (pi = 0; pi < nparams; pi++) {
+			if (params[pi].jp_name != NULL &&
+			    strcmp(params[pi].jp_name, "name") == 0) {
+				jailparam_import_raw(&params[pi], jname,
+				    strlen(jname) + 1);
+				break;
+			}
+		}
+	}
+
+	/* Create jail (persist is set by oci_spec_to_jail_params) */
 	c->jid = jailparam_set(params, nparams, JAIL_CREATE);
 	if (c->jid < 0) {
 		fprintf(stderr, "error: failed to create jail: %s\n",
