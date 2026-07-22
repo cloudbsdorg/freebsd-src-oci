@@ -22,4 +22,7 @@ LIBADD+=	archive
 
 WARNS?=		3
 
+# Static archive is linked into the PIE ocifbsd binary (LTO).
+CFLAGS+=	-fPIC
+
 .include <bsd.lib.mk>
