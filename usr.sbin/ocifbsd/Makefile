@@ -17,6 +17,8 @@
 PROG=	ocifbsd
 VERSION=	0.1.0
 MAN=	ocifbsd.8
+# pkgbase package name → FreeBSD-ocifbsd
+PACKAGE=	ocifbsd
 
 SRCS=	\
 	ocifbsd.c \
