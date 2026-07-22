@@ -67,41 +67,38 @@ char *
 generate_container_id(void)
 {
 	char *id;
-	uint8_t digest[SHA256_DIGEST_LENGTH];
-	size_t i, j;
+	char hex[SHA256_DIGEST_STRING_LENGTH];
+	uint8_t random_bytes[32];
+	FILE *urandom;
+	size_t nread;
 
 	id = malloc(OCIFBSD_MAX_CONTAINER_ID_LENGTH);
 	if (id == NULL)
 		return (NULL);
 
-	/* Generate random bytes using /dev/urandom */
-	FILE *urandom = fopen("/dev/urandom", "r");
+	/*
+	 * SHA256_Data(3) writes a NUL-terminated hex digest
+	 * (SHA256_DIGEST_LENGTH * 2 chars) into the output buffer.
+	 * Do not treat that buffer as binary and re-encode it — the
+	 * old code overflowed a 32-byte array (SIGABRT under ATF).
+	 */
+	urandom = fopen("/dev/urandom", "r");
 	if (urandom == NULL) {
 		free(id);
 		return (NULL);
 	}
-
-	uint8_t random_bytes[32];
-	size_t nread = fread(random_bytes, 1, sizeof(random_bytes), urandom);
+	nread = fread(random_bytes, 1, sizeof(random_bytes), urandom);
 	fclose(urandom);
-
 	if (nread != sizeof(random_bytes)) {
 		free(id);
 		return (NULL);
 	}
-
-	/* Calculate SHA-256 of random data */
-	SHA256_Data(random_bytes, sizeof(random_bytes), digest);
-
-	/* Convert to hex string */
-	for (i = 0, j = 0; i < SHA256_DIGEST_LENGTH; i++) {
-		snprintf(&id[j], 3, "%02x", digest[i]);
-		j += 2;
+	if (SHA256_Data(random_bytes, sizeof(random_bytes), hex) == NULL) {
+		free(id);
+		return (NULL);
 	}
-
-	/* Ensure null termination */
+	memcpy(id, hex, OCIFBSD_MAX_CONTAINER_ID_LENGTH - 1);
 	id[OCIFBSD_MAX_CONTAINER_ID_LENGTH - 1] = '\0';
-
 	return (id);
 }
 

@@ -20,8 +20,9 @@ help_lists_commands_body()
 	if [ ! -x "${bin}" ]; then
 		atf_skip "ocifbsd binary not built at ${bin}"
 	fi
-	atf_check -s exit:0 -o match:"create" -o match:"start" \
-	    -o match:"kill" -o match:"delete" -o match:"state" \
+	# usage is printed on stderr
+	atf_check -s exit:0 -e match:"create" -e match:"start" \
+	    -e match:"kill" -e match:"delete" -e match:"state" \
 	    "${bin}" --help
 }
 
