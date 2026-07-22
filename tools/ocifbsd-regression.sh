@@ -61,7 +61,14 @@ export MAKEOBJDIRPREFIX="${OBJ}"
 
 (
 	cd tests/usr.sbin/ocifbsd
-	echo "==== kyua test ===="
+	# With MAKEOBJDIRPREFIX, Kyuafile + test binaries live in .OBJDIR
+	TESTOBJ=$(make -V .OBJDIR)
+	if [ -z "${TESTOBJ}" ] || [ ! -f "${TESTOBJ}/Kyuafile" ]; then
+		TESTOBJ=$(pwd)
+	fi
+	echo "==== kyua test (dir=${TESTOBJ}) ===="
+	cd "${TESTOBJ}"
+	ls -la Kyuafile utils_test cli_test parser_test k8s_test 2>&1 || true
 	kyua test -k Kyuafile 2>&1 | tee "${OUT}/kyua-test.txt"
 	kyua report --verbose -r LATEST --output="${OUT}/kyua-report.txt" || true
 	kyua report-junit -r LATEST --output="${OUT}/kyua-junit.xml" || true
