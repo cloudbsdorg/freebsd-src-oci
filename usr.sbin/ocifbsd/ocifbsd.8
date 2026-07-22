@@ -74,6 +74,17 @@ List known containers from the state directory.
 Show detailed container metadata as JSON.
 .It Cm run Oo Fl n Ar name Oc Ar bundle
 Create and start a container in one command.
+.It Cm pull Oo Fl n | -dry-run Oc Ar reference
+Parse an OCI image reference and print registry, repository, tag, and
+planned store path under
+.Pa /var/lib/ocifbsd .
+Full registry download is not yet implemented; without
+.Fl n
+the command exits with status 2 after printing the resolved reference.
+.It Cm images
+List top-level entries under the local image store
+.Pq Pa /var/lib/ocifbsd .
+An empty or missing store is not an error.
 .El
 .Sh OPTIONS
 Global options (before the command):

@@ -24,7 +24,10 @@ SRCS=	\
 	src/oci2jail.c \
 	src/state.c \
 	src/hooks.c \
-	src/utils.c
+	src/utils.c \
+	image/reference.c \
+	image/paths.c \
+	image/whiteout.c
 
 # ocifbsd has no tests/ subdir yet (the test suite lives at
 # ../../tests/usr.sbin/ocifbsd/ via the 'make test' target).
@@ -77,6 +80,7 @@ SUBDIR+=	tpm
 
 CFLAGS+=	-I${.CURDIR}/include
 CFLAGS+=	-I${.CURDIR}
+CFLAGS+=	-I${.CURDIR}/image
 CFLAGS+=	-Wall -Wextra
 CFLAGS+=	-D__BSD_VISIBLE=1
 CFLAGS+=	-D_POSIX_C_SOURCE=200809L
@@ -134,7 +138,7 @@ SUBDIR.${MK_TESTS}+=	tests
 # Tell BSD make where to find .c files in subdirectories.
 # SRCS contains paths like 'src/container.c' — make needs .PATH to resolve
 # them when generating the .o -> .c dependency rules.
-.PATH: ${.CURDIR}/src
+.PATH: ${.CURDIR}/src ${.CURDIR}/image
 
 # Disable the default /usr/obj objdir. The ocifbsd build is a standalone
 # checkout (not in /usr/src), so we put .o files in the current directory.

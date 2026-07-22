@@ -87,6 +87,8 @@ mkdirp_local(const char *path, mode_t mode)
 #define WHITEOUT_PREFIX		".wh."
 #define WHITEOUT_PREFIX_LEN	4
 
+/* is_whiteout / get_whiteout_target live in whiteout.c */
+
 /*
  * Default unpack options
  */
@@ -160,15 +162,6 @@ compression_extension(compression_type_t type)
 }
 
 /*
- * Check if filename is a whiteout marker
- */
-bool
-is_whiteout(const char *filename)
-{
-	return (strncmp(filename, WHITEOUT_PREFIX, WHITEOUT_PREFIX_LEN) == 0);
-}
-
-/*
  * Check if directory has opaque whiteout marker
  */
 bool
@@ -183,34 +176,6 @@ is_opaque(const char *dirname)
 		return (true);
 
 	return (false);
-}
-
-/*
- * Get the target filename from a whiteout name
- *
- * .wh.foo -> foo
- * .wh..wh..opq -> (special, means empty directory)
- */
-char *
-get_whiteout_target(const char *whiteout_name)
-{
-	char *target;
-	size_t len;
-
-	if (strcmp(whiteout_name, ".wh..wh..opq") == 0)
-		return (NULL);  /* Opaque marker */
-
-	if (strncmp(whiteout_name, WHITEOUT_PREFIX, WHITEOUT_PREFIX_LEN) != 0)
-		return (NULL);
-
-	len = strlen(whiteout_name) - WHITEOUT_PREFIX_LEN + 1;
-	target = malloc(len);
-	if (target == NULL)
-		return (NULL);
-
-	strlcpy(target, whiteout_name + WHITEOUT_PREFIX_LEN, len);
-
-	return (target);
 }
 
 /*

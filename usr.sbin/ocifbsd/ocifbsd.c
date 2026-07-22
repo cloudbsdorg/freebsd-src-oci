@@ -35,8 +35,10 @@
 #include <sys/stat.h>
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +46,8 @@
 #include <unistd.h>
 
 #include "include/ocifbsd.h"
+#include "image/pull.h"
+#include "image/zfs_store.h"
 
 /* Global verbosity flag */
 static bool verbose = false;
@@ -79,6 +83,8 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "  list                               List containers\n");
 		fprintf(stderr, "  inspect <container-id>            Show container details\n");
 		fprintf(stderr, "  run <bundle> [--name <name>]      Create and start in one command\n");
+		fprintf(stderr, "  pull <reference> [--dry-run]      Resolve/pull OCI image reference\n");
+		fprintf(stderr, "  images                            List local image store paths\n");
 		fprintf(stderr, "\nRun '%s help <command>' for more information on a command.\n",
 		    prog);
 	} else {
@@ -661,6 +667,138 @@ cmd_run(int argc, char **argv)
 	return (0);
 }
 
+/*
+ * pull — resolve an OCI reference (full registry fetch is Phase 2 ongoing).
+ * --dry-run only parses and prints registry/repo/tag[/digest].
+ */
+static int
+cmd_pull(int argc, char **argv)
+{
+	const char *ref = NULL;
+	int dry_run = 0;
+	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
+	char *store_path = NULL;
+	int ch, ret = 1;
+
+	static struct option longopts[] = {
+		{ "dry-run",	no_argument,		NULL, 'n' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+nh", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'n':
+			dry_run = 1;
+			break;
+		case 'h':
+			usage(argv[0], "pull [--dry-run] <reference>");
+			return (0);
+		default:
+			usage(argv[0], "pull");
+			return (1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+	if (argc < 1) {
+		usage("ocifbsd", "pull [--dry-run] <reference>");
+		return (1);
+	}
+	ref = argv[0];
+
+	if (parse_reference(ref, &registry, &repo, &tag, &digest) != 0) {
+		fprintf(stderr, "error: invalid image reference: %s\n", ref);
+		return (1);
+	}
+
+	printf("reference=%s\n", ref);
+	printf("registry=%s\n", registry ? registry : "");
+	printf("repository=%s\n", repo ? repo : "");
+	printf("tag=%s\n", tag ? tag : "");
+	if (digest != NULL)
+		printf("digest=%s\n", digest);
+
+	store_path = zfs_image_path(registry, repo, tag);
+	if (store_path != NULL) {
+		printf("store_path=%s\n", store_path);
+		free(store_path);
+	}
+
+	if (dry_run) {
+		ret = 0;
+		goto out;
+	}
+
+	/*
+	 * Full registry pull (curl + ZFS layers) is not wired into the
+	 * main binary yet. Parse/path resolution is the tested Phase 2
+	 * surface; refuse with a clear error so operators are not misled.
+	 */
+	fprintf(stderr,
+	    "error: full image pull is not implemented in this binary yet\n"
+	    "hint: use --dry-run to validate references; "
+	    "see image/pull.c for the registry client scaffold\n");
+	ret = 2;
+
+out:
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+	return (ret);
+}
+
+/*
+ * images — list known image store roots (filesystem scan of OCIFBSD_DATA_DIR).
+ */
+static int
+cmd_images(int argc, char **argv)
+{
+	DIR *dir;
+	struct dirent *ent;
+	const char *base = OCIFBSD_DATA_DIR;
+	char path[PATH_MAX];
+	int found = 0;
+
+	(void)argc;
+	(void)argv;
+
+	/*
+	 * Image store layout (paths.c): /var/lib/ocifbsd/<registry>/...
+	 * Until a catalog DB exists, list top-level registry directories.
+	 */
+	dir = opendir(base);
+	if (dir == NULL) {
+		if (errno == ENOENT) {
+			/* empty store is success */
+			return (0);
+		}
+		fprintf(stderr, "error: cannot open %s: %s\n", base,
+		    strerror(errno));
+		return (1);
+	}
+
+	printf("REPOSITORY\tTAG\tPATH\n");
+	while ((ent = readdir(dir)) != NULL) {
+		struct stat st;
+
+		if (ent->d_name[0] == '.')
+			continue;
+		snprintf(path, sizeof(path), "%s/%s", base, ent->d_name);
+		if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+			continue;
+		/* One row per registry root; finer listing comes with ZFS catalog */
+		printf("%s\t-\t%s\n", ent->d_name, path);
+		found++;
+	}
+	closedir(dir);
+	(void)found;
+	return (0);
+}
+
 /* Command table */
 struct command {
 	const char *name;
@@ -677,6 +815,8 @@ static struct command commands[] = {
 	{ "list",	cmd_list,	"List containers" },
 	{ "inspect",	cmd_inspect,	"Show container details" },
 	{ "run",	cmd_run,	"Create and start container" },
+	{ "pull",	cmd_pull,	"Resolve or pull an OCI image" },
+	{ "images",	cmd_images,	"List local image store" },
 	{ NULL,		NULL,		NULL },
 };
 
