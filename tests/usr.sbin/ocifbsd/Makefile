@@ -22,6 +22,6 @@ CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/include
 CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/convert
 
 # utils_test includes src/utils.c (needs libmd for SHA256_Data)
-LDADD.utils_test+=	-lmd
+LIBADD.utils_test+=	md
 
 .include <bsd.test.mk>

@@ -5,22 +5,21 @@
 # ocifbsd lab regression driver for FreeBSD.
 # Produces agent-readable artifacts under artifacts/regression/<gitsha>/.
 #
-# Usage (on FreeBSD lab host, from anywhere):
+# Usage (on FreeBSD lab host):
 #   sh tools/ocifbsd-regression.sh
 #   REPO=$HOME/git/freebsd-src-oci sh tools/ocifbsd-regression.sh
-#
-# Optional env:
-#   WITH_CCACHE_BUILD=yes (default yes if ccache present)
-#   MAKEOBJDIRPREFIX, CCACHE_DIR, CCACHE_BASEDIR, NCPU
 #
 
 set -eu
 
 REPO=${REPO:-}
 if [ -z "${REPO}" ]; then
-	# Resolve repo root from this script: tools/ -> parent
-	SCRIPT=$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")
-	REPO=$(CDPATH= cd -- "$(dirname "$SCRIPT")/.." && pwd)
+	SCRIPT=$0
+	case ${SCRIPT} in
+	/*) ;;
+	*) SCRIPT=$(pwd)/${SCRIPT} ;;
+	esac
+	REPO=$(CDPATH= cd -- "$(dirname "${SCRIPT}")/.." && pwd)
 fi
 
 cd "${REPO}"
@@ -38,7 +37,6 @@ OBJ=${MAKEOBJDIRPREFIX:-${HOME}/obj/freebsd-src-oci}
 
 mkdir -p "${OUT}" "${OBJ}"
 
-# ccache if available
 if [ -x /usr/local/bin/ccache ]; then
 	export WITH_CCACHE_BUILD=${WITH_CCACHE_BUILD:-yes}
 	export CCACHE_DIR=${CCACHE_DIR:-${HOME}/.ccache/ocifbsd}
@@ -70,23 +68,15 @@ export MAKEOBJDIRPREFIX="${OBJ}"
 )
 
 # summary for agents
-if [ -f "${OUT}/kyua-junit.xml" ]; then
-	python3 - "${OUT}/kyua-junit.xml" "${OUT}/summary.md" <<'PY' || {
-		# fallback without python
-		echo "# Regression ${SHA}" > "${OUT}/summary.md"
-		echo "host=${HOST}" >> "${OUT}/summary.md"
-		grep -c 'testcase ' "${OUT}/kyua-junit.xml" | \
-		    awk '{print "testcase_elements="$1}' >> "${OUT}/summary.md" || true
-	}
+if [ -f "${OUT}/kyua-junit.xml" ] && command -v python3 >/dev/null 2>&1; then
+	python3 -c '
 import sys
 from pathlib import Path
 import xml.etree.ElementTree as ET
-
 xml_path, out_path = Path(sys.argv[1]), Path(sys.argv[2])
 root = ET.parse(xml_path).getroot()
 cases = list(root.iter("testcase"))
-fails = []
-skips = []
+fails, skips = [], []
 for c in cases:
     if c.find("failure") is not None or c.find("error") is not None:
         fails.append(c)
@@ -97,15 +87,20 @@ lines = [
     f"total={len(cases)} failed={len(fails)} skipped={len(skips)}",
 ]
 for c in fails:
-    lines.append(f"- FAIL {c.get('classname')}.{c.get('name')}")
+    lines.append(f"- FAIL {c.get(\"classname\")}.{c.get(\"name\")}")
 for c in skips:
-    lines.append(f"- SKIP {c.get('classname')}.{c.get('name')}")
+    lines.append(f"- SKIP {c.get(\"classname\")}.{c.get(\"name\")}")
 out_path.write_text("\n".join(lines) + "\n")
 print(out_path.read_text())
-PY
+' "${OUT}/kyua-junit.xml" "${OUT}/summary.md"
 else
-	echo "# Regression ${SHA}" > "${OUT}/summary.md"
-	echo "kyua-junit.xml missing" >> "${OUT}/summary.md"
+	{
+		echo "# Regression ${SHA}"
+		echo "host=${HOST}"
+		if [ -f "${OUT}/kyua-test.txt" ]; then
+			tail -5 "${OUT}/kyua-test.txt"
+		fi
+	} | tee "${OUT}/summary.md"
 fi
 
 if [ -x /usr/local/bin/ccache ]; then
@@ -117,8 +112,11 @@ fi
 
 echo "Artifacts: ${OUT}"
 cat "${OUT}/summary.md"
-# exit non-zero if summary reports failures
 if grep -q 'failed=[1-9]' "${OUT}/summary.md" 2>/dev/null; then
+	exit 1
+fi
+# also fail if kyua text summary shows failed
+if grep -E '[1-9][0-9]* failed' "${OUT}/kyua-test.txt" 2>/dev/null; then
 	exit 1
 fi
 exit 0
