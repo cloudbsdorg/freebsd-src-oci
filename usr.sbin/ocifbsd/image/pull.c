@@ -428,43 +428,70 @@ authenticate(struct registry *reg, const char *scope)
 	char *p, *end;
 	int ret = -1;
 
+	realm[0] = '\0';
+
 	/* Build token URL */
 	if (reg->auth->type == AUTH_ANONYMOUS) {
-		/* Check if we need to authenticate */
+		long response_code = 0;
+		CURLcode res;
+		CURL *curl;
+
+		/* Probe /v2/ — connection failure is hard error */
 		url = build_url(reg, "/v2/");
 		if (url == NULL)
 			return (-1);
 
-		/* Try anonymous access first */
-		CURL *curl = curl_easy_init();
+		curl = curl_easy_init();
+		if (curl == NULL) {
+			free(url);
+			return (-1);
+		}
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+		curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
 		curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
 		curl_easy_setopt(curl, CURLOPT_HEADERDATA, &auth_header);
-		curl_easy_perform(curl);
+		res = curl_easy_perform(curl);
+		if (res == CURLE_OK)
+			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,
+			    &response_code);
 		curl_easy_cleanup(curl);
 		free(url);
 
+		if (res != CURLE_OK) {
+			fprintf(stderr, "error: cannot reach registry %s: %s\n",
+			    reg->host, curl_easy_strerror(res));
+			return (-1);
+		}
+
 		if (auth_header != NULL &&
 		    strstr(auth_header, "Www-Authenticate") != NULL) {
-			/* Parse auth header */
-			p = strchr(auth_header, '"');
-			if (p) {
-				end = strchr(p + 1, '"');
-				if (end) {
-					*end = '\0';
-					strlcpy(realm, p + 1, sizeof(realm));
+			/* Parse realm= from Www-Authenticate (best-effort) */
+			p = strstr(auth_header, "realm=\"");
+			if (p != NULL) {
+				p += 7;
+				end = strchr(p, '"');
+				if (end != NULL) {
+					size_t n = (size_t)(end - p);
+
+					if (n >= sizeof(realm))
+						n = sizeof(realm) - 1;
+					memcpy(realm, p, n);
+					realm[n] = '\0';
 				}
 			}
 		}
 
-		if (realm[0] == '\0') {
-			/* Anonymous access works */
+		/*
+		 * 200/401 without realm: continue (anonymous or later 401).
+		 * Unreachable hosts already returned above.
+		 */
+		if (realm[0] == '\0')
 			return (0);
-		}
 	} else {
-		/* Basic auth */
-		reg->auth->type = AUTH_BASIC;
+		/* Basic auth preconfigured */
 		return (0);
 	}
 
@@ -940,16 +967,22 @@ registry_pull(struct registry *reg, const char *reference,
 	struct oci_config *config = NULL;
 	int i, ret = -1;
 
-	/* Parse reference */
-	ret = parse_reference(reference, &registry, &repo, &tag, &digest);
-	if (ret != 0) {
+	/* Parse reference (do not reuse ret for intermediate successes) */
+	if (parse_reference(reference, &registry, &repo, &tag, &digest) != 0) {
 		fprintf(stderr, "error: invalid reference: %s\n", reference);
 		return (-1);
+	}
+
+	/* Prefer repository stored at registry_init when present */
+	if (reg->repository != NULL) {
+		free(repo);
+		repo = strdup(reg->repository);
 	}
 
 	/* Authenticate */
 	if (authenticate(reg, repo) != 0) {
 		fprintf(stderr, "error: authentication failed\n");
+		ret = -1;
 		goto cleanup;
 	}
 
