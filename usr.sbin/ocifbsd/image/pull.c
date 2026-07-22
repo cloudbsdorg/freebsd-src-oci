@@ -1036,7 +1036,6 @@ verify_layer(const char *path, const char *expected_digest)
 		fprintf(stderr, "  actual: sha256:%s\n", actual_digest);
 		ret = -1;
 	}
-	(void)algo;
 
 	free(actual_digest);
 	return (ret);
