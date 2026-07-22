@@ -279,12 +279,18 @@ disc1:
 # Set up installation environment
 	ln -fs /tmp/bsdinstall_etc/resolv.conf ${.TARGET}/etc/resolv.conf
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
+	echo linux_enable=\"YES\" >> ${.TARGET}/etc/rc.conf
+	echo compat.linux.osrelease=\"5.14\" >> ${.TARGET}/etc/sysctl.conf
+	echo kern.module_path=\"/boot/kernel;/boot/modules;/modules;/compat/linux/lib/modules\" >> ${.TARGET}/boot/loader.conf
 	echo debug.witness.trace=0 >> ${.TARGET}/etc/sysctl.conf
 	echo debug.debugger_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
 	echo kern.sync_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
 	echo kern.powercycle_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo debug.trace_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
+	echo module_load=\"amdgpu i915kms radeonkms\" >> ${.TARGET}/boot/loader.conf
+	echo module_load=\"drm\" >> ${.TARGET}/boot/loader.conf
+	echo kld_list=\"amdtemp coretemp cuse fusefs filemon drm amdgpu i915kms radeonkms nvidia-drm nvidia-modeset\" >> ${.TARGET}/etc/rc.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
 	echo loader_brand=\"install\" >> ${.TARGET}/boot/loader.conf
 	echo loader_menu_multi_user_prompt=\"Installer\" >> ${.TARGET}/boot/loader.conf
@@ -295,6 +301,24 @@ disc1:
 	echo "./boot/loader.conf type=file uname=root gname=wheel mode=0644" >> ${.TARGET}/METALOG
 	echo "./etc/rc.local type=file uname=root gname=wheel mode=0644" >> ${.TARGET}/METALOG
 	touch ${.TARGET}
+	# Operator doas.conf: wheel nopass (passwordless for operator group)
+	mkdir -p ${.TARGET}/usr/local/etc
+	printf "permit nopass :wheel\npermit nopass :wheel cmd /sbin/shutdown\npermit nopass :wheel cmd reboot\n" > ${.TARGET}/usr/local/etc/doas.conf
+	chmod 0644 ${.TARGET}/usr/local/etc/doas.conf
+	echo \"./usr/local/etc/doas.conf type=file uname=root gname=wheel mode=0644\" >> ${.TARGET}/METALOG
+	# sudo: drop a sudoers.d/wheel snippet allowing wheel NOPASSWD (matches lab host hygiene)
+	mkdir -p ${.TARGET}/usr/local/etc/sudoers.d
+	printf "%%wheel ALL=(ALL:ALL) NOPASSWD: ALL\n" > ${.TARGET}/usr/local/etc/sudoers.d/wheel
+	chmod 0440 ${.TARGET}/usr/local/etc/sudoers.d/wheel
+	echo \"./usr/local/etc type=dir uname=root gname=wheel mode=0755\" >> ${.TARGET}/METALOG
+	echo \"./usr/local/etc/sudoers.d type=dir uname=root gname=wheel mode=0755\" >> ${.TARGET}/METALOG
+	echo \"./usr/local/etc/sudoers.d/wheel type=file uname=root gname=wheel mode=0440\" >> ${.TARGET}/METALOG
+	# Linuxulator subsystem: fstab entries (matches freedev007 host hygiene)
+	echo \"/dev/fd /dev/fd fdescfs rw 0 0\" >> ${.TARGET}/etc/fstab
+	echo \"/proc /proc procfs rw 0 0\" >> ${.TARGET}/etc/fstab
+	echo \"/compat/linux/proc /compat/linux/proc linprocfs rw 0 0\" >> ${.TARGET}/etc/fstab
+	echo \"/compat/linux/sys /compat/linux/sys linsysfs rw 0 0\" >> ${.TARGET}/etc/fstab
+	echo \"./etc/fstab type=file uname=root gname=wheel mode=0644\" >> ${.TARGET}/METALOG
 
 bootonly:
 # Install system
@@ -322,17 +346,24 @@ bootonly:
 	${PKG_INSTALL} pkg
 .endif
 	${PKG_INSTALL} wifi-firmware-iwlwifi-kmod wifi-firmware-rtw88-kmod || true
+	${PKG_INSTALL} emulators/linux-rl9 || true  # Rocky 9 Linuxulator userland (best-effort; absent if not in repo)
 	${PKG_CLEAN} || true
 .endif
 # Set up installation environment
 	ln -fs /tmp/bsdinstall_etc/resolv.conf ${.TARGET}/etc/resolv.conf
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
+	echo linux_enable=\"YES\" >> ${.TARGET}/etc/rc.conf
+	echo compat.linux.osrelease=\"5.14\" >> ${.TARGET}/etc/sysctl.conf
+	echo kern.module_path=\"/boot/kernel;/boot/modules;/modules;/compat/linux/lib/modules\" >> ${.TARGET}/boot/loader.conf
 	echo debug.witness.trace=0 >> ${.TARGET}/etc/sysctl.conf
 	echo debug.debugger_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
 	echo kern.sync_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
 	echo kern.powercycle_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo debug.trace_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
+	echo module_load=\"amdgpu i915kms radeonkms\" >> ${.TARGET}/boot/loader.conf
+	echo module_load=\"drm\" >> ${.TARGET}/boot/loader.conf
+	echo kld_list=\"amdtemp coretemp cuse fusefs filemon drm amdgpu i915kms radeonkms nvidia-drm nvidia-modeset\" >> ${.TARGET}/etc/rc.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
 	echo loader_brand=\"install\" >> ${.TARGET}/boot/loader.conf
 	echo loader_menu_multi_user_prompt=\"Installer\" >> ${.TARGET}/boot/loader.conf
@@ -389,12 +420,18 @@ dvd:
 # Set up installation environment
 	ln -fs /tmp/bsdinstall_etc/resolv.conf ${.TARGET}/etc/resolv.conf
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
+	echo linux_enable=\"YES\" >> ${.TARGET}/etc/rc.conf
+	echo compat.linux.osrelease=\"5.14\" >> ${.TARGET}/etc/sysctl.conf
+	echo kern.module_path=\"/boot/kernel;/boot/modules;/modules;/compat/linux/lib/modules\" >> ${.TARGET}/boot/loader.conf
 	echo debug.witness.trace=0 >> ${.TARGET}/etc/sysctl.conf
 	echo debug.debugger_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
 	echo kern.sync_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
 	echo kern.powercycle_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo debug.trace_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
+	echo module_load=\"amdgpu i915kms radeonkms\" >> ${.TARGET}/boot/loader.conf
+	echo module_load=\"drm\" >> ${.TARGET}/boot/loader.conf
+	echo kld_list=\"amdtemp coretemp cuse fusefs filemon drm amdgpu i915kms radeonkms nvidia-drm nvidia-modeset\" >> ${.TARGET}/etc/rc.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
 	echo loader_brand=\"install\" >> ${.TARGET}/boot/loader.conf
 	echo loader_menu_multi_user_prompt=\"Installer\" >> ${.TARGET}/boot/loader.conf
