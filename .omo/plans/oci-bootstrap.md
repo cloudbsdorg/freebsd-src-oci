@@ -1,5 +1,12 @@
 # OCI Runtime (ocifbsd) Bootstrap + CLion Tooling on macOS
 
+> **Plan status (2026-07-21): MOSTLY SUPERSEDED / HISTORICAL**
+>
+> - **Bootstrap build goal (all SUBDIRs compile on FreeBSD 16): DONE** on `feature/oci-bootstrap` (2026-06-05). See `usr.sbin/ocifbsd/OCI-STATUS.md` on that branch.
+> - **Plan/doc accuracy:** Reconciled 2026-07-21 — see [`.omo/drafts/oci-status-reconciliation-2026-07-21.md`](../drafts/oci-status-reconciliation-2026-07-21.md) and [`.plan/005.0-Risks-TODO.md`](../../.plan/005.0-Risks-TODO.md) §0.
+> - **Still open from this plan’s spirit:** merge `main` (upstream FreeBSD) into `feature/oci-bootstrap`; re-verify build; harden Phase 1 tests. macOS cross-build / CLion bits remain optional developer convenience, not the tier-1 path.
+> - **Do not re-run** the “recover from devel” wave — code is already on `feature/oci-bootstrap`.
+
 ## TL;DR
 
 > **Quick Summary**: Recover the orphaned `ocifbsd` OCI runtime work from `origin/devel` onto a current branch off `main`, set up bmake-based cross-compile from macOS targeting FreeBSD amd64, and configure CLion 2026.1.2 with custom build targets + run/debug configs so the developer can edit/build/test `usr.sbin/ocifbsd/` from the IDE. Reuse existing `release/Makefile.oci` infrastructure. Update `.plan/` docs to match reality.
