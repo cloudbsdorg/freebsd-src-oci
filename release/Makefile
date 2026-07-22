@@ -280,6 +280,12 @@ disc1:
 	ln -fs /tmp/bsdinstall_etc/resolv.conf ${.TARGET}/etc/resolv.conf
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
 	echo debug.witness.trace=0 >> ${.TARGET}/etc/sysctl.conf
+# Auto-reboot on kernel panic (panic recovery policy applied to install media + VMs)
+echo debug.debugger_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
+echo kern.sync_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
+echo kern.powercycle_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
+# Console in single-user after panic, then auto-reboot
+echo debug.trace_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
 	echo loader_brand=\"install\" >> ${.TARGET}/boot/loader.conf
@@ -324,6 +330,12 @@ bootonly:
 	ln -fs /tmp/bsdinstall_etc/resolv.conf ${.TARGET}/etc/resolv.conf
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
 	echo debug.witness.trace=0 >> ${.TARGET}/etc/sysctl.conf
+# Auto-reboot on kernel panic (panic recovery policy applied to install media + VMs)
+echo debug.debugger_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
+echo kern.sync_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
+echo kern.powercycle_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
+# Console in single-user after panic, then auto-reboot
+echo debug.trace_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
 	echo loader_brand=\"install\" >> ${.TARGET}/boot/loader.conf
@@ -382,6 +394,12 @@ dvd:
 	ln -fs /tmp/bsdinstall_etc/resolv.conf ${.TARGET}/etc/resolv.conf
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
 	echo debug.witness.trace=0 >> ${.TARGET}/etc/sysctl.conf
+# Auto-reboot on kernel panic (panic recovery policy applied to install media + VMs)
+echo debug.debugger_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
+echo kern.sync_on_panic=0 >> ${.TARGET}/etc/sysctl.conf
+echo kern.powercycle_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
+# Console in single-user after panic, then auto-reboot
+echo debug.trace_on_panic=1 >> ${.TARGET}/etc/sysctl.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
 	echo loader_brand=\"install\" >> ${.TARGET}/boot/loader.conf
