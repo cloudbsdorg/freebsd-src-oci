@@ -90,18 +90,19 @@ create_start_kill_delete_body()
 		atf_fail "state after create unexpected: $(cat state1.out)"
 	fi
 
-	# start
-	atf_check -s exit:0 -e ignore "${bin}" start "${cid}"
+	# start (may print id on stdout)
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
 
 	# running: jail should exist
 	atf_check -s exit:0 -o match:"ocifbsd-" jls -n name
 
 	# kill (SIGTERM default)
-	atf_check -s exit:0 -e ignore "${bin}" kill "${cid}"
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" kill "${cid}"
 
 	# delete
-	atf_check -s exit:0 -e ignore "${bin}" delete "${cid}" --force || \
-	    atf_check -s exit:0 -e ignore "${bin}" delete "${cid}"
+	atf_check -s exit:0 -e ignore -o ignore \
+	    "${bin}" delete --force "${cid}" || \
+	    atf_check -s exit:0 -e ignore -o ignore "${bin}" delete "${cid}"
 
 	# gone from jls
 	if jls -n name 2>/dev/null | grep -q "ocifbsd-"; then
