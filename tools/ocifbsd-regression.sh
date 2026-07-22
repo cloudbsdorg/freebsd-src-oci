@@ -94,6 +94,18 @@ export MAKEOBJDIRPREFIX="${OBJ}"
 	fi
 )
 
+# Stress harness (non-root; optional LIVE_PULL=1)
+if [ -x "${REPO}/tools/ocifbsd-stress.sh" ]; then
+	echo "==== stress (ITER=${STRESS_ITER:-100}) ===="
+	ITER=${STRESS_ITER:-100} LIVE_PULL=${LIVE_PULL:-0} \
+	    sh "${REPO}/tools/ocifbsd-stress.sh" 2>&1 |
+	    tee "${OUT}/stress.log" || true
+	if [ -f "${REPO}/artifacts/stress/${SHA}/RESULT.txt" ]; then
+		cp "${REPO}/artifacts/stress/${SHA}/RESULT.txt" \
+		    "${OUT}/stress-RESULT.txt" || true
+	fi
+fi
+
 # summary for agents
 if [ -f "${OUT}/kyua-junit.xml" ] && command -v python3 >/dev/null 2>&1; then
 	python3 -c '

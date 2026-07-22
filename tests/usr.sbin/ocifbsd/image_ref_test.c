@@ -201,6 +201,114 @@ ATF_TC_BODY(zfs_paths, tc)
 	ATF_CHECK(zfs_layer_path(NULL) == NULL);
 }
 
+ATF_TC(ref_digest);
+ATF_TC_HEAD(ref_digest, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "reference with @sha256 digest parses digest field");
+}
+ATF_TC_BODY(ref_digest, tc)
+{
+	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
+
+	ATF_REQUIRE_EQ(parse_reference(
+	    "ghcr.io/cloudbsd/ocifbsd@sha256:deadbeef",
+	    &registry, &repo, &tag, &digest), 0);
+	ATF_CHECK_STREQ(registry, "ghcr.io");
+	ATF_CHECK_STREQ(repo, "cloudbsd/ocifbsd");
+	ATF_REQUIRE(digest != NULL);
+	ATF_CHECK_STREQ(digest, "sha256:deadbeef");
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+}
+
+ATF_TC(ref_tag_and_digest);
+ATF_TC_HEAD(ref_tag_and_digest, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "tag and @digest together: tag before @");
+}
+ATF_TC_BODY(ref_tag_and_digest, tc)
+{
+	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
+
+	ATF_REQUIRE_EQ(parse_reference(
+	    "docker.io/library/alpine:3.19@sha256:abc",
+	    &registry, &repo, &tag, &digest), 0);
+	ATF_CHECK_STREQ(repo, "library/alpine");
+	ATF_CHECK_STREQ(tag, "3.19");
+	ATF_CHECK_STREQ(digest, "sha256:abc");
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+}
+
+ATF_TC(ref_port_registry);
+ATF_TC_HEAD(ref_port_registry, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "registry host:port is kept in registry field");
+}
+ATF_TC_BODY(ref_port_registry, tc)
+{
+	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
+
+	ATF_REQUIRE_EQ(parse_reference("127.0.0.1:5000/ns/img:v1",
+	    &registry, &repo, &tag, &digest), 0);
+	ATF_CHECK_STREQ(registry, "127.0.0.1:5000");
+	ATF_CHECK_STREQ(repo, "ns/img");
+	ATF_CHECK_STREQ(tag, "v1");
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+}
+
+ATF_TC(ref_no_library_for_ns);
+ATF_TC_HEAD(ref_no_library_for_ns, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "namespaced docker hub repos do not get library/ prefix");
+}
+ATF_TC_BODY(ref_no_library_for_ns, tc)
+{
+	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
+
+	ATF_REQUIRE_EQ(parse_reference("library/hello-world:latest",
+	    &registry, &repo, &tag, &digest), 0);
+	ATF_CHECK_STREQ(repo, "library/hello-world");
+	free(registry);
+	free(repo);
+	free(tag);
+	free(digest);
+}
+
+ATF_TC(ref_stress_many);
+ATF_TC_HEAD(ref_stress_many, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "parse_reference survives 1000 iterations without leak crash");
+}
+ATF_TC_BODY(ref_stress_many, tc)
+{
+	int i;
+	char *registry, *repo, *tag, *digest;
+
+	for (i = 0; i < 1000; i++) {
+		registry = repo = tag = digest = NULL;
+		ATF_REQUIRE_EQ(parse_reference("hello-world:latest",
+		    &registry, &repo, &tag, &digest), 0);
+		ATF_CHECK_STREQ(repo, "library/hello-world");
+		free(registry);
+		free(repo);
+		free(tag);
+		free(digest);
+	}
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, ref_docker_hub_short);
@@ -211,5 +319,10 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ref_canonical);
 	ATF_TP_ADD_TC(tp, ref_docker_hub_official);
 	ATF_TP_ADD_TC(tp, zfs_paths);
+	ATF_TP_ADD_TC(tp, ref_digest);
+	ATF_TP_ADD_TC(tp, ref_tag_and_digest);
+	ATF_TP_ADD_TC(tp, ref_port_registry);
+	ATF_TP_ADD_TC(tp, ref_no_library_for_ns);
+	ATF_TP_ADD_TC(tp, ref_stress_many);
 	return (atf_no_error());
 }

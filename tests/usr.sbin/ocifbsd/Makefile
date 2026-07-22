@@ -3,15 +3,25 @@
 #
 # Test suite for ocifbsd
 #
-# - parser_test / k8s_test: convert module pure helpers
-# - utils_test: src/utils.c pure helpers (no jail)
-# - cli_test: atf_check against built ocifbsd binary
+# Unit (C ATF) — sources #include'd like image_ref_test (no SRCS from
+# outside the test dir; FreeBSD bsd.dep.mk forbids $OBJS under $SRCTOP):
+#   parser_test / k8s_test     — convert module
+#   utils_test                 — src/utils.c pure helpers
+#   oci2jail_test / hooks_test — runtime/spec helpers
+#   image_ref_test             — reference + paths (no network)
+#   whiteout_test              — whiteout name helpers
+#   image_parse_test           — manifest/config/digest/registry_init
+#   unpack_layer_test          — real tar unpack + dirname safety
+#
+# Integration (shell ATF):
+#   cli_test                   — CLI smoke + failure matrix
+#   lifecycle_test             — create/start/kill/delete (root)
 #
 # ocifbsd_test.c.disabled is preserved for history; it referenced
 # APIs that never landed.
 
 ATF_TESTS_C=	parser_test k8s_test utils_test oci2jail_test hooks_test \
-		image_ref_test whiteout_test
+		image_ref_test whiteout_test image_parse_test unpack_layer_test
 ATF_TESTS_SH=	cli_test lifecycle_test
 
 # convert/ sources compile at WARNS=3; match for #include tests
@@ -37,5 +47,16 @@ LIBADD.oci2jail_test+=	jail
 CFLAGS.hooks_test+=	-I/usr/local/include/json-c
 LDFLAGS.hooks_test+=	-L/usr/local/lib
 LDADD.hooks_test+=	-ljson-c
+
+# image_parse_test #includes pull.c + unpack + json-c/curl/md/archive
+CFLAGS.image_parse_test+=	-I/usr/local/include -I/usr/local/include/json-c
+LDFLAGS.image_parse_test+=	-L/usr/local/lib
+LDADD.image_parse_test+=	-lcurl -ljson-c
+LIBADD.image_parse_test+=	md archive
+
+# unpack_layer_test #includes unpack.c + whiteout.c
+CFLAGS.unpack_layer_test+=	-I/usr/local/include
+LDFLAGS.unpack_layer_test+=	-L/usr/local/lib
+LIBADD.unpack_layer_test+=	archive
 
 .include <bsd.test.mk>

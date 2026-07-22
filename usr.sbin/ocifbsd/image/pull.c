@@ -110,18 +110,32 @@ write_callback(void *ptr, size_t size, size_t nmemb, void *stream)
 static size_t
 header_callback(void *ptr, size_t size, size_t nmemb, void *stream)
 {
-	/* Capture Content-Length header */
-	char *header = (char *)ptr;
-	char *end = header + size * nmemb;
-	*end = '\0';
+	/*
+	 * Capture Content-Length without mutating curl's buffer (writing
+	 * past the end is undefined). Copy into a local NUL-terminated line.
+	 */
+	size_t n = size * nmemb;
+	char line[256];
+	char *p;
+	struct progress_data *pd = stream;
 
-	if (strncasecmp(header, "Content-Length:", 15) == 0) {
-		char *p = header + 15;
+	if (pd == NULL || n == 0)
+		return (n);
+	if (n >= sizeof(line))
+		n = sizeof(line) - 1;
+	memcpy(line, ptr, n);
+	line[n] = '\0';
+
+	if (strncasecmp(line, "Content-Length:", 15) == 0) {
+		p = line + 15;
 		while (*p == ' ' || *p == '\t')
 			p++;
-		*(p + strlen(p) - 2) = '\0'; /* Remove \r\n */
-		struct progress_data *pd = (struct progress_data *)stream;
-		pd->total = strtoull(p, NULL, 10);
+		/* strip trailing CR/LF */
+		while (n > 0 && (line[n - 1] == '\r' || line[n - 1] == '\n')) {
+			line[n - 1] = '\0';
+			n--;
+		}
+		pd->total = (off_t)strtoull(p, NULL, 10);
 	}
 
 	return (size * nmemb);

@@ -205,16 +205,153 @@ create_image_missing_fails_body()
 	    "${bin}" create --image ghcr.io/cloudbsd/missing:latest
 }
 
+atf_test_case pull_dry_run_official
+pull_dry_run_official_head()
+{
+	atf_set "descr" "pull --dry-run maps official image to library/"
+}
+pull_dry_run_official_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	atf_check -s exit:0 \
+	    -o match:"registry=docker.io" \
+	    -o match:"repository=library/hello-world" \
+	    -o match:"tag=latest" \
+	    "${bin}" pull --dry-run hello-world:latest
+}
+
+atf_test_case create_missing_bundle_fails
+create_missing_bundle_fails_head()
+{
+	atf_set "descr" "create without args or missing bundle fails"
+}
+create_missing_bundle_fails_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	atf_check -s not-exit:0 -e ignore "${bin}" create
+	atf_check -s not-exit:0 -e ignore \
+	    "${bin}" create /nonexistent/ocifbsd-bundle-$$
+}
+
+atf_test_case run_image_missing_fails
+run_image_missing_fails_head()
+{
+	atf_set "descr" "run --image fails when store is not ready"
+}
+run_image_missing_fails_body()
+{
+	local bin store
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	store=$(pwd)/imgstore-run
+	mkdir -p "${store}"
+	atf_check -s not-exit:0 -e match:"image not ready" \
+	    env OCIFBSD_DATA_DIR="${store}" \
+	    "${bin}" run --image ghcr.io/cloudbsd/missing:latest
+}
+
+atf_test_case start_missing_fails
+start_missing_fails_head()
+{
+	atf_set "descr" "start/state/kill/delete fail on missing container"
+}
+start_missing_fails_body()
+{
+	local bin id
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	id="0000000000000000000000000000000000000000000000000000000000000000"
+	atf_check -s not-exit:0 -e ignore "${bin}" start "${id}"
+	atf_check -s not-exit:0 -e ignore "${bin}" state "${id}"
+	atf_check -s not-exit:0 -e ignore "${bin}" kill "${id}"
+	atf_check -s not-exit:0 -e ignore "${bin}" delete "${id}"
+}
+
+atf_test_case list_empty_ok
+list_empty_ok_head()
+{
+	atf_set "descr" "list succeeds with empty container set"
+}
+list_empty_ok_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	atf_check -s exit:0 -o ignore -e ignore "${bin}" list
+}
+
+atf_test_case images_respects_data_dir
+images_respects_data_dir_head()
+{
+	atf_set "descr" "images lists registry under OCIFBSD_DATA_DIR"
+}
+images_respects_data_dir_body()
+{
+	local bin store
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	store=$(pwd)/imgstore-list
+	mkdir -p "${store}/ghcr.io/demo/latest"
+	atf_check -s exit:0 -o match:"ghcr.io" \
+	    env OCIFBSD_DATA_DIR="${store}" "${bin}" images
+}
+
+atf_test_case pull_no_args_fails
+pull_no_args_fails_head()
+{
+	atf_set "descr" "pull without reference fails"
+}
+pull_no_args_fails_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	atf_check -s not-exit:0 -e ignore "${bin}" pull
+	atf_check -s not-exit:0 -e ignore "${bin}" rmi
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case help_lists_commands
 	atf_add_test_case version_prints
 	atf_add_test_case unknown_command_fails
 	atf_add_test_case pull_dry_run
+	atf_add_test_case pull_dry_run_official
 	atf_add_test_case images_empty_ok
+	atf_add_test_case images_respects_data_dir
 	atf_add_test_case pull_invalid_ref
+	atf_add_test_case pull_no_args_fails
 	atf_add_test_case pull_real_unreachable
 	atf_add_test_case rmi_missing_fails
 	atf_add_test_case rmi_removes_store
 	atf_add_test_case create_image_missing_fails
+	atf_add_test_case create_missing_bundle_fails
+	atf_add_test_case run_image_missing_fails
+	atf_add_test_case start_missing_fails
+	atf_add_test_case list_empty_ok
 }
