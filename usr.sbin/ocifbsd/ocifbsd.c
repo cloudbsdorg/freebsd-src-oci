@@ -668,8 +668,8 @@ cmd_run(int argc, char **argv)
 }
 
 /*
- * pull — resolve an OCI reference (full registry fetch is Phase 2 ongoing).
- * --dry-run only parses and prints registry/repo/tag[/digest].
+ * pull — resolve an OCI reference; without --dry-run, fetch via
+ * registry_pull(3) into the local store path.
  */
 static int
 cmd_pull(int argc, char **argv)
@@ -678,6 +678,7 @@ cmd_pull(int argc, char **argv)
 	int dry_run = 0;
 	char *registry = NULL, *repo = NULL, *tag = NULL, *digest = NULL;
 	char *store_path = NULL;
+	struct registry reg;
 	int ch, ret = 1;
 
 	static struct option longopts[] = {
@@ -722,32 +723,42 @@ cmd_pull(int argc, char **argv)
 		printf("digest=%s\n", digest);
 
 	store_path = zfs_image_path(registry, repo, tag);
-	if (store_path != NULL) {
-		printf("store_path=%s\n", store_path);
-		free(store_path);
+	if (store_path == NULL) {
+		fprintf(stderr, "error: cannot allocate store path\n");
+		goto out;
 	}
+	printf("store_path=%s\n", store_path);
 
 	if (dry_run) {
 		ret = 0;
 		goto out;
 	}
 
-	/*
-	 * Full registry pull (curl + ZFS layers) is not wired into the
-	 * main binary yet. Parse/path resolution is the tested Phase 2
-	 * surface; refuse with a clear error so operators are not misled.
-	 */
-	fprintf(stderr,
-	    "error: full image pull is not implemented in this binary yet\n"
-	    "hint: use --dry-run to validate references; "
-	    "see image/pull.c for the registry client scaffold\n");
-	ret = 2;
+	if (registry_init(&reg, ref) != 0) {
+		fprintf(stderr, "error: registry_init failed for %s\n", ref);
+		goto out;
+	}
+
+	if (verbose)
+		fprintf(stderr, "pulling %s -> %s\n", ref, store_path);
+
+	if (registry_pull(&reg, ref, store_path, NULL, NULL) != 0) {
+		fprintf(stderr, "error: pull failed for %s\n", ref);
+		registry_free(&reg);
+		ret = 1;
+		goto out;
+	}
+
+	registry_free(&reg);
+	printf("status=ok\n");
+	ret = 0;
 
 out:
 	free(registry);
 	free(repo);
 	free(tag);
 	free(digest);
+	free(store_path);
 	return (ret);
 }
 

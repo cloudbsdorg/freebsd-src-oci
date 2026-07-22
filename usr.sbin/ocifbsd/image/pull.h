@@ -127,6 +127,8 @@ struct registry {
 	int	port;			/* registry port */
 	char	*path_prefix;		/* API path prefix */
 	bool	tls;			/* use HTTPS */
+	char	*repository;		/* last reference's repo path */
+	char	*tag;			/* last reference's tag */
 	struct registry_auth *auth;
 };
 

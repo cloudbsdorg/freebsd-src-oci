@@ -144,10 +144,19 @@ ATF_TC_BODY(zfs_paths, tc)
 {
 	char *p;
 
+	unsetenv("OCIFBSD_DATA_DIR");
 	p = zfs_image_path("ghcr.io", "cloudbsd/ocifbsd", "latest");
 	ATF_REQUIRE(p != NULL);
 	ATF_CHECK_STREQ(p, "/var/lib/ocifbsd/ghcr.io/cloudbsd/ocifbsd/latest");
 	free(p);
+
+	ATF_REQUIRE(setenv("OCIFBSD_DATA_DIR", "/tmp/oci-store", 1) == 0);
+	p = zfs_image_path("ghcr.io", "cloudbsd/ocifbsd", "latest");
+	ATF_REQUIRE(p != NULL);
+	ATF_CHECK_STREQ(p,
+	    "/tmp/oci-store/ghcr.io/cloudbsd/ocifbsd/latest");
+	free(p);
+	unsetenv("OCIFBSD_DATA_DIR");
 
 	p = zfs_layer_path("sha256:deadbeef");
 	ATF_REQUIRE(p != NULL);

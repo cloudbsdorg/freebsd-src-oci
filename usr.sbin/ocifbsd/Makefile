@@ -24,10 +24,7 @@ SRCS=	\
 	src/oci2jail.c \
 	src/state.c \
 	src/hooks.c \
-	src/utils.c \
-	image/reference.c \
-	image/paths.c \
-	image/whiteout.c
+	src/utils.c
 
 # ocifbsd has no tests/ subdir yet (the test suite lives at
 # ../../tests/usr.sbin/ocifbsd/ via the 'make test' target).
@@ -118,8 +115,25 @@ LIBADD=	\
 # This is a known migration target (see .omo/drafts/MIGRATION.md):
 # long-term, ocifbsd should use libxo(3) which IS in FreeBSD base.
 CFLAGS+=	-I/usr/local/include/json-c
+CFLAGS+=	-I/usr/local/include
 LDFLAGS+=	-L/usr/local/lib
 LDADD+=		-ljson-c
+#
+# Image module (registry pull, unpack, ZFS paths). Build the archive
+# first, then link it. Paths work with and without MAKEOBJDIRPREFIX.
+#
+OCIFBSD_IMAGE_OBJDIR!=	cd ${.CURDIR}/image && ${MAKE} -V .OBJDIR
+OCIFBSD_IMAGE_LIB=	${OCIFBSD_IMAGE_OBJDIR}/libocifbsd_image.a
+
+${OCIFBSD_IMAGE_LIB}: .PHONY
+	@cd ${.CURDIR}/image && ${MAKE} all
+
+.if !target(${PROG})
+# bsd.prog.mk defines ${PROG}; ensure image lib is ready first
+.endif
+DPADD+=		${OCIFBSD_IMAGE_LIB}
+LDADD+=		${OCIFBSD_IMAGE_LIB}
+LDADD+=		-lcurl -larchive
 
 # Enable test suite
 HAS_TESTS=
@@ -138,7 +152,11 @@ SUBDIR.${MK_TESTS}+=	tests
 # Tell BSD make where to find .c files in subdirectories.
 # SRCS contains paths like 'src/container.c' — make needs .PATH to resolve
 # them when generating the .o -> .c dependency rules.
-.PATH: ${.CURDIR}/src ${.CURDIR}/image
+.PATH: ${.CURDIR}/src
+
+# Link order: image library before PROG objects finish linking
+beforebuild: ${OCIFBSD_IMAGE_LIB}
+.ORDER: ${OCIFBSD_IMAGE_LIB} ${PROG}
 
 # Disable the default /usr/obj objdir. The ocifbsd build is a standalone
 # checkout (not in /usr/src), so we put .o files in the current directory.

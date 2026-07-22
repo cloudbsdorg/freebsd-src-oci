@@ -76,11 +76,16 @@ Show detailed container metadata as JSON.
 Create and start a container in one command.
 .It Cm pull Oo Fl n | -dry-run Oc Ar reference
 Parse an OCI image reference and print registry, repository, tag, and
-planned store path under
-.Pa /var/lib/ocifbsd .
-Full registry download is not yet implemented; without
+store path (default
+.Pa /var/lib/ocifbsd ,
+overridable with
+.Ev OCIFBSD_DATA_DIR ) .
+With
 .Fl n
-the command exits with status 2 after printing the resolved reference.
+only resolve and print.
+Without
+.Fl n ,
+fetch the manifest and layers via the OCI Distribution API into that path.
 .It Cm images
 List top-level entries under the local image store
 .Pq Pa /var/lib/ocifbsd .

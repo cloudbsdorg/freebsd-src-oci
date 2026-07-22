@@ -100,6 +100,46 @@ images_empty_ok_body()
 	atf_check -s exit:0 -o ignore -e ignore "${bin}" images
 }
 
+atf_test_case pull_invalid_ref
+pull_invalid_ref_head()
+{
+	atf_set "descr" "pull rejects empty/invalid references"
+}
+pull_invalid_ref_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	# empty string after parse_reference should fail
+	atf_check -s not-exit:0 -e ignore "${bin}" pull --dry-run ""
+}
+
+atf_test_case pull_real_unreachable
+pull_real_unreachable_head()
+{
+	atf_set "descr" "pull without dry-run fails cleanly on unreachable host"
+}
+pull_real_unreachable_body()
+{
+	local bin store
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	store=$(pwd)/imgstore
+	mkdir -p "${store}"
+	# 127.0.0.1:1 — nothing listening; must not hang forever (curl timeout default)
+	# Use a host that fails DNS quickly
+	export OCIFBSD_DATA_DIR="${store}"
+	atf_check -s not-exit:0 -o ignore -e ignore \
+	    env OCIFBSD_DATA_DIR="${store}" \
+	    "${bin}" pull not-a-real-registry.invalid/ocifbsd/test:latest
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case help_lists_commands
@@ -107,4 +147,6 @@ atf_init_test_cases()
 	atf_add_test_case unknown_command_fails
 	atf_add_test_case pull_dry_run
 	atf_add_test_case images_empty_ok
+	atf_add_test_case pull_invalid_ref
+	atf_add_test_case pull_real_unreachable
 }

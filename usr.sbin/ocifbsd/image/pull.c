@@ -155,6 +155,8 @@ registry_init(struct registry *reg, const char *reference)
 	reg->port = REGISTRY_DEFAULT_PORT;
 	reg->path_prefix = strdup(REGISTRY_API_PREFIX);
 	reg->tls = true;
+	reg->repository = repo;
+	reg->tag = tag != NULL ? tag : strdup("latest");
 	reg->auth = calloc(1, sizeof(struct registry_auth));
 	if (reg->auth == NULL)
 		return (-1);
@@ -162,8 +164,6 @@ registry_init(struct registry *reg, const char *reference)
 	reg->auth->type = AUTH_ANONYMOUS;
 	reg->auth->registry = strdup(registry);
 
-	free(repo);
-	free(tag);
 	free(digest);
 
 	return (0);
@@ -177,6 +177,8 @@ registry_free(struct registry *reg)
 
 	free(reg->host);
 	free(reg->path_prefix);
+	free(reg->repository);
+	free(reg->tag);
 	if (reg->auth) {
 		free(reg->auth->username);
 		free(reg->auth->password);
@@ -198,14 +200,68 @@ build_url(struct registry *reg, const char *path)
 {
 	char *url;
 	size_t len;
+	const char *scheme;
+	char hostbuf[512];
+	const char *host;
 
-	len = strlen(path) + 16; /* https://host:port */
+	if (reg == NULL || reg->host == NULL || path == NULL)
+		return (NULL);
+
+	scheme = reg->tls ? "https" : "http";
+	host = reg->host;
+	/*
+	 * Host may already include :port (e.g. localhost:5000 from
+	 * parse_reference). Avoid doubling the port.
+	 */
+	if (strchr(host, ':') != NULL) {
+		len = strlen(scheme) + 3 + strlen(host) + strlen(path) + 1;
+		url = malloc(len);
+		if (url == NULL)
+			return (NULL);
+		snprintf(url, len, "%s://%s%s", scheme, host, path);
+		return (url);
+	}
+
+	len = strlen(scheme) + 3 + strlen(host) + 1 + 8 + strlen(path) + 1;
 	url = malloc(len);
 	if (url == NULL)
 		return (NULL);
-
-	snprintf(url, len, "https://%s:%d%s", reg->host, reg->port, path);
+	if ((reg->tls && reg->port == 443) ||
+	    (!reg->tls && reg->port == 80))
+		snprintf(url, len, "%s://%s%s", scheme, host, path);
+	else
+		snprintf(url, len, "%s://%s:%d%s", scheme, host, reg->port,
+		    path);
+	(void)hostbuf;
 	return (url);
+}
+
+/*
+ * Ensure directory exists including parents (mkdir -p).
+ */
+static int
+mkdirp_path(const char *path, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *p;
+	size_t len;
+
+	if (path == NULL || *path == '\0')
+		return (-1);
+	len = strlcpy(buf, path, sizeof(buf));
+	if (len >= sizeof(buf))
+		return (-1);
+	for (p = buf + 1; *p != '\0'; p++) {
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		if (mkdir(buf, mode) != 0 && errno != EEXIST)
+			return (-1);
+		*p = '/';
+	}
+	if (mkdir(buf, mode) != 0 && errno != EEXIST)
+		return (-1);
+	return (0);
 }
 
 /*
@@ -224,6 +280,8 @@ setup_curl(struct registry *reg, const char *url, FILE *out)
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
 
 	if (out != NULL) {
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -798,8 +856,12 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 	int ret = -1;
 
 	if (layer->url == NULL) {
-		/* Need to get download URL from registry */
-		if (asprintf(&path, "/v2/%s/blobs/%s", reg->host, layer->digest) == -1)
+		const char *repo = reg->repository != NULL ? reg->repository :
+		    reg->host;
+
+		/* OCI Distribution: /v2/<name>/blobs/<digest> */
+		if (asprintf(&path, "/v2/%s/blobs/%s", repo, layer->digest) ==
+		    -1)
 			return (-1);
 		url = build_url(reg, path);
 		free(path);
@@ -824,6 +886,8 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
@@ -903,9 +967,10 @@ registry_pull(struct registry *reg, const char *reference,
 		}
 	}
 
-	/* Create destination directory */
-	if (mkdir(destdir, 0755) != 0 && errno != EEXIST) {
-		fprintf(stderr, "error: cannot create directory: %s\n", destdir);
+	/* Create destination directory (including parents) */
+	if (mkdirp_path(destdir, 0755) != 0) {
+		fprintf(stderr, "error: cannot create directory: %s: %s\n",
+		    destdir, strerror(errno));
 		goto cleanup;
 	}
 
@@ -914,12 +979,16 @@ registry_pull(struct registry *reg, const char *reference,
 		char layer_dir[PATH_MAX];
 
 		if (cb)
-			cb(opaque, manifest->layers[i]->digest, 0, manifest->layers[i]->size);
+			cb(opaque, manifest->layers[i]->digest, 0,
+			    manifest->layers[i]->size);
 
 		snprintf(layer_dir, sizeof(layer_dir), "%s/layers", destdir);
-		if (mkdir(layer_dir, 0755) != 0 && errno != EEXIST) {
-			fprintf(stderr, "error: cannot create layers directory\n");
-			continue;
+		if (mkdirp_path(layer_dir, 0755) != 0) {
+			fprintf(stderr,
+			    "error: cannot create layers directory: %s\n",
+			    layer_dir);
+			ret = -1;
+			goto cleanup;
 		}
 
 		ret = registry_pull_layer(reg, manifest->layers[i],
