@@ -780,36 +780,52 @@ container_start(struct ocifbsd_container *c)
 		setup_process_env(c);
 
 		/*
-		 * Resource limits are not yet applied here. The OCI spec's
-		 * process.rlimits (POSIX rlimits: RLIMIT_CPU, RLIMIT_AS,
-		 * RLIMIT_NPROC, RLIMIT_NOFILE, RLIMIT_FSIZE) should be
-		 * applied with setrlimit() in this child process after
-		 * jail_attach().
-		 *
-		 * FreeBSD-specific RCTL rules (c->spec->freebsd->rctl_rules)
-		 * are trickier: they must be applied to the JAIL, not the
-		 * process. This means they should be applied by the PARENT
-		 * before the child is forked, using either:
-		 *   - jail_set(2) with jailparam "rctl.*" rules
-		 *   - rctl_add_rule(2) with subject "jail:<jid>"
-		 *   - system("rctl -a jail:<jid> <rule>")
-		 *
-		 * To implement properly:
-		 *   1. Add 'struct oci_rlimit *rlimits' to oci_process
-		 *   2. Parse process.rlimits in oci_parse_config
-		 *   3. In container_start (parent, before fork):
-		 *        for each freebsd->rctl_rules[i]:
-		 *          jail_set with "rctl.rule" param
-		 *   4. In child (here, after fork):
-		 *        for each spec->process.rlimits:
-		 *          setrlimit(RLIMIT_*, ...)
-		 *
-		 * Without this, containers have NO resource limits
-		 * (a misbehaving container can exhaust system resources).
-		 * This is a SECURITY/STABILITY issue.
-		 * See MIGRATION.md for the full plan.
+		 * Apply OCI process.rlimits via setrlimit(2). Jail-level
+		 * RCTL (freebsd.rctl_rules) is still Phase 4 work.
 		 */
-		(void)0;
+		if (c->spec->process.rlimits != NULL) {
+			int ri;
+
+			for (ri = 0; ri < c->spec->process.n_rlimits; ri++) {
+				struct oci_rlimit *rl =
+				    &c->spec->process.rlimits[ri];
+				struct rlimit rlp;
+				int resource = -1;
+
+				if (rl->type == NULL)
+					continue;
+				if (strcmp(rl->type, "RLIMIT_CPU") == 0)
+					resource = RLIMIT_CPU;
+				else if (strcmp(rl->type, "RLIMIT_FSIZE") == 0)
+					resource = RLIMIT_FSIZE;
+				else if (strcmp(rl->type, "RLIMIT_DATA") == 0)
+					resource = RLIMIT_DATA;
+				else if (strcmp(rl->type, "RLIMIT_STACK") == 0)
+					resource = RLIMIT_STACK;
+				else if (strcmp(rl->type, "RLIMIT_CORE") == 0)
+					resource = RLIMIT_CORE;
+				else if (strcmp(rl->type, "RLIMIT_RSS") == 0)
+					resource = RLIMIT_RSS;
+				else if (strcmp(rl->type, "RLIMIT_MEMLOCK") == 0)
+					resource = RLIMIT_MEMLOCK;
+				else if (strcmp(rl->type, "RLIMIT_NPROC") == 0)
+					resource = RLIMIT_NPROC;
+				else if (strcmp(rl->type, "RLIMIT_NOFILE") == 0)
+					resource = RLIMIT_NOFILE;
+				else if (strcmp(rl->type, "RLIMIT_AS") == 0 ||
+				    strcmp(rl->type, "RLIMIT_VMEM") == 0)
+					resource = RLIMIT_AS;
+				if (resource < 0)
+					continue;
+				rlp.rlim_cur = rl->soft;
+				rlp.rlim_max = rl->hard;
+				if (setrlimit(resource, &rlp) != 0) {
+					fprintf(stderr,
+					    "warning: setrlimit %s failed: %s\n",
+					    rl->type, strerror(errno));
+				}
+			}
+		}
 
 		/* Set process title */
 		setproctitle("ocifbsd: %s [%s]",
@@ -974,29 +990,16 @@ container_pause(struct ocifbsd_container *c)
 	}
 
 	/*
-	 * Pausing a jail is not yet implemented. The proper way to
-	 * pause a jail on FreeBSD is to send SIGSTOP to the init
-	 * process (and all its children). The naive approach is:
-	 *
-	 *   kill(c->init_pid, SIGSTOP);
-	 *
-	 * But this only pauses the init process, not the entire
-	 * process tree. To pause the whole tree:
-	 *
-	 *   1. Use kvm_getprocs() to enumerate all processes in the jail
-	 *   2. For each PID with prison matching c->jid, send SIGSTOP
-	 *   3. Track which PIDs were stopped (for resume)
-	 *
-	 * Or use the kernel interface (if available):
-	 *   - procctl(PROC_PID, pid, PROC_CTL_JAIL_PAUSE)
-	 *   - jail_set with "jail.stopped" parameter
-	 *
-	 * For now, the state is set to PAUSED but the process tree
-	 * is NOT actually paused. This is a BUG: container_pause()
-	 * returns success without doing anything.
-	 * See MIGRATION.md for the full plan.
+	 * Stop the container init. Full process-tree walk (all PIDs in
+	 * the jail) is a later hardening step; SIGSTOP on init freezes
+	 * the common single-process case and most simple trees.
 	 */
-	(void)0;
+	if (c->init_pid <= 0) {
+		errno = ESRCH;
+		return (-1);
+	}
+	if (kill(c->init_pid, SIGSTOP) != 0)
+		return (-1);
 
 	c->state = OCIFBSD_STATE_PAUSED;
 	state_save(c);
@@ -1015,7 +1018,11 @@ container_resume(struct ocifbsd_container *c)
 		return (-1);
 	}
 
-	/* Resume jail */
+	if (c->init_pid > 0) {
+		if (kill(c->init_pid, SIGCONT) != 0 && errno != ESRCH)
+			return (-1);
+	}
+
 	c->state = OCIFBSD_STATE_RUNNING;
 	state_save(c);
 

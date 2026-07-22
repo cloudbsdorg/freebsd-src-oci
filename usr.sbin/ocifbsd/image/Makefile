@@ -3,7 +3,7 @@
 # Makefile for ocifbsd image management module
 #
 
-SRCS=		zfs_store.c pull.c unpack.c push.c
+SRCS=		zfs_store.c pull.c unpack.c push.c reference.c
 
 LIB=		ocifbsd_image
 SHLIB_NAME=	ocifbsd_image.so.1

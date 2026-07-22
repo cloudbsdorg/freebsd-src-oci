@@ -33,6 +33,7 @@
 #define _OCIFBSD_H
 
 #include <sys/types.h>
+#include <sys/resource.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
@@ -86,6 +87,12 @@ struct oci_root {
 	bool	readonly;	/* Readonly rootfs */
 };
 
+struct oci_rlimit {
+	char	*type;		/* e.g. RLIMIT_NOFILE */
+	rlim_t	hard;
+	rlim_t	soft;
+};
+
 struct oci_process {
 	char	**args;		/* Command arguments */
 	char	**env;		/* Environment variables */
@@ -98,6 +105,8 @@ struct oci_process {
 	int	nice;		/* Nice value */
 	char	**capabilities;	/* Linux capabilities (ignored) */
 	char	*rlimits_no_reset; /* Rlimits not to reset */
+	struct oci_rlimit *rlimits;
+	int	n_rlimits;
 };
 
 struct oci_mount {

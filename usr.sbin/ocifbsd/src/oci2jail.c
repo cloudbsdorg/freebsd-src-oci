@@ -35,6 +35,7 @@
 #include <sys/types.h>
 #include <sys/jail.h>
 #include <sys/mount.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syslimits.h>
 
@@ -485,6 +486,39 @@ oci_parse_config(const char *config_path)
 			spec->process.uid = 0;
 			spec->process.gid = 0;
 		}
+		/* process.rlimits: [ { type, hard, soft }, ... ] */
+		{
+			struct json_object *rlarr, *elem;
+			size_t ri, rn;
+
+			rlarr = json_object_object_get(proc_val, "rlimits");
+			if (rlarr != NULL &&
+			    json_object_get_type(rlarr) == json_type_array) {
+				rn = json_object_array_length(rlarr);
+				spec->process.rlimits = calloc(rn + 1,
+				    sizeof(*spec->process.rlimits));
+				if (spec->process.rlimits != NULL) {
+					spec->process.n_rlimits = (int)rn;
+					for (ri = 0; ri < rn; ri++) {
+						elem = json_object_array_get_idx(
+						    rlarr, ri);
+						if (elem == NULL ||
+						    json_object_get_type(elem) !=
+						    json_type_object)
+							continue;
+						spec->process.rlimits[ri].type =
+						    json_get_string(elem,
+						    "type");
+						spec->process.rlimits[ri].hard =
+						    (rlim_t)json_get_int(elem,
+						    "hard", 0);
+						spec->process.rlimits[ri].soft =
+						    (rlim_t)json_get_int(elem,
+						    "soft", 0);
+					}
+				}
+			}
+		}
 		(void)nargs;
 		(void)nenv;
 	}
@@ -532,6 +566,12 @@ oci_free_spec(struct oci_runtime_spec *spec)
 		for (i = 0; spec->process.env[i]; i++)
 			free(spec->process.env[i]);
 		free(spec->process.env);
+	}
+
+	if (spec->process.rlimits != NULL) {
+		for (i = 0; i < spec->process.n_rlimits; i++)
+			free(spec->process.rlimits[i].type);
+		free(spec->process.rlimits);
 	}
 
 	if (spec->mounts) {

@@ -52,8 +52,8 @@ execute_hook(const struct oci_hook *hook, const char *state_file)
 {
 	pid_t pid;
 	int status;
-	char **envp;
-	char **argp;
+	char **envp = NULL;
+	char **argp = NULL;
 	int env_count, arg_count;
 	int ret = 0;
 	int i;
@@ -86,6 +86,7 @@ execute_hook(const struct oci_hook *hook, const char *state_file)
 	/* Allocate envp: hook env + state env + NULL */
 	envp = calloc(env_count + 4, sizeof(char *));
 	if (envp == NULL) {
+		free(argp[arg_count + 1]);
 		free(argp);
 		return (-1);
 	}
@@ -142,13 +143,21 @@ execute_hook(const struct oci_hook *hook, const char *state_file)
 	}
 
 cleanup:
-	for (i = 0; argp[i]; i++)
-		free(argp[i]);
-	free(argp);
-
-	for (i = 0; envp[i]; i++)
-		free(envp[i]);
-	free(envp);
+	/*
+	 * Only free memory we allocated. argp[0] and hook->args[] are
+	 * borrowed; argp[arg_count+1] is the strdup'd state_file.
+	 * envp[0..env_count) are borrowed; the next three are ours.
+	 */
+	if (argp != NULL) {
+		free(argp[arg_count + 1]);
+		free(argp);
+	}
+	if (envp != NULL) {
+		free(envp[env_count]);
+		free(envp[env_count + 1]);
+		free(envp[env_count + 2]);
+		free(envp);
+	}
 
 	return (ret);
 }
@@ -204,7 +213,7 @@ hooks_run_poststart(const struct ocifbsd_container *c)
 {
 	char state_file[PATH_MAX];
 
-	if (c->spec == NULL || c->spec->hooks == NULL)
+	if (c == NULL || c->spec == NULL || c->spec->hooks == NULL)
 		return (0);
 
 	snprintf(state_file, sizeof(state_file), "%s/state.json",
@@ -222,7 +231,7 @@ hooks_run_poststop(const struct ocifbsd_container *c)
 {
 	char state_file[PATH_MAX];
 
-	if (c->spec == NULL || c->spec->hooks == NULL)
+	if (c == NULL || c->spec == NULL || c->spec->hooks == NULL)
 		return (0);
 
 	snprintf(state_file, sizeof(state_file), "%s/state.json",

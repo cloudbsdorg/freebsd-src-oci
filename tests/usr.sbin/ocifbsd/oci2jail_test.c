@@ -352,6 +352,36 @@ ATF_TC_BODY(jailparams_null, tc)
 	ATF_CHECK(oci_spec_to_jail_params(NULL, &n) == NULL);
 }
 
+ATF_TC(parse_rlimits);
+ATF_TC_HEAD(parse_rlimits, tc)
+{
+	atf_tc_set_md_var(tc, "descr", "process.rlimits array is parsed");
+}
+ATF_TC_BODY(parse_rlimits, tc)
+{
+	struct oci_runtime_spec *spec;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": {\n"
+	    "    \"args\": [ \"/bin/true\" ],\n"
+	    "    \"rlimits\": [\n"
+	    "      { \"type\": \"RLIMIT_NOFILE\", \"hard\": 256, \"soft\": 128 }\n"
+	    "    ]\n"
+	    "  },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_REQUIRE_EQ(spec->process.n_rlimits, 1);
+	ATF_REQUIRE(spec->process.rlimits != NULL);
+	ATF_CHECK_STREQ(spec->process.rlimits[0].type, "RLIMIT_NOFILE");
+	ATF_CHECK_EQ(spec->process.rlimits[0].hard, (rlim_t)256);
+	ATF_CHECK_EQ(spec->process.rlimits[0].soft, (rlim_t)128);
+	oci_free_spec(spec);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, parse_minimal);
@@ -366,5 +396,6 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, jailparams_basic);
 	ATF_TP_ADD_TC(tp, jailparams_vnet);
 	ATF_TP_ADD_TC(tp, jailparams_null);
+	ATF_TP_ADD_TC(tp, parse_rlimits);
 	return (atf_no_error());
 }
