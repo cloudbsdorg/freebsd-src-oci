@@ -448,6 +448,18 @@ container_start(struct ocifbsd_container *c)
 		return (-1);
 	}
 
+	/* Ensure OCI spec is available (reloaded by state_load when possible) */
+	if (c->spec == NULL && c->config_path != NULL)
+		c->spec = oci_parse_config(c->config_path);
+	if (c->spec == NULL || c->spec->process.args == NULL ||
+	    c->spec->process.args[0] == NULL) {
+		errno = EINVAL;
+		fprintf(stderr,
+		    "error: container %s has no process args (missing OCI config)\n",
+		    c->id);
+		return (-1);
+	}
+
 	/* Run prestart hooks */
 	hooks_run_prestart(c);
 
@@ -548,6 +560,16 @@ container_start(struct ocifbsd_container *c)
 		c->exit_code = WEXITSTATUS(status);
 		c->state = OCIFBSD_STATE_STOPPED;
 		c->finished_at = time(NULL);
+		state_save(c);
+		return (-1);
+	} else if (WIFSIGNALED(status)) {
+		c->exit_code = 128 + WTERMSIG(status);
+		c->state = OCIFBSD_STATE_STOPPED;
+		c->finished_at = time(NULL);
+		state_save(c);
+		fprintf(stderr,
+		    "error: container init exited on signal %d\n",
+		    WTERMSIG(status));
 		return (-1);
 	}
 

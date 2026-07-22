@@ -263,6 +263,32 @@ state_load(const char *id)
 
 	json_object_put(root);
 
+	/*
+	 * State files store lifecycle metadata only. Reload the full OCI
+	 * runtime spec from config.json so start/exec work after process
+	 * restart (CLI is multi-invocation).
+	 */
+	if (c->config_path != NULL) {
+		c->spec = oci_parse_config(c->config_path);
+		if (c->spec != NULL && c->rootfs != NULL &&
+		    c->spec->root.path != NULL &&
+		    c->spec->root.path[0] != '/' &&
+		    c->bundle_path != NULL) {
+			char abspath[PATH_MAX];
+			char *resolved;
+
+			snprintf(abspath, sizeof(abspath), "%s/%s",
+			    c->bundle_path, c->spec->root.path);
+			resolved = realpath(abspath, NULL);
+			if (resolved == NULL)
+				resolved = strdup(abspath);
+			if (resolved != NULL) {
+				free(c->spec->root.path);
+				c->spec->root.path = resolved;
+			}
+		}
+	}
+
 	return (c);
 }
 
