@@ -102,25 +102,18 @@ LIBADD=	\
 	m \
 	pthread \
 	crypto \
-	md
+	md \
+	archive
 
-# json-c is NOT in FreeBSD base (it's a port: devel/json-c). The
-# standard FreeBSD approach for port dependencies is to use LDADD with
-# the port's library path, NOT LIBADD (which is validated against
-# src.libnames.mk and would fail). The CFLAGS/LDFLAGS additions point
-# at /usr/local (the FreeBSD port prefix).
-#
-# Install with:  sudo pkg install json-c
-#
-# This is a known migration target (see .omo/drafts/MIGRATION.md):
-# long-term, ocifbsd should use libxo(3) which IS in FreeBSD base.
+# json-c and curl are ports (not in FreeBSD base) — use LDADD, not LIBADD.
+# Install: pkg install json-c curl
 CFLAGS+=	-I/usr/local/include/json-c
 CFLAGS+=	-I/usr/local/include
 LDFLAGS+=	-L/usr/local/lib
-LDADD+=		-ljson-c
+LDADD+=		-ljson-c -lcurl
 #
 # Image module (registry pull, unpack, ZFS paths). Build the archive
-# first, then link it. Paths work with and without MAKEOBJDIRPREFIX.
+# first, then link it. Works with and without MAKEOBJDIRPREFIX.
 #
 OCIFBSD_IMAGE_OBJDIR!=	cd ${.CURDIR}/image && ${MAKE} -V .OBJDIR
 OCIFBSD_IMAGE_LIB=	${OCIFBSD_IMAGE_OBJDIR}/libocifbsd_image.a
@@ -128,12 +121,8 @@ OCIFBSD_IMAGE_LIB=	${OCIFBSD_IMAGE_OBJDIR}/libocifbsd_image.a
 ${OCIFBSD_IMAGE_LIB}: .PHONY
 	@cd ${.CURDIR}/image && ${MAKE} all
 
-.if !target(${PROG})
-# bsd.prog.mk defines ${PROG}; ensure image lib is ready first
-.endif
 DPADD+=		${OCIFBSD_IMAGE_LIB}
 LDADD+=		${OCIFBSD_IMAGE_LIB}
-LDADD+=		-lcurl -larchive
 
 # Enable test suite
 HAS_TESTS=
@@ -154,9 +143,8 @@ SUBDIR.${MK_TESTS}+=	tests
 # them when generating the .o -> .c dependency rules.
 .PATH: ${.CURDIR}/src
 
-# Link order: image library before PROG objects finish linking
+# Ensure image library exists before linking the PROG
 beforebuild: ${OCIFBSD_IMAGE_LIB}
-.ORDER: ${OCIFBSD_IMAGE_LIB} ${PROG}
 
 # Disable the default /usr/obj objdir. The ocifbsd build is a standalone
 # checkout (not in /usr/src), so we put .o files in the current directory.
