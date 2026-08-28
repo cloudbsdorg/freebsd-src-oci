@@ -106,6 +106,16 @@ struct cluster_node {
     /* Tree entry */
     RB_ENTRY(cluster_node) entry;
     pthread_mutex_t lock;
+
+    /*
+     * Lifetime management (protected by node_registry_lock): cluster_node_get
+     * hands out a counted reference; cluster_node_remove detaches the node
+     * from the tree but defers free() until the last reference is released
+     * via cluster_node_put. This prevents a use-after-free when one thread
+     * removes a node while another is still operating on it.
+     */
+    int refcount;
+    bool removed;
 };
 
 /* Node RB tree */
@@ -177,6 +187,7 @@ int cluster_leave(const char *reason);
 struct cluster_node *cluster_node_add(const char *node_id, const char *ip, uint16_t port);
 int cluster_node_remove(const char *node_id);
 struct cluster_node *cluster_node_get(const char *node_id);
+void cluster_node_put(struct cluster_node *node);
 struct cluster_node **cluster_nodes_list(int *count);
 struct cluster_node **cluster_nodes_by_role(int role, int *count);
 

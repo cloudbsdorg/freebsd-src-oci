@@ -255,8 +255,12 @@ cert_load_registry(void)
     while (fgets(buf, sizeof(buf), fp) != NULL) {
         struct cert_info *cert = cert_parse_json(buf);
         if (cert) {
-            RB_INSERT(cert_tree, &cert_registry, cert);
-            stats.total_certs++;
+            if (RB_INSERT(cert_tree, &cert_registry, cert) != NULL) {
+                /* Duplicate name in the registry file; don't leak. */
+                free(cert);
+            } else {
+                stats.total_certs++;
+            }
         }
     }
 
@@ -400,9 +404,14 @@ cert_create_ca(const char *name, int validity_days)
         strlcpy(info->cert_path, cert_path, sizeof(info->cert_path));
 
         pthread_mutex_lock(&cert_lock);
-        RB_INSERT(cert_tree, &cert_registry, info);
-        stats.total_certs++;
-        stats.valid_certs++;
+        if (RB_INSERT(cert_tree, &cert_registry, info) != NULL) {
+            /* Name already present; don't leak the duplicate or double-count. */
+            free(info);
+            info = NULL;
+        } else {
+            stats.total_certs++;
+            stats.valid_certs++;
+        }
         pthread_mutex_unlock(&cert_lock);
 
         cert_save_registry();
@@ -830,9 +839,28 @@ cert_save(const char *name, const char *key_pem, const char *cert_pem)
         strlcpy(info->cert_path, cert_path, sizeof(info->cert_path));
 
         pthread_mutex_lock(&cert_lock);
-        RB_INSERT(cert_tree, &cert_registry, info);
-        stats.total_certs++;
-        stats.valid_certs++;
+        struct cert_info *existing =
+            RB_INSERT(cert_tree, &cert_registry, info);
+        if (existing != NULL) {
+            /*
+             * A cert with this name already exists (e.g. on renewal).
+             * RB_INSERT did not insert, so update the existing entry and
+             * free the duplicate instead of leaking it and double-counting
+             * the stats.
+             */
+            existing->type = info->type;
+            existing->status = info->status;
+            existing->expires = info->expires;
+            existing->last_rotated = info->last_rotated;
+            strlcpy(existing->key_path, info->key_path,
+                sizeof(existing->key_path));
+            strlcpy(existing->cert_path, info->cert_path,
+                sizeof(existing->cert_path));
+            free(info);
+        } else {
+            stats.total_certs++;
+            stats.valid_certs++;
+        }
         pthread_mutex_unlock(&cert_lock);
 
         cert_save_registry();

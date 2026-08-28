@@ -384,41 +384,77 @@ cluster_node_remove(const char *node_id)
     node = RB_FIND(node_tree, &node_registry, &node_find);
     if (node != NULL) {
         RB_REMOVE(node_tree, &node_registry, node);
-        pthread_mutex_destroy(&node->lock);
-        free(node);
+        /*
+         * Detach from the tree now, but only free once no other thread
+         * holds a reference. If references remain, mark it removed and let
+         * the last cluster_node_put free it.
+         */
+        if (node->refcount == 0) {
+            pthread_mutex_destroy(&node->lock);
+            free(node);
+        } else {
+            node->removed = true;
+        }
     }
     pthread_mutex_unlock(&node_registry_lock);
-    
+
     if (node != NULL) {
         cluster_emit_event(2, node_id, "node left cluster");
         return (0);
     }
-    
+
     return (-1);
 }
 
 /*
- * Get node by ID
+ * Get node by ID. Returns a counted reference; the caller must release it
+ * with cluster_node_put when done (except the local node, which is never
+ * freed but is still safe to put).
  */
 struct cluster_node *
 cluster_node_get(const char *node_id)
 {
     struct cluster_node node_find;
-    
+    struct cluster_node *node;
+
     if (node_id == NULL)
         return (NULL);
-    
+
     /* Check local node first */
     if (local_node != NULL && strcmp(node_id, local_node->node_id) == 0)
         return (local_node);
-    
+
     strlcpy(node_find.node_id, node_id, sizeof(node_find.node_id));
-    
+
     pthread_mutex_lock(&node_registry_lock);
-    struct cluster_node *node = RB_FIND(node_tree, &node_registry, &node_find);
+    node = RB_FIND(node_tree, &node_registry, &node_find);
+    if (node != NULL)
+        node->refcount++;
     pthread_mutex_unlock(&node_registry_lock);
-    
+
     return (node);
+}
+
+/*
+ * Release a reference obtained from cluster_node_get. Frees the node if it
+ * has been removed from the tree and this was the last reference.
+ */
+void
+cluster_node_put(struct cluster_node *node)
+{
+    if (node == NULL || node == local_node)
+        return;
+
+    pthread_mutex_lock(&node_registry_lock);
+    if (node->refcount > 0)
+        node->refcount--;
+    if (node->refcount == 0 && node->removed) {
+        pthread_mutex_unlock(&node_registry_lock);
+        pthread_mutex_destroy(&node->lock);
+        free(node);
+        return;
+    }
+    pthread_mutex_unlock(&node_registry_lock);
 }
 
 /*
@@ -611,11 +647,18 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
     char sender_ip[64];
     
     inet_ntop(AF_INET, &sender->sin_addr, sender_ip, sizeof(sender_ip));
-    
+
     /* Validate message */
     if (len < offsetof(struct gossip_message, payload))
         return;
-    
+
+    /*
+     * source_id is a fixed char[256] filled from the wire and is not
+     * guaranteed NUL-terminated; force a terminator before any string
+     * operation to prevent an over-read past the field.
+     */
+    msg->source_id[sizeof(msg->source_id) - 1] = '\0';
+
     /* Update sender's last_seen */
     struct cluster_node *node = cluster_node_get(msg->source_id);
     if (node != NULL) {
@@ -624,13 +667,22 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
         if (node->state == NODE_STATE_SUSPECTED)
             node->state = NODE_STATE_ACTIVE;
         pthread_mutex_unlock(&node->lock);
+        cluster_node_put(node);
     }
-    
+
     switch (msg->type) {
         case GOSSIP_MSG_JOIN:
-            /* New node joining - add to registry */
-            if (msg->length > 0 && len >= offsetof(struct gossip_message, payload) + msg->length) {
+            /*
+             * New node joining. The payload is reinterpreted as a
+             * struct cluster_node, so require that the received payload is
+             * at least that large — otherwise the node_id/ip/port reads
+             * would run past the received bytes into stale buffer data.
+             */
+            if (msg->length >= sizeof(struct cluster_node) &&
+                len >= offsetof(struct gossip_message, payload) + msg->length) {
                 struct cluster_node *new_node = (struct cluster_node *)msg->payload;
+                new_node->node_id[sizeof(new_node->node_id) - 1] = '\0';
+                new_node->ip[sizeof(new_node->ip) - 1] = '\0';
                 cluster_node_add(new_node->node_id, new_node->ip, new_node->port);
             }
             break;
@@ -712,10 +764,15 @@ gossip_send_message(const char *target_id, uint8_t type, const void *payload, si
     if (!cluster_initialized || target_id == NULL)
         return (-1);
     
+    /* The wire length field is 16-bit; refuse oversized payloads rather
+     * than silently truncating msg.length. */
+    if (len > UINT16_MAX)
+        return (-1);
+
     target = cluster_node_get(target_id);
     if (target == NULL)
         return (-1);
-    
+
     /* Build message */
     memset(&msg, 0, sizeof(msg));
     msg.type = type;
@@ -723,7 +780,7 @@ gossip_send_message(const char *target_id, uint8_t type, const void *payload, si
     strlcpy(msg.source_id, local_node->node_id, sizeof(msg.source_id));
     msg.source_incarnation = local_node->incarnation;
     msg.timestamp = time(NULL);
-    msg.length = len;
+    msg.length = (uint16_t)len;
     
     /* Set destination */
     memset(&addr, 0, sizeof(addr));
@@ -746,7 +803,8 @@ gossip_send_message(const char *target_id, uint8_t type, const void *payload, si
     pthread_mutex_lock(&gossip_lock);
     sent = sendmsg(gossip_socket, &mhdr, 0);
     pthread_mutex_unlock(&gossip_lock);
-    
+
+    cluster_node_put(target);
     return (sent >= 0 ? 0 : -1);
 }
 
@@ -806,7 +864,8 @@ swim_process_heartbeat(const char *node_id, uint64_t incarnation)
     
     node->last_seen = time(NULL);
     pthread_mutex_unlock(&node->lock);
-    
+
+    cluster_node_put(node);
     return (0);
 }
 
@@ -828,10 +887,12 @@ swim_mark_suspected(const char *node_id)
     if (node->suspicion_started == 0)
         node->suspicion_started = time(NULL);
     pthread_mutex_unlock(&node->lock);
-    
+
+    cluster_node_put(node);
+
     /* Emit warning event */
     cluster_emit_event(3, node_id, "node suspected to be dead");
-    
+
     return (0);
 }
 
@@ -850,13 +911,18 @@ swim_mark_dead(const char *node_id)
     pthread_mutex_lock(&node->lock);
     node->state = NODE_STATE_DEAD;
     pthread_mutex_unlock(&node->lock);
-    
-    /* Remove from registry */
+
+    /*
+     * Remove from the registry. Our held reference makes cluster_node_remove
+     * defer the free; releasing it below frees the node safely once no other
+     * thread holds a reference.
+     */
     cluster_node_remove(node_id);
-    
+    cluster_node_put(node);
+
     /* Emit failure event */
     cluster_emit_event(4, node_id, "node marked as dead");
-    
+
     return (0);
 }
 
@@ -882,7 +948,8 @@ swim_mark_alive(const char *node_id)
         cluster_emit_event(5, node_id, "node recovered");
     }
     pthread_mutex_unlock(&node->lock);
-    
+
+    cluster_node_put(node);
     return (0);
 }
 
@@ -960,13 +1027,17 @@ raft_append_entry(const char *command, size_t len)
     
     /* Grow log if needed */
     if (raft.log_size >= raft.log_capacity) {
-        raft.log_capacity = raft.log_capacity ? raft.log_capacity * 2 : 16;
-        raft.log = realloc(raft.log, raft.log_capacity * sizeof(struct raft_log_entry));
-    }
-    
-    if (raft.log == NULL) {
-        pthread_mutex_unlock(&cluster_lock);
-        return (-1);
+        int new_cap = raft.log_capacity ? raft.log_capacity * 2 : 16;
+        struct raft_log_entry *grown = realloc(raft.log,
+            new_cap * sizeof(struct raft_log_entry));
+        /* On failure keep the existing log intact rather than leaking it
+         * (and losing every prior entry) by overwriting raft.log with NULL. */
+        if (grown == NULL) {
+            pthread_mutex_unlock(&cluster_lock);
+            return (-1);
+        }
+        raft.log = grown;
+        raft.log_capacity = new_cap;
     }
     
     entry = &raft.log[raft.log_size];
