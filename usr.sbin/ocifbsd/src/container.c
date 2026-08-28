@@ -656,6 +656,19 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		return (-1);
 	}
 
+	/*
+	 * Per-container log path. The container's init process has its stdio
+	 * redirected here (see container_start) so it does not inherit — and
+	 * hold open — the CLI's terminal/pipe.
+	 */
+	{
+		char logbuf[PATH_MAX];
+
+		snprintf(logbuf, sizeof(logbuf), "%s/%s.log",
+		    OCIFBSD_STATE_DIR, c->id);
+		c->log_path = strdup(logbuf);
+	}
+
 	/* Generate jail parameters from OCI spec */
 	params = oci_spec_to_jail_params(spec, &nparams);
 	if (params == NULL) {
@@ -768,6 +781,39 @@ container_start(struct ocifbsd_container *c)
 
 	if (pid == 0) {
 		/* Child process - become the container init */
+
+		/*
+		 * Detach from the controlling terminal and redirect stdio so the
+		 * container's init does not inherit — and keep open — the CLI's
+		 * stdin/stdout/stderr. Without this, a foreground `run`/`start`
+		 * blocks the caller until the container exits (the container holds
+		 * the caller's pipe). stdin comes from /dev/null; stdout/stderr go
+		 * to the per-container log. Done before jail_attach so the log path
+		 * on the host filesystem is still reachable.
+		 */
+		setsid();
+		{
+			int lfd, nfd;
+
+			nfd = open(_PATH_DEVNULL, O_RDONLY);
+			if (nfd >= 0) {
+				dup2(nfd, STDIN_FILENO);
+				if (nfd > STDERR_FILENO)
+					close(nfd);
+			}
+			lfd = -1;
+			if (c->log_path != NULL)
+				lfd = open(c->log_path,
+				    O_WRONLY | O_CREAT | O_APPEND, 0644);
+			if (lfd < 0)
+				lfd = open(_PATH_DEVNULL, O_WRONLY);
+			if (lfd >= 0) {
+				dup2(lfd, STDOUT_FILENO);
+				dup2(lfd, STDERR_FILENO);
+				if (lfd > STDERR_FILENO)
+					close(lfd);
+			}
+		}
 
 		/* Attach to jail */
 		if (jail_attach(c->jid) != 0) {
