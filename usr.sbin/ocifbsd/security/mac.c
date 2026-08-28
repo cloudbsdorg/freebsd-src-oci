@@ -36,12 +36,60 @@
 #include <sys/wait.h>
 
 #include <errno.h>
+#include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "mac.h"
+
+/*
+ * Validate an identifier (jail name, policy name, MAC label) that would
+ * otherwise be interpolated into a command run as root. Restrict to a
+ * conservative charset so it cannot inject shell/argument boundaries.
+ * MAC label values legitimately contain '/' and ',' (e.g. "biba/low"),
+ * so those are permitted; shell metacharacters are not.
+ */
+static bool
+mac_arg_is_safe(const char *s)
+{
+	size_t i;
+
+	if (s == NULL || s[0] == '\0')
+		return (false);
+	for (i = 0; s[i] != '\0'; i++) {
+		char c = s[i];
+		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		    (c >= '0' && c <= '9') ||
+		    c == '.' || c == '-' || c == '_' || c == '/' || c == ','))
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * Run a command via fork/exec (no shell). argv is NULL-terminated.
+ * Returns the child exit status, or -1 on failure.
+ */
+static int
+mac_run(char *const argv[])
+{
+	pid_t pid;
+	int status;
+
+	pid = fork();
+	if (pid < 0)
+		return (-1);
+	if (pid == 0) {
+		execvp(argv[0], argv);
+		_exit(127);
+	}
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	return (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+}
 
 /*
  * Security policy presets
@@ -164,17 +212,21 @@ mac_list_policies(char ***policies, int *npolicies)
 int
 mac_load_policy(const char *policy_name)
 {
-	char cmd[256];
+	char module[128];
 	int ret;
 
-	snprintf(cmd, sizeof(cmd), "kldload mac_%s", policy_name);
-	ret = system(cmd);
-
-	/* Also try loading via module */
-	if (ret != 0) {
-		snprintf(cmd, sizeof(cmd), "kldload %s", policy_name);
-		ret = system(cmd);
+	if (!mac_arg_is_safe(policy_name)) {
+		errno = EINVAL;
+		return (-1);
 	}
+
+	snprintf(module, sizeof(module), "mac_%s", policy_name);
+	ret = mac_run((char *const[]){ "kldload", module, NULL });
+
+	/* Also try loading via the bare module name. */
+	if (ret != 0)
+		ret = mac_run((char *const[]){ "kldload",
+		    (char *)policy_name, NULL });
 
 	return (ret);
 }
@@ -185,10 +237,14 @@ mac_load_policy(const char *policy_name)
 int
 mac_unload_policy(const char *policy_name)
 {
-	char cmd[256];
+	char module[128];
 
-	snprintf(cmd, sizeof(cmd), "kldunload mac_%s", policy_name);
-	return (system(cmd));
+	if (!mac_arg_is_safe(policy_name)) {
+		errno = EINVAL;
+		return (-1);
+	}
+	snprintf(module, sizeof(module), "mac_%s", policy_name);
+	return (mac_run((char *const[]){ "kldunload", module, NULL }));
 }
 
 /*
@@ -197,18 +253,20 @@ mac_unload_policy(const char *policy_name)
 int
 mac_set_label(const char *jail_name, struct mac_label *label)
 {
-	char cmd[512];
-	int ret;
+	char labelarg[256];
 
 	if (label == NULL || label->label == NULL) {
 		errno = EINVAL;
 		return (-1);
 	}
+	if (!mac_arg_is_safe(jail_name) || !mac_arg_is_safe(label->label)) {
+		errno = EINVAL;
+		return (-1);
+	}
 
-	snprintf(cmd, sizeof(cmd), "jail -j %s label=%s", jail_name, label->label);
-	ret = system(cmd);
-
-	return (ret);
+	snprintf(labelarg, sizeof(labelarg), "label=%s", label->label);
+	return (mac_run((char *const[]){ "jail", "-j", (char *)jail_name,
+	    labelarg, NULL }));
 }
 
 /*
@@ -217,26 +275,61 @@ mac_set_label(const char *jail_name, struct mac_label *label)
 int
 mac_get_label(const char *jail_name, struct mac_label **label)
 {
-	char cmd[256];
-	struct mac_label *l;
+	char buf[256];
+	int fds[2];
+	pid_t pid;
+	FILE *fp;
+	char *line = NULL;
 
 	*label = NULL;
 
-	snprintf(cmd, sizeof(cmd), "jail -j %s -v | grep label", jail_name);
-
-	FILE *fp = popen(cmd, "r");
-	if (fp == NULL)
-		return (-1);
-
-	char buf[256];
-	if (fgets(buf, sizeof(buf), fp) == NULL) {
-		pclose(fp);
+	if (!mac_arg_is_safe(jail_name)) {
+		errno = EINVAL;
 		return (-1);
 	}
-	pclose(fp);
+
+	/* Run `jail -j <name> -v` without a shell and grep for label in C. */
+	if (pipe(fds) != 0)
+		return (-1);
+	pid = fork();
+	if (pid < 0) {
+		close(fds[0]);
+		close(fds[1]);
+		return (-1);
+	}
+	if (pid == 0) {
+		int devnull = open("/dev/null", O_WRONLY);
+		close(fds[0]);
+		if (dup2(fds[1], STDOUT_FILENO) < 0)
+			_exit(127);
+		if (devnull >= 0)
+			dup2(devnull, STDERR_FILENO);
+		if (fds[1] != STDOUT_FILENO)
+			close(fds[1]);
+		execlp("jail", "jail", "-j", (char *)jail_name, "-v",
+		    (char *)NULL);
+		_exit(127);
+	}
+	close(fds[1]);
+	fp = fdopen(fds[0], "r");
+	if (fp == NULL) {
+		close(fds[0]);
+		waitpid(pid, NULL, 0);
+		return (-1);
+	}
+	while (fgets(buf, sizeof(buf), fp) != NULL) {
+		if (strstr(buf, "label") != NULL) {
+			line = buf;
+			break;
+		}
+	}
+	fclose(fp);
+	waitpid(pid, NULL, 0);
+	if (line == NULL)
+		return (-1);
 
 	/* Parse label from output */
-	char *p = strchr(buf, '=');
+	char *p = strchr(line, '=');
 	if (p == NULL)
 		return (-1);
 	p++;
@@ -245,12 +338,14 @@ mac_get_label(const char *jail_name, struct mac_label **label)
 	while (end > p && (*end == '\n' || *end == ' '))
 		*end-- = '\0';
 
-	l = mac_label_alloc();
-	if (l == NULL)
+	/*
+	 * Let mac_label_parse allocate the label directly into *label.
+	 * Pre-allocating one here (as the old code did) leaked it, because
+	 * mac_label_parse allocates its own and never frees the incoming
+	 * pointer.
+	 */
+	if (mac_label_parse(p, label) != 0)
 		return (-1);
-
-	mac_label_parse(p, &l);
-	*label = l;
 
 	return (0);
 }
@@ -261,11 +356,13 @@ mac_get_label(const char *jail_name, struct mac_label **label)
 int
 mac_remove_label(const char *jail_name)
 {
-	/* MAC labels are removed by setting an empty label */
-	char cmd[256];
-
-	snprintf(cmd, sizeof(cmd), "jail -j %s label=\"\"", jail_name);
-	return (system(cmd));
+	/* MAC labels are removed by setting an empty label. */
+	if (!mac_arg_is_safe(jail_name)) {
+		errno = EINVAL;
+		return (-1);
+	}
+	return (mac_run((char *const[]){ "jail", "-j", (char *)jail_name,
+	    "label=", NULL }));
 }
 
 /*
