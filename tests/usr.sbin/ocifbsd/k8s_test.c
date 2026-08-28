@@ -42,6 +42,44 @@ ATF_TC_BODY(k8s_detect_kind_service, tc)
 	ATF_CHECK_EQ(k8s_detect_kind("apiVersion: v1\nkind: Service\n"), K8S_SERVICE);
 }
 
+ATF_TC(k8s_detect_kind_service_account_not_service);
+ATF_TC_HEAD(k8s_detect_kind_service_account_not_service, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "k8s_detect_kind: ServiceAccount must not match Service");
+}
+ATF_TC_BODY(k8s_detect_kind_service_account_not_service, tc)
+{
+	/* Prefix matching used to classify this as K8S_SERVICE. */
+	ATF_CHECK_EQ(
+	    k8s_detect_kind("apiVersion: v1\nkind: ServiceAccount\n"),
+	    K8S_UNKNOWN);
+}
+
+ATF_TC(k8s_detect_kind_pod_template_not_pod);
+ATF_TC_HEAD(k8s_detect_kind_pod_template_not_pod, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "k8s_detect_kind: PodTemplate must not match Pod");
+}
+ATF_TC_BODY(k8s_detect_kind_pod_template_not_pod, tc)
+{
+	ATF_CHECK_EQ(
+	    k8s_detect_kind("apiVersion: v1\nkind: PodTemplate\n"),
+	    K8S_UNKNOWN);
+}
+
+ATF_TC(k8s_detect_kind_quoted_value);
+ATF_TC_HEAD(k8s_detect_kind_quoted_value, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "k8s_detect_kind: a quoted kind value is matched");
+}
+ATF_TC_BODY(k8s_detect_kind_quoted_value, tc)
+{
+	ATF_CHECK_EQ(k8s_detect_kind("kind: \"Pod\"\n"), K8S_POD);
+}
+
 ATF_TC(k8s_detect_kind_configmap);
 ATF_TC_HEAD(k8s_detect_kind_configmap, tc)
 {
@@ -334,6 +372,9 @@ ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, k8s_detect_kind_deployment);
 	ATF_TP_ADD_TC(tp, k8s_detect_kind_service);
+	ATF_TP_ADD_TC(tp, k8s_detect_kind_service_account_not_service);
+	ATF_TP_ADD_TC(tp, k8s_detect_kind_pod_template_not_pod);
+	ATF_TP_ADD_TC(tp, k8s_detect_kind_quoted_value);
 	ATF_TP_ADD_TC(tp, k8s_detect_kind_configmap);
 	ATF_TP_ADD_TC(tp, k8s_detect_kind_secret);
 	ATF_TP_ADD_TC(tp, k8s_detect_kind_ingress);

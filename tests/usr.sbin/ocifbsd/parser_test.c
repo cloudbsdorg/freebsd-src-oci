@@ -219,6 +219,40 @@ ATF_TC_BODY(json_escape_high_char_passthrough, tc)
 	free(r);
 }
 
+ATF_TC(json_escape_utf8_high_byte);
+ATF_TC_HEAD(json_escape_utf8_high_byte, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "json_escape passes UTF-8 high bytes (>=0x80) through unchanged");
+}
+ATF_TC_BODY(json_escape_utf8_high_byte, tc)
+{
+	/*
+	 * A high-bit byte is negative as a signed char; the old code tested
+	 * *p < 32, treated it as a control char, and both overflowed the
+	 * buffer and emitted a bogus 8-digit \u escape. It must pass through
+	 * verbatim (e.g. the two bytes of U+00E9 "é" in UTF-8: 0xC3 0xA9).
+	 */
+	char *r = json_escape("caf\xc3\xa9");
+	ATF_REQUIRE(r != NULL);
+	ATF_CHECK_STREQ(r, "\"caf\xc3\xa9\"");
+	free(r);
+}
+
+ATF_TC(yaml_escape_utf8_high_byte);
+ATF_TC_HEAD(yaml_escape_utf8_high_byte, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "yaml_escape passes UTF-8 high bytes through unchanged");
+}
+ATF_TC_BODY(yaml_escape_utf8_high_byte, tc)
+{
+	char *r = yaml_escape("caf\xc3\xa9");
+	ATF_REQUIRE(r != NULL);
+	ATF_CHECK_STREQ(r, "\"caf\xc3\xa9\"");
+	free(r);
+}
+
 /* ----- native_format_service ----- */
 
 ATF_TC(native_format_service_full);
@@ -411,6 +445,8 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, json_escape_backslash);
 	ATF_TP_ADD_TC(tp, json_escape_control_char);
 	ATF_TP_ADD_TC(tp, json_escape_high_char_passthrough);
+	ATF_TP_ADD_TC(tp, json_escape_utf8_high_byte);
+	ATF_TP_ADD_TC(tp, yaml_escape_utf8_high_byte);
 
 	ATF_TP_ADD_TC(tp, native_format_service_full);
 	ATF_TP_ADD_TC(tp, native_format_service_null_fields);

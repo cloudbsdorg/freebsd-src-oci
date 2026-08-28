@@ -85,12 +85,19 @@ convert_add_warning(struct convert_context *ctx, int line,
 		return;
 	
 	if (ctx->nwarnings >= ctx->warning_capacity) {
-		ctx->warning_capacity = ctx->warning_capacity ? 
+		int new_cap = ctx->warning_capacity ?
 		    ctx->warning_capacity * 2 : 16;
-		ctx->warnings = realloc(ctx->warnings,
-		    ctx->warning_capacity * sizeof(struct convert_warning));
-		if (ctx->warnings == NULL)
+		struct convert_warning *grown = realloc(ctx->warnings,
+		    new_cap * sizeof(struct convert_warning));
+		/*
+		 * On realloc failure keep the existing array and capacity
+		 * rather than clobbering ctx->warnings with NULL (which would
+		 * leak the old block and lose every warning recorded so far).
+		 */
+		if (grown == NULL)
 			return;
+		ctx->warnings = grown;
+		ctx->warning_capacity = new_cap;
 	}
 	
 	w = &ctx->warnings[ctx->nwarnings];
@@ -241,13 +248,27 @@ convert_stdin(const char *output_path, struct convert_options *opts)
 	input = malloc(cap);
 	if (input == NULL)
 		return (CONVERT_MEMORY_ERROR);
-	
-	/* Read all from stdin */
-	while (!feof(stdin)) {
+
+	/*
+	 * Read all of stdin, growing the buffer as needed. The previous loop
+	 * broke once the fixed 4 KiB buffer filled, silently truncating any
+	 * manifest larger than 4095 bytes (real k8s manifests routinely
+	 * exceed that).
+	 */
+	for (;;) {
 		size_t n = fread(input + len, 1, cap - len - 1, stdin);
 		len += n;
-		if (len >= cap - 1)
-			break;
+		if (n == 0)
+			break;		/* EOF or error */
+		if (len >= cap - 1) {
+			char *grown = realloc(input, cap * 2);
+			if (grown == NULL) {
+				free(input);
+				return (CONVERT_MEMORY_ERROR);
+			}
+			input = grown;
+			cap *= 2;
+		}
 	}
 	input[len] = '\0';
 	

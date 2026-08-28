@@ -73,35 +73,51 @@ k8s_detect_kind(const char *yaml)
 		return (K8S_UNKNOWN);
 	
 	p += 5;
-	while (isspace(*p))
+	while (isspace((unsigned char)*p))
 		p++;
-	
-	/* Compare against known kinds */
-	if (strncmp(p, "Deployment", 10) == 0)
-		return (K8S_DEPLOYMENT);
-	if (strncmp(p, "Service", 7) == 0)
-		return (K8S_SERVICE);
-	if (strncmp(p, "ConfigMap", 9) == 0)
-		return (K8S_CONFIGMAP);
-	if (strncmp(p, "Secret", 6) == 0)
-		return (K8S_SECRET);
-	if (strncmp(p, "Ingress", 7) == 0)
-		return (K8S_INGRESS);
-	if (strncmp(p, "PersistentVolumeClaim", 21) == 0)
-		return (K8S_PVC);
-	if (strncmp(p, "Namespace", 9) == 0)
-		return (K8S_NAMESPACE);
-	if (strncmp(p, "Pod", 3) == 0)
-		return (K8S_POD);
-	if (strncmp(p, "StatefulSet", 11) == 0)
-		return (K8S_STATEFULSET);
-	if (strncmp(p, "DaemonSet", 9) == 0)
-		return (K8S_DAEMONSET);
-	if (strncmp(p, "Job", 3) == 0)
-		return (K8S_JOB);
-	if (strncmp(p, "CronJob", 7) == 0)
-		return (K8S_CRONJOB);
-	
+	/* Skip an opening quote so kind: "Pod" is matched like kind: Pod. */
+	if (*p == '"' || *p == '\'')
+		p++;
+
+	/*
+	 * Extract the kind token (up to whitespace, comment, or quote) and
+	 * match it exactly. A prefix match would misclassify "ServiceAccount"
+	 * as Service and "PodTemplate" as Pod.
+	 */
+	{
+		const char *e = p;
+		size_t klen;
+		static const struct {
+			const char	*name;
+			k8s_kind_t	 kind;
+		} kinds[] = {
+			{ "Deployment", K8S_DEPLOYMENT },
+			{ "Service", K8S_SERVICE },
+			{ "ConfigMap", K8S_CONFIGMAP },
+			{ "Secret", K8S_SECRET },
+			{ "Ingress", K8S_INGRESS },
+			{ "PersistentVolumeClaim", K8S_PVC },
+			{ "Namespace", K8S_NAMESPACE },
+			{ "Pod", K8S_POD },
+			{ "StatefulSet", K8S_STATEFULSET },
+			{ "DaemonSet", K8S_DAEMONSET },
+			{ "Job", K8S_JOB },
+			{ "CronJob", K8S_CRONJOB },
+		};
+		size_t i;
+
+		while (*e != '\0' && !isspace((unsigned char)*e) &&
+		    *e != '#' && *e != '"' && *e != '\'')
+			e++;
+		klen = (size_t)(e - p);
+
+		for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+			if (strlen(kinds[i].name) == klen &&
+			    strncmp(p, kinds[i].name, klen) == 0)
+				return (kinds[i].kind);
+		}
+	}
+
 	return (K8S_UNKNOWN);
 }
 
@@ -124,7 +140,7 @@ yaml_get_field(const char *yaml, const char *field)
 		return (NULL);
 	
 	p += field_len + 1;
-	while (isspace(*p))
+	while (isspace((unsigned char)*p))
 		p++;
 	
 	/* Check for quoted string */
@@ -145,7 +161,7 @@ yaml_get_field(const char *yaml, const char *field)
 			end++;
 		
 		/* Trim trailing whitespace */
-		while (end > p && isspace(end[-1]))
+		while (end > p && isspace((unsigned char)end[-1]))
 			end--;
 		
 		if (end > p) {
@@ -207,6 +223,8 @@ k8s_convert_deployment(const char *yaml, char **output,
 	free(replicas_str);
 	free(container_port_str);
 	
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
@@ -256,6 +274,8 @@ k8s_convert_service(const char *yaml, char **output,
 	free(target_port_str);
 	free(type);
 	
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
@@ -289,6 +309,8 @@ k8s_convert_configmap(const char *yaml, char **output,
 	free(name);
 	free(namespace);
 	
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
@@ -323,6 +345,8 @@ k8s_convert_secret(const char *yaml, char **output,
 	free(name);
 	free(namespace);
 	
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
@@ -364,6 +388,8 @@ k8s_convert_ingress(const char *yaml, char **output,
 	free(name);
 	free(namespace);
 	
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
@@ -403,6 +429,8 @@ k8s_convert_persistentvolumeclaim(const char *yaml, char **output,
 	free(namespace);
 	free(storage_str);
 	
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
@@ -426,6 +454,8 @@ k8s_convert_namespace(const char *yaml, char **output,
 	
 	free(name);
 	
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
@@ -547,6 +577,8 @@ k8s_convert_multi(const char *yaml, char **output,
 		p = doc_end;
 	}
 
+	if (result == NULL)
+		return (CONVERT_MEMORY_ERROR);
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
