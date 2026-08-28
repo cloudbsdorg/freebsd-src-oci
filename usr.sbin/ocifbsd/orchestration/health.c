@@ -45,9 +45,64 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#include <sys/wait.h>
+
 #include "orchestration.h"
 
 #define MAX_HEALTH_CHECKS 1024
+
+/*
+ * Run a health-check command and return its exit status (0 = healthy).
+ *
+ * EXEC probes are run via fork/exec of a tokenized argument vector — no
+ * shell — matching Kubernetes exec-probe semantics (a command + args, not
+ * a shell string) and removing the shell-injection surface that system()
+ * exposed. SHELL probes still use /bin/sh -c because a shell is their
+ * explicit purpose.
+ *
+ * NOTE: these run in the host context. Running probes inside the target
+ * container (via jexec into its jail) requires the jail id to be threaded
+ * through here and is left as a follow-up; callers must not pass
+ * attacker-controlled SHELL probe strings until then.
+ */
+static int
+run_health_command(const char *command, bool shell)
+{
+	pid_t pid;
+	int status;
+
+	if (command == NULL || command[0] == '\0')
+		return (-1);
+
+	pid = fork();
+	if (pid < 0)
+		return (-1);
+	if (pid == 0) {
+		if (shell) {
+			execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+		} else {
+			/* Tokenize on whitespace into argv (exec-probe form). */
+			char *buf = strdup(command);
+			char *argv[64];
+			int argc = 0;
+			char *save = NULL, *tok;
+
+			if (buf == NULL)
+				_exit(127);
+			for (tok = strtok_r(buf, " \t", &save);
+			    tok != NULL && argc < 63;
+			    tok = strtok_r(NULL, " \t", &save))
+				argv[argc++] = tok;
+			argv[argc] = NULL;
+			if (argc > 0)
+				execvp(argv[0], argv);
+		}
+		_exit(127);
+	}
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	return (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+}
 
 /*
  * Health check state for a replica
@@ -219,8 +274,11 @@ execute_health_check(struct health_check_state *state)
 		    &state->check_data.http.status_code);
 	
 	case HEALTH_CHECK_EXEC:
+		return run_health_command(state->check_data.exec.command,
+		    false);
 	case HEALTH_CHECK_SHELL:
-		return system(state->check_data.exec.command);
+		return run_health_command(state->check_data.exec.command,
+		    true);
 	
 	default:
 		return (-1);
@@ -375,6 +433,12 @@ health_check_start(struct service *service)
 	pthread_mutex_lock(&health_lock);
 	
 	for (int i = 0; i < service->nreplicas; i++) {
+		/* Bound the global table; overflowing it corrupts memory. */
+		if (health_check_count >= MAX_HEALTH_CHECKS) {
+			pthread_mutex_unlock(&health_lock);
+			errno = ENOSPC;
+			return (-1);
+		}
 		state = calloc(1, sizeof(struct health_check_state));
 		if (state == NULL) {
 			pthread_mutex_unlock(&health_lock);
@@ -484,7 +548,7 @@ health_check_run(struct service *service, const char *replica_name)
 			    hc->port, hc->path);
 			result = health_check_http(url, &(int){0});
 		} else if (hc->type == HEALTH_CHECK_EXEC) {
-			result = system(hc->command);
+			result = run_health_command(hc->command, false);
 		} else {
 			result = 0;  /* No check defined */
 		}
