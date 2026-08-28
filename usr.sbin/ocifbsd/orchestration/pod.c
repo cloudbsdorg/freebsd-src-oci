@@ -197,6 +197,25 @@ pod_create(struct pod_spec *spec)
 		return (NULL);
 	}
 	memcpy(pod->spec, spec, sizeof(struct pod_spec));
+	/*
+	 * The shallow struct copy above aliases the caller's containers
+	 * array. Deep-copy it so the pod owns its own buffer and the caller
+	 * remains free to release (or reuse) its spec.containers.
+	 */
+	if (spec->ncontainers > 0 && spec->containers != NULL) {
+		pod->spec->containers = calloc(spec->ncontainers,
+		    sizeof(struct container_spec));
+		if (pod->spec->containers == NULL) {
+			free(pod->spec);
+			free(pod);
+			return (NULL);
+		}
+		memcpy(pod->spec->containers, spec->containers,
+		    spec->ncontainers * sizeof(struct container_spec));
+	} else {
+		pod->spec->containers = NULL;
+		pod->spec->ncontainers = 0;
+	}
 	
 	/* Initialize status */
 	status = calloc(1, sizeof(struct pod_status));
@@ -423,79 +442,64 @@ pod_get(const char *name, const char *namespace)
 	struct pod **p;
 	int count;
 	
+	(void)p;
+	(void)count;
+
 	pthread_mutex_lock(&pod_registry_lock);
 	for (int i = 0; i < pod_registry_count; i++) {
 		if (strcmp(pod_registry[i]->name, name) == 0 &&
 		    strcmp(pod_registry[i]->namespace,
 		    namespace ? namespace : "default") == 0) {
+			struct pod *found = pod_registry[i];
 			pthread_mutex_unlock(&pod_registry_lock);
-			return (pod_registry[i]);
+			return (found);
 		}
 	}
 	pthread_mutex_unlock(&pod_registry_lock);
-	
-	/* Try loading from disk */
-	p = pod_list(namespace, &count);
-	if (p != NULL && count > 0) {
-		struct pod *pod = p[0];
-		free(p);
-		return (pod);
-	}
-	
+
 	errno = ENOENT;
 	return (NULL);
 }
 
 /*
- * List pods
+ * List pods in a namespace from the in-memory registry.
+ *
+ * This used to scan the on-disk state directory and call pod_get() per
+ * file, but pod_get() fell back to pod_list() on a registry miss, so any
+ * on-disk pod caused unbounded mutual recursion (and disk pods were never
+ * reconstructed anyway — load_pod_state is a stub). Listing the registry
+ * is correct for the current in-memory model.
  */
 struct pod **
 pod_list(const char *namespace, int *count)
 {
 	struct pod **result;
-	char path[PATH_MAX];
-	DIR *dir;
-	struct dirent *ent;
+	const char *ns = namespace ? namespace : "default";
 	int alloc = 16;
 	int n = 0;
-	
+	int i;
+
 	*count = 0;
 	result = calloc(alloc, sizeof(struct pod *));
 	if (result == NULL)
 		return (NULL);
-	
-	snprintf(path, sizeof(path), "%s/pods/%s",
-	    OCIFBSD_ORCH_VAR_DIR, namespace ? namespace : "default");
-	
-	dir = opendir(path);
-	if (dir == NULL) {
-		free(result);
-		errno = ENOENT;
-		return (NULL);
-	}
-	
-	while ((ent = readdir(dir)) != NULL) {
-		struct pod *pod;
-		char *ext;
-		
-		if (ent->d_type != DT_REG)
+
+	pthread_mutex_lock(&pod_registry_lock);
+	for (i = 0; i < pod_registry_count; i++) {
+		if (strcmp(pod_registry[i]->namespace, ns) != 0)
 			continue;
-		
-		ext = strrchr(ent->d_name, '.');
-		if (ext == NULL || strcmp(ext, ".json") != 0)
-			continue;
-		
-		pod = pod_get(ent->d_name, namespace);
-		if (pod != NULL) {
-			if (n >= alloc) {
-				alloc *= 2;
-				result = realloc(result, alloc * sizeof(struct pod *));
-			}
-			result[n++] = pod;
+		if (n >= alloc) {
+			struct pod **grown = realloc(result,
+			    alloc * 2 * sizeof(struct pod *));
+			if (grown == NULL)
+				break;
+			result = grown;
+			alloc *= 2;
 		}
+		result[n++] = pod_registry[i];
 	}
-	
-	closedir(dir);
+	pthread_mutex_unlock(&pod_registry_lock);
+
 	*count = n;
 	return (result);
 }
@@ -508,10 +512,15 @@ pod_free(struct pod *pod)
 {
 	if (pod == NULL)
 		return;
-	
-	free(pod->spec);
-	free(pod->status->containers);
-	free(pod->status);
+
+	if (pod->spec != NULL) {
+		free(pod->spec->containers);
+		free(pod->spec);
+	}
+	if (pod->status != NULL) {
+		free(pod->status->containers);
+		free(pod->status);
+	}
 	free(pod->state_file);
 	free(pod);
 }

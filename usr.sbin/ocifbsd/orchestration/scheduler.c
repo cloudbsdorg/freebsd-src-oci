@@ -117,7 +117,13 @@ scheduler_init(void)
 		return (0);
 	}
 	
-	/* Add local node by default */
+	/* Add local node by default. nodes[] holds pointers, all NULL; the
+	 * local node must be allocated before use. */
+	nodes[0] = calloc(1, sizeof(struct node_info));
+	if (nodes[0] == NULL) {
+		pthread_mutex_unlock(&scheduler_lock);
+		return (-1);
+	}
 	strlcpy(nodes[0]->name, "localhost", sizeof(nodes[0]->name));
 	strlcpy(nodes[0]->address, "127.0.0.1", sizeof(nodes[0]->address));
 	nodes[0]->ready = true;

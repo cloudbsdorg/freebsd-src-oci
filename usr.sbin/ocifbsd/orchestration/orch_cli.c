@@ -124,7 +124,7 @@ cmd_pod_create(int argc, char **argv)
 	}
 	
 	printf("Pod %s created with UID %s\n", pod->name, pod->uid);
-	pod_free(pod);
+	/* pod is owned by the registry; do not free it here. */
 	return (0);
 }
 
@@ -171,10 +171,14 @@ cmd_pod_list(int argc, char **argv)
 		    pods[i]->namespace);
 	}
 	
-	for (int i = 0; i < count; i++)
-		pod_free(pods[i]);
+	/*
+	 * pods[] are registry-owned pointers (pod_list returns references,
+	 * not copies); only free the array, never the elements. Freeing them
+	 * here left dangling pointers in the registry (UAF on next access,
+	 * double-free on delete).
+	 */
 	free(pods);
-	
+
 	return (0);
 }
 
@@ -331,7 +335,7 @@ cmd_service_create(int argc, char **argv)
 	}
 	
 	printf("Service %s created with %d replicas\n", svc->name, replicas);
-	service_free(svc);
+	/* svc is owned by the registry; do not free it here. */
 	return (0);
 }
 
@@ -378,12 +382,11 @@ cmd_service_scale(int argc, char **argv)
 	
 	if (service_scale(svc, replicas) != 0) {
 		fprintf(stderr, "Error: Failed to scale service: %s\n", strerror(errno));
-		service_free(svc);
 		return (1);
 	}
-	
+
 	printf("Service %s scaled to %d replicas\n", name, replicas);
-	service_free(svc);
+	/* svc is registry-owned; do not free. */
 	return (0);
 }
 
@@ -435,16 +438,15 @@ cmd_service_update(int argc, char **argv)
 		
 		if (service_update(svc, &new_spec) != 0) {
 			fprintf(stderr, "Error: Failed to update service: %s\n", strerror(errno));
-			service_free(svc);
 			return (1);
 		}
-		
+
 		printf("Service %s update initiated\n", name);
 	} else {
 		printf("No image specified for update\n");
 	}
-	
-	service_free(svc);
+
+	/* svc is registry-owned; do not free. */
 	return (0);
 }
 
@@ -489,8 +491,7 @@ cmd_service_list(int argc, char **argv)
 		    services[i]->namespace);
 	}
 	
-	for (int i = 0; i < count; i++)
-		service_free(services[i]);
+	/* services[] are registry-owned references; free only the array. */
 	free(services);
 	
 	return (0);
@@ -584,7 +585,7 @@ cmd_stack_create(int argc, char **argv)
 	}
 	
 	printf("Stack %s created\n", name);
-	stack_free(stack);
+	/* stack is registry-owned; do not free. */
 	return (0);
 }
 
@@ -621,12 +622,11 @@ cmd_stack_up(int argc, char **argv)
 	
 	if (stack_start(stack) != 0) {
 		fprintf(stderr, "Error: Failed to start stack: %s\n", strerror(errno));
-		stack_free(stack);
 		return (1);
 	}
-	
+
 	printf("Stack %s started\n", name);
-	stack_free(stack);
+	/* stack is registry-owned; do not free. */
 	return (0);
 }
 
@@ -663,12 +663,11 @@ cmd_stack_down(int argc, char **argv)
 	
 	if (stack_stop(stack) != 0) {
 		fprintf(stderr, "Error: Failed to stop stack: %s\n", strerror(errno));
-		stack_free(stack);
 		return (1);
 	}
-	
+
 	printf("Stack %s stopped\n", name);
-	stack_free(stack);
+	/* stack is registry-owned; do not free. */
 	return (0);
 }
 
@@ -696,8 +695,7 @@ cmd_stack_list(int argc, char **argv)
 		    stacks[i]->namespace);
 	}
 	
-	for (int i = 0; i < count; i++)
-		stack_free(stacks[i]);
+	/* stacks[] are registry-owned references; free only the array. */
 	free(stacks);
 	
 	return (0);

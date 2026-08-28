@@ -580,17 +580,29 @@ service_start(struct service *service)
 		memset(&spec, 0, sizeof(spec));
 		strlcpy(spec.name, pod_name, sizeof(spec.name));
 		strlcpy(spec.namespace, service->namespace, sizeof(spec.namespace));
+
+		/*
+		 * spec.containers is a pointer, NULL after the memset; it must
+		 * be allocated before indexing. Writing spec.containers[0]
+		 * without this dereferenced NULL and crashed every start.
+		 */
+		spec.containers = calloc(1, sizeof(*spec.containers));
+		if (spec.containers == NULL) {
+			service->replicas[i].state = REPLICA_STATE_FAILED;
+			return (-1);
+		}
 		spec.ncontainers = 1;
-		
+
 		/* Create container spec */
 		strlcpy(spec.containers[0].name, service->name,
 		    sizeof(spec.containers[0].name));
 		strlcpy(spec.containers[0].image, service->spec->image,
 		    sizeof(spec.containers[0].image));
-		
+
 		/* Schedule pod */
 		decision = scheduler_select_node(&spec);
 		if (decision == NULL) {
+			free(spec.containers);
 			service->replicas[i].state = REPLICA_STATE_FAILED;
 			return (-1);
 		}
@@ -604,10 +616,11 @@ service_start(struct service *service)
 		/* Create and start pod */
 		pod = pod_create(&spec);
 		if (pod == NULL) {
+			free(spec.containers);
 			service->replicas[i].state = REPLICA_STATE_FAILED;
 			return (-1);
 		}
-		
+
 		if (pod_start(pod) == 0) {
 			service->replicas[i].state = REPLICA_STATE_RUNNING;
 			service->replicas[i].started = time(NULL);
@@ -615,6 +628,8 @@ service_start(struct service *service)
 		} else {
 			service->replicas[i].state = REPLICA_STATE_FAILED;
 		}
+		free(spec.containers);
+		spec.containers = NULL;
 	}
 	
 	service->status->ready_replicas = service->status->available_replicas;

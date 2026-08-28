@@ -255,13 +255,19 @@ rolling_update_progress(struct rolling_update_info *info)
 		memset(&pod_spec, 0, sizeof(pod_spec));
 		strlcpy(pod_spec.name, new_pod_name, sizeof(pod_spec.name));
 		strlcpy(pod_spec.namespace, info->namespace, sizeof(pod_spec.namespace));
+		/* containers is a pointer, NULL after memset — allocate it. */
+		pod_spec.containers = calloc(1, sizeof(*pod_spec.containers));
+		if (pod_spec.containers == NULL)
+			return (-1);
 		pod_spec.ncontainers = 1;
 		strlcpy(pod_spec.containers[0].name, target_spec->name,
 		    sizeof(pod_spec.containers[0].name));
 		strlcpy(pod_spec.containers[0].image, target_spec->image,
 		    sizeof(pod_spec.containers[0].image));
-		
+
 		new_pod = pod_create(&pod_spec);
+		free(pod_spec.containers);
+		pod_spec.containers = NULL;
 		if (new_pod == NULL) {
 			/* Handle failure */
 			if (target_spec->update_config.failure_policy != NULL &&
