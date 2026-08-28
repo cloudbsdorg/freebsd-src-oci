@@ -4,7 +4,34 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-08-28 — correctness & security hardening pass
+> **Last updated**: 2026-08-28 — runtime verified end-to-end with real images
+
+## 🚀 **2026-08-28 — Verified running real FreeBSD OCI images end-to-end**
+
+`ocifbsd` was driven end-to-end on FreeBSD 15.1-STABLE against genuine OCI
+images and every issue found was fixed. Confirmed working:
+
+- **Run a real FreeBSD base image**: downloaded
+  `FreeBSD-15.1-RELEASE-amd64-container-image-runtime.txz` from
+  download.freebsd.org, `ocifbsd load`ed it, and `run`/`create`+`start`
+  launched it as a native jail. `exec` inside reports the image's userland
+  (freebsd-version 15.1-RELEASE) and the jailed hostname.
+- **Full lifecycle**: create → start → exec → pause → resume → stop →
+  delete, plus `kill` with signal names, all verified against a live
+  container. Read-only rootfs is enforced (writes fail inside).
+- **Image store**: `pull` from Docker Hub (anonymous token, multi-arch
+  index resolution, layer download + digest verification, unpack) produces
+  a usable rootfs+config.json; `load` imports a local OCI archive (dir or
+  .txz) equivalently; `images` lists real repo:tag entries; `rmi` removes
+  the store (including immutable/schg files).
+
+New in this pass: the `load` command; container stdio detached to a
+per-container log (so `run` no longer blocks the caller); container logs
+removed on delete; `images` lists real images; fast-exiting containers are
+no longer misreported as start failures; the layer unpacker accepts the
+legitimate absolute/relative symlinks present in every real base image
+(traversal still blocked via entry-name checks + O_NOFOLLOW); and rmi/delete
+clear immutable flags so FreeBSD image rootfses can be removed.
 
 ## 🔒 **2026-08-28 — Full correctness & security hardening pass**
 
