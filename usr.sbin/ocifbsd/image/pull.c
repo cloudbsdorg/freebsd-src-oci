@@ -174,6 +174,37 @@ WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
 }
 
 /*
+ * Validate an OCI content digest of the form "sha256:<64 lowercase hex>"
+ * (also accepts sha512:<128 hex>). Digests from a manifest are used to
+ * build on-disk layer filenames and unpack paths, so a malformed value
+ * ("../../etc/x") must be rejected before it can escape the store.
+ */
+bool
+digest_is_valid(const char *digest)
+{
+	const char *hex;
+	size_t want, i;
+
+	if (digest == NULL)
+		return (false);
+	if (strncmp(digest, "sha256:", 7) == 0) {
+		hex = digest + 7;
+		want = 64;
+	} else if (strncmp(digest, "sha512:", 7) == 0) {
+		hex = digest + 7;
+		want = 128;
+	} else {
+		return (false);
+	}
+	for (i = 0; i < want; i++) {
+		char c = hex[i];
+		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+			return (false);
+	}
+	return (hex[want] == '\0');
+}
+
+/*
  * Initialize registry structure from reference
  */
 int
@@ -342,12 +373,13 @@ setup_curl(struct registry *reg, const char *url, FILE *out)
 
 	/* Authentication */
 	if (reg->auth->type == AUTH_BASIC) {
-		char *userpwd;
-		asprintf(&userpwd, "%s:%s", reg->auth->username,
-		    reg->auth->password);
-		curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-		curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-		free(userpwd);
+		char *userpwd = NULL;
+		if (asprintf(&userpwd, "%s:%s", reg->auth->username,
+		    reg->auth->password) >= 0) {
+			curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+			curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+			free(userpwd);
+		}
 	} else if (reg->auth->type == AUTH_BEARER) {
 		char *header = NULL;
 		struct curl_slist *list;
@@ -373,8 +405,7 @@ fetch_data(struct registry *reg, const char *path, char **data, size_t *len)
 	CURL *curl;
 	CURLcode res;
 	char *url;
-	char *buffer = NULL;
-	size_t buflen = 0;
+	struct MemoryStruct chunk = { NULL, 0 };
 	long response_code;
 	struct curl_slist *headers = NULL;
 	int ret = -1;
@@ -396,10 +427,13 @@ fetch_data(struct registry *reg, const char *path, char **data, size_t *len)
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
-	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_only);
-	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &buflen);
+	/*
+	 * Accumulate the body into a growable memory buffer. The previous
+	 * version passed fwrite as the write callback with a char** as the
+	 * "FILE*", which is undefined behavior and never captured the body.
+	 */
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &chunk);
 
 	res = curl_easy_perform(curl);
 
@@ -415,14 +449,14 @@ fetch_data(struct registry *reg, const char *path, char **data, size_t *len)
 		goto cleanup;
 	}
 
-	*data = buffer;
-	*len = buflen;
+	*data = chunk.memory;
+	*len = chunk.size;
 	ret = 0;
-	buffer = NULL;
+	chunk.memory = NULL;
 
 cleanup:
 	free(url);
-	free(buffer);
+	free(chunk.memory);
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 
@@ -1007,19 +1041,57 @@ parse_manifest_json(json_object *obj, struct oci_manifest **manifest)
 
 	/* Get layers */
 	if (json_object_object_get_ex(obj, "layers", &layers_obj)) {
+		/*
+		 * Guard against a malformed manifest: "layers" must be an
+		 * array. Without this check json_object_array_length() on a
+		 * non-array returns 0 or misbehaves and later indexing derefs
+		 * a NULL element.
+		 */
+		if (json_object_get_type(layers_obj) != json_type_array) {
+			fprintf(stderr,
+			    "error: manifest 'layers' is not an array\n");
+			free_manifest(m);
+			return (-1);
+		}
 		nlayers = json_object_array_length(layers_obj);
 		m->nlayers = nlayers;
 		m->layers = calloc(nlayers + 1, sizeof(struct oci_layer *));
+		if (m->layers == NULL) {
+			free_manifest(m);
+			return (-1);
+		}
 
 		for (i = 0; i < nlayers; i++) {
 			json_object *layer_obj, *digest, *size, *mtype;
 			layer_obj = json_object_array_get_idx(layers_obj, i);
 
 			m->layers[i] = calloc(1, sizeof(struct oci_layer));
+			if (m->layers[i] == NULL) {
+				free_manifest(m);
+				return (-1);
+			}
+			if (layer_obj == NULL ||
+			    json_object_get_type(layer_obj) != json_type_object)
+				continue;
 
-			if (json_object_object_get_ex(layer_obj, "digest", &digest))
-				m->layers[i]->digest = strdup(
-				    json_object_get_string(digest));
+			if (json_object_object_get_ex(layer_obj, "digest", &digest)) {
+				const char *ds = json_object_get_string(digest);
+				/*
+				 * Reject a digest that is not a well-formed
+				 * sha256:<64-hex>. The digest is later used to
+				 * build on-disk filenames and unpack paths; an
+				 * unvalidated value (e.g. "../../etc/x") would
+				 * escape the layer store.
+				 */
+				if (!digest_is_valid(ds)) {
+					fprintf(stderr,
+					    "error: invalid layer digest in "
+					    "manifest: %s\n", ds ? ds : "(null)");
+					free_manifest(m);
+					return (-1);
+				}
+				m->layers[i]->digest = strdup(ds);
+			}
 
 			if (json_object_object_get_ex(layer_obj, "mediaType", &mtype))
 				m->layers[i]->media_type = strdup(
@@ -1397,6 +1469,17 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 
 	if (layer == NULL || layer->digest == NULL)
 		return (-1);
+
+	/*
+	 * Never build a path or filename from an unvalidated digest. The
+	 * manifest parser already checks this, but registry_pull_layer is a
+	 * public entry point, so guard here too.
+	 */
+	if (!digest_is_valid(layer->digest)) {
+		fprintf(stderr, "error: refusing layer with invalid digest: %s\n",
+		    layer->digest ? layer->digest : "(null)");
+		return (-1);
+	}
 
 	if (layer->url == NULL) {
 		const char *repo = reg->repository != NULL ? reg->repository :

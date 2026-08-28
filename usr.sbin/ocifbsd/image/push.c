@@ -56,20 +56,63 @@
 #include "push.h"
 #include "pull.h"
 
+/*
+ * In-memory read source for libcurl uploads. Without an explicit
+ * CURLOPT_READFUNCTION, libcurl's default reader calls fread() and treats
+ * CURLOPT_READDATA as a FILE* — passing a raw buffer there is undefined
+ * behavior. This callback feeds bytes from a fixed buffer instead.
+ */
+struct mem_reader {
+	const char	*data;
+	size_t		 len;
+	size_t		 pos;
+};
+
+static size_t
+mem_read_callback(char *ptr, size_t size, size_t nmemb, void *userp)
+{
+	struct mem_reader *r = userp;
+	size_t want = size * nmemb;
+	size_t avail = r->len - r->pos;
+
+	if (want > avail)
+		want = avail;
+	if (want > 0) {
+		memcpy(ptr, r->data + r->pos, want);
+		r->pos += want;
+	}
+	return (want);
+}
+
+/*
+ * Capture the Location header into sess->location. userdata is the
+ * upload_session; we heap-copy the (non-NUL-terminated) header value into
+ * a freshly allocated string rather than writing 1 KiB over a pointer.
+ */
 static size_t
 header_callback(char *buffer, size_t size, size_t nitems, void *userdata)
 {
 	size_t len = size * nitems;
-	char *location = (char *)userdata;
+	struct upload_session *sess = userdata;
 
 	if (len >= 10 && strncasecmp(buffer, "Location:", 9) == 0) {
-		char *value = buffer + 9;
-		while (*value == ' ' || *value == '\t')
+		const char *value = buffer + 9;
+		const char *end = buffer + len;
+		size_t vlen;
+		char *copy;
+
+		while (value < end && (*value == ' ' || *value == '\t'))
 			value++;
-		char *end = buffer + len;
 		while (end > value && (end[-1] == '\n' || end[-1] == '\r'))
-			*--end = '\0';
-		strlcpy(location, value, 1024);
+			end--;
+		vlen = (size_t)(end - value);
+		copy = malloc(vlen + 1);
+		if (copy != NULL) {
+			memcpy(copy, value, vlen);
+			copy[vlen] = '\0';
+			free(sess->location);
+			sess->location = copy;
+		}
 	}
 
 	return (len);
@@ -106,7 +149,7 @@ upload_start(struct registry *reg, const char *repo)
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
-	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &sess->location);
+	curl_easy_setopt(curl, CURLOPT_HEADERDATA, sess);
 
 	CURLcode res = curl_easy_perform(curl);
 
@@ -144,12 +187,15 @@ upload_chunk(struct upload_session *sess, const char *data, size_t len)
 	/* Append data to upload URL */
 	url = strdup(sess->location);
 
+	struct mem_reader reader = { data, len, 0 };
+
 	curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
 	curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-	curl_easy_setopt(curl, CURLOPT_READDATA, data);
-	curl_easy_setopt(curl, CURLOPT_INFILESIZE, len);
+	curl_easy_setopt(curl, CURLOPT_READFUNCTION, mem_read_callback);
+	curl_easy_setopt(curl, CURLOPT_READDATA, &reader);
+	curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)len);
 
 	res = curl_easy_perform(curl);
 
@@ -245,8 +291,9 @@ push_layer(struct registry *reg, const char *layer_path,
 		return (-1);
 	}
 
-	/* Start upload session */
-	char *repo = "library/_uploads";
+	/* Start upload session against the reference's repository. */
+	const char *repo = (reg->repository != NULL) ? reg->repository :
+	    "library/_uploads";
 	sess = upload_start(reg, repo);
 	if (sess == NULL) {
 		fprintf(stderr, "error: failed to start upload session\n");
@@ -422,7 +469,8 @@ push_image(struct registry *reg, const char *reference,
 {
 	char *registry, *repo, *tag, *digest;
 	char manifest_path[PATH_MAX];
-	char **layer_digests = NULL;
+	struct oci_layer *layers = NULL;
+	struct oci_layer **layer_ptrs = NULL;
 	int nlayers = 0;
 	DIR *dir;
 	struct dirent *ent;
@@ -453,6 +501,8 @@ push_image(struct registry *reg, const char *reference,
 	while ((ent = readdir(dir)) != NULL) {
 		char layer_path[PATH_MAX];
 		char *layer_digest;
+		struct oci_layer *grown;
+		struct stat lst;
 
 		if (ent->d_type != DT_REG)
 			continue;
@@ -476,10 +526,20 @@ push_image(struct registry *reg, const char *reference,
 			continue;
 		}
 
-		/* Track digest */
-		layer_digests = realloc(layer_digests,
-		    (nlayers + 1) * sizeof(char *));
-		layer_digests[nlayers++] = layer_digest;
+		/* Track the layer as a real descriptor (digest + size) */
+		grown = realloc(layers, (nlayers + 1) * sizeof(*layers));
+		if (grown == NULL) {
+			free(layer_digest);
+			closedir(dir);
+			ret = -1;
+			goto cleanup;
+		}
+		layers = grown;
+		memset(&layers[nlayers], 0, sizeof(layers[nlayers]));
+		layers[nlayers].digest = layer_digest;
+		layers[nlayers].size = (stat(layer_path, &lst) == 0) ?
+		    (size_t)lst.st_size : 0;
+		nlayers++;
 	}
 	closedir(dir);
 
@@ -495,8 +555,18 @@ push_image(struct registry *reg, const char *reference,
 		goto cleanup;
 	}
 
-	ret = create_manifest(config_digest, (struct oci_layer **)layer_digests,
-	    nlayers, &manifest_json);
+	/* Build an array of pointers to the layer descriptors. */
+	if (nlayers > 0) {
+		layer_ptrs = calloc(nlayers, sizeof(*layer_ptrs));
+		if (layer_ptrs == NULL) {
+			ret = -1;
+			goto cleanup;
+		}
+		for (i = 0; i < nlayers; i++)
+			layer_ptrs[i] = &layers[i];
+	}
+
+	ret = create_manifest(config_digest, layer_ptrs, nlayers, &manifest_json);
 	if (ret == 0) {
 		ret = push_manifest(reg, repo, tag, manifest_json);
 		free(manifest_json);
@@ -510,8 +580,9 @@ cleanup:
 	free(config_digest);
 
 	for (i = 0; i < nlayers; i++)
-		free(layer_digests[i]);
-	free(layer_digests);
+		free(layers[i].digest);
+	free(layers);
+	free(layer_ptrs);
 
 	return (ret);
 }
@@ -582,12 +653,16 @@ push_manifest(struct registry *reg, const char *repo, const char *tag,
 	    reg->host, reg->port, repo, tag) == -1)
 		return (-1);
 
+	struct mem_reader reader = { manifest_json, strlen(manifest_json), 0 };
+
 	curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
 	curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-	curl_easy_setopt(curl, CURLOPT_READDATA, manifest_json);
-	curl_easy_setopt(curl, CURLOPT_INFILESIZE, strlen(manifest_json));
+	curl_easy_setopt(curl, CURLOPT_READFUNCTION, mem_read_callback);
+	curl_easy_setopt(curl, CURLOPT_READDATA, &reader);
+	curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE,
+	    (curl_off_t)reader.len);
 
 	headers = curl_slist_append(headers,
 	    "Content-Type: application/vnd.oci.image.manifest.v1+json");

@@ -179,5 +179,6 @@ int	 canonicalize_reference(const char *ref, char **canonical);
  */
 int	 verify_layer(const char *path, const char *expected_digest);
 int	 compute_digest(const char *path, char **digest);
+bool	 digest_is_valid(const char *digest);
 
 #endif /* _OCIFBSD_IMAGE_PULL_H */

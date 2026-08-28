@@ -108,46 +108,86 @@ run_zfs(int argc, ...)
 	return (-1);
 }
 
+/*
+ * Run zfs(8) with an explicit argv (NULL-terminated) and capture stdout.
+ * Uses fork/exec + a pipe rather than popen(3): the dataset/property
+ * arguments come from image names, tags, and digests, so routing them
+ * through a shell would allow command injection. execvp passes each
+ * argument verbatim with no shell interpretation.
+ *
+ * Returns the child's exit status (>= 0) or -1 on a setup failure. On a
+ * zero exit *output (if non-NULL) receives the captured stdout.
+ */
 static int
-run_zfs_str(const char *cmd, char **output)
+run_zfs_capture(char *const argv[], char **output)
 {
-	FILE *fp;
+	int fds[2];
+	pid_t pid;
+	int status, ret;
 	char buf[1024];
-	size_t len;
+	ssize_t n;
 	size_t result_len = 0;
 	char *result = NULL;
-	int first = 1;
 
-	fp = popen(cmd, "r");
-	if (fp == NULL)
+	if (pipe(fds) != 0)
 		return (-1);
 
-	while (fgets(buf, sizeof(buf), fp) != NULL) {
-		len = strlen(buf);
-		char *newp = realloc(result, result_len + len + 1);
-		if (newp == NULL) {
-			free(result);
-			pclose(fp);
-			return (-1);
-		}
-		result = newp;
-		if (first) {
-			result[0] = '\0';
-			first = 0;
-		}
-		memcpy(result + result_len, buf, len);
-		result_len += len;
-		result[result_len] = '\0';
+	pid = fork();
+	if (pid < 0) {
+		close(fds[0]);
+		close(fds[1]);
+		return (-1);
 	}
 
-	pclose(fp);
+	if (pid == 0) {
+		/* Child: stdout -> pipe write end. */
+		close(fds[0]);
+		if (dup2(fds[1], STDOUT_FILENO) < 0)
+			_exit(127);
+		if (fds[1] != STDOUT_FILENO)
+			close(fds[1]);
+		execvp("zfs", argv);
+		_exit(127);
+	}
 
-	if (output != NULL && result != NULL)
+	/* Parent: read the child's stdout. */
+	close(fds[1]);
+	for (;;) {
+		n = read(fds[0], buf, sizeof(buf));
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		if (n == 0)
+			break;
+		char *newp = realloc(result, result_len + (size_t)n + 1);
+		if (newp == NULL) {
+			free(result);
+			result = NULL;
+			result_len = 0;
+			break;
+		}
+		result = newp;
+		memcpy(result + result_len, buf, (size_t)n);
+		result_len += (size_t)n;
+		result[result_len] = '\0';
+	}
+	close(fds[0]);
+
+	if (waitpid(pid, &status, 0) < 0)
+		ret = -1;
+	else if (WIFEXITED(status))
+		ret = WEXITSTATUS(status);
+	else
+		ret = -1;
+
+	if (output != NULL && ret == 0)
 		*output = result;
 	else
 		free(result);
 
-	return (0);
+	return (ret);
 }
 
 static int
@@ -167,8 +207,14 @@ make_dataset_name(const char *prefix, const char *name, char *buf,
 	char *q;
 	size_t plen = strlen(prefix);
 
-	if (buflen < plen + 1 + strlen(name) + 1)
+	if (buflen == 0)
 		return (-1);
+	if (buflen < plen + 1 + strlen(name) + 1) {
+		/* Leave a valid empty string so a missed return check does
+		 * not operate on an uninitialized dataset name. */
+		buf[0] = '\0';
+		return (-1);
+	}
 
 	snprintf(buf, buflen, "%s/", prefix);
 	q = buf + plen + 1;
@@ -182,6 +228,23 @@ make_dataset_name(const char *prefix, const char *name, char *buf,
 	*q = '\0';
 
 	return (0);
+}
+
+/*
+ * Build the image dataset name for a registry/repo/tag under the images
+ * dataset. Image datasets are keyed by this composite (slashes mapped to
+ * colons by make_dataset_name) so that create and destroy agree and the
+ * digest is stored only as a property. Returns 0 on success.
+ */
+static int
+make_image_dataset(const char *registry, const char *repo, const char *tag,
+    char *buf, size_t buflen)
+{
+	char name[PATH_MAX];
+
+	snprintf(name, sizeof(name), "%s/%s/%s",
+	    registry ? registry : "", repo ? repo : "", tag ? tag : "");
+	return (make_dataset_name(zfs_get_images_dataset(), name, buf, buflen));
 }
 
 int
@@ -276,12 +339,12 @@ zfs_set_property(const char *dataset, const char *property, const char *value)
 int
 zfs_get_property(const char *dataset, const char *property, char **value)
 {
-	char cmd[PATH_MAX * 2];
 	char *output = NULL;
 	int ret;
+	char *argv[] = { "zfs", "get", "-H", "-o", "value",
+	    (char *)property, (char *)dataset, NULL };
 
-	snprintf(cmd, sizeof(cmd), "zfs get -H -o value %s %s", property, dataset);
-	ret = run_zfs_str(cmd, &output);
+	ret = run_zfs_capture(argv, &output);
 
 	if (ret != 0 || output == NULL)
 		return (-1);
@@ -298,13 +361,12 @@ zfs_get_property(const char *dataset, const char *property, char **value)
 int
 zfs_dataset_exists(const char *dataset)
 {
-	char cmd[PATH_MAX];
 	char *output = NULL;
 	int ret;
+	char *argv[] = { "zfs", "list", "-H", "-t", "filesystem,snapshot",
+	    (char *)dataset, NULL };
 
-	snprintf(cmd, sizeof(cmd), "zfs list -H -t filesystem,snapshot %s",
-	    dataset);
-	ret = run_zfs_str(cmd, &output);
+	ret = run_zfs_capture(argv, &output);
 
 	free(output);
 	return (ret == 0 ? 1 : 0);
@@ -589,8 +651,9 @@ zfs_store_create_image(const char *registry, const char *repo,
 	char mp[PATH_MAX];
 	int ret;
 
-	make_dataset_name(zfs_get_images_dataset(), digest, dataset,
-	    sizeof(dataset));
+	if (make_image_dataset(registry, repo, tag, dataset,
+	    sizeof(dataset)) != 0)
+		return (-1);
 
 	ret = run_zfs(4, "zfs", "create", "-p", dataset);
 	if (ret != 0 && ret != 1)
@@ -697,19 +760,11 @@ zfs_store_destroy_image(const char *registry, const char *repo,
     const char *tag)
 {
 	char dataset[PATH_MAX];
-	char digest[PATH_MAX];
-	char *value;
 	int ret;
 
-	make_dataset_name(zfs_get_images_dataset(), digest, dataset,
-	    sizeof(dataset));
-
-	/* Get the image digest before destroying */
-	ret = zfs_get_property(dataset, "ocifbsd:digest", &value);
-	if (ret == 0) {
-		strlcpy(digest, value, sizeof(digest));
-		free(value);
-	}
+	if (make_image_dataset(registry, repo, tag, dataset,
+	    sizeof(dataset)) != 0)
+		return (-1);
 
 	ret = zfs_destroy_dataset(dataset, true);
 	if (ret != 0)
@@ -796,52 +851,52 @@ int
 zfs_store_send(const char *dataset, const char *snapshot, int fd)
 {
 	char snap[PATH_MAX * 2];
-	char cmd[PATH_MAX * 2];
-	FILE *fp;
-	char buf[8192];
-	size_t n;
+	pid_t pid;
+	int status;
 
+	/* fork/exec (no shell) so the dataset/snapshot cannot inject. */
 	snprintf(snap, sizeof(snap), "%s@%s", dataset, snapshot);
-	snprintf(cmd, sizeof(cmd), "zfs send %s", snap);
 
-	fp = popen(cmd, "r");
-	if (fp == NULL)
+	pid = fork();
+	if (pid < 0)
 		return (-1);
-
-	while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
-		if (write(fd, buf, n) != (ssize_t)n) {
-			pclose(fp);
-			return (-1);
-		}
+	if (pid == 0) {
+		if (dup2(fd, STDOUT_FILENO) < 0)
+			_exit(127);
+		if (fd != STDOUT_FILENO)
+			close(fd);
+		execlp("zfs", "zfs", "send", snap, (char *)NULL);
+		_exit(127);
 	}
 
-	pclose(fp);
-	return (0);
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	return (WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1);
 }
 
 int
 zfs_store_recv(const char *dataset, int fd)
 {
-	char cmd[PATH_MAX * 2];
-	FILE *fp;
-	char buf[8192];
-	size_t n;
-	int ret;
+	pid_t pid;
+	int status;
 
-	snprintf(cmd, sizeof(cmd), "zfs recv -F %s", dataset);
-	fp = popen(cmd, "w");
-	if (fp == NULL)
+	/* fork/exec (no shell); the send stream arrives on fd -> child stdin. */
+	pid = fork();
+	if (pid < 0)
 		return (-1);
-
-	while ((n = read(fd, buf, sizeof(buf))) > 0) {
-		if (fwrite(buf, 1, n, fp) != n) {
-			pclose(fp);
-			return (-1);
-		}
+	if (pid == 0) {
+		if (dup2(fd, STDIN_FILENO) < 0)
+			_exit(127);
+		if (fd != STDIN_FILENO)
+			close(fd);
+		execlp("zfs", "zfs", "recv", "-F", (char *)dataset,
+		    (char *)NULL);
+		_exit(127);
 	}
 
-	ret = pclose(fp);
-	return (ret == 0 ? 0 : -1);
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	return (WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1);
 }
 
 /*
@@ -854,7 +909,9 @@ zfs_store_get_usage(uint64_t *used, uint64_t *available)
 	char *line, *save;
 	int ret;
 
-	ret = run_zfs_str("zfs list -H -p -t filesystem,volume ocifbsd", &output);
+	char *list_argv[] = { "zfs", "list", "-H", "-p", "-t",
+	    "filesystem,volume", "ocifbsd", NULL };
+	ret = run_zfs_capture(list_argv, &output);
 	if (ret != 0 || output == NULL)
 		return (-1);
 
@@ -873,7 +930,9 @@ zfs_store_get_usage(uint64_t *used, uint64_t *available)
 	free(output);
 
 	/* Get available space */
-	ret = run_zfs_str("zfs get -H -p available zroot", &output);
+	char *avail_argv[] = { "zfs", "get", "-H", "-p", "available",
+	    "zroot", NULL };
+	ret = run_zfs_capture(avail_argv, &output);
 	if (ret == 0 && output != NULL) {
 		char *tab = strrchr(output, '\t');
 		if (tab != NULL)
