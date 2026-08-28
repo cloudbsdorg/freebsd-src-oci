@@ -151,21 +151,44 @@ state_save(const struct ocifbsd_container *c)
 		return (-1);
 	}
 
-	/* Write to file */
-	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-	if (fd < 0) {
-		free(json_str);
-		return (-1);
-	}
+	/*
+	 * Write atomically: write to a temp file, fsync, then rename over the
+	 * target. A crash or a concurrent reader never sees a truncated or
+	 * half-written state file (the previous O_TRUNC write did).
+	 */
+	{
+		char tmp[PATH_MAX];
+		int n;
 
-	if (safe_write(fd, json_str, strlen(json_str)) != 0) {
+		n = snprintf(tmp, sizeof(tmp), "%s.tmp.%d", path, (int)getpid());
+		if (n < 0 || (size_t)n >= sizeof(tmp)) {
+			free(json_str);
+			errno = ENAMETOOLONG;
+			return (-1);
+		}
+
+		fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (fd < 0) {
+			free(json_str);
+			return (-1);
+		}
+
+		if (safe_write(fd, json_str, strlen(json_str)) != 0) {
+			close(fd);
+			unlink(tmp);
+			free(json_str);
+			return (-1);
+		}
+
+		(void)fsync(fd);
 		close(fd);
 		free(json_str);
-		return (-1);
-	}
 
-	close(fd);
-	free(json_str);
+		if (rename(tmp, path) != 0) {
+			unlink(tmp);
+			return (-1);
+		}
+	}
 
 	return (0);
 }

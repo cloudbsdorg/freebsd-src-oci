@@ -26,7 +26,13 @@ SRCS=	\
 	src/oci2jail.c \
 	src/state.c \
 	src/hooks.c \
+	src/procutil.c \
 	src/utils.c
+
+# procutil.c needs <sys/user.h> (struct kinfo_proc), which is incompatible
+# with the strict _POSIX_C_SOURCE feature-test macro applied tree-wide.
+# Drop that macro for just this translation unit.
+CFLAGS.procutil.c+=	-U_POSIX_C_SOURCE
 
 # ocifbsd has no tests/ subdir yet (the test suite lives at
 # ../../tests/usr.sbin/ocifbsd/ via the 'make test' target).

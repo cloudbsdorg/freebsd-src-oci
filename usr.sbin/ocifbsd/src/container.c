@@ -64,6 +64,14 @@ extern void setproctitle(const char *fmt, ...);
  * via _POSIX_C_SOURCE). Declare it locally. */
 extern int putenv(char *string);
 
+/*
+ * Return true if process `pid` currently exists and, when jid > 0, belongs
+ * to jail `jid`. Used to avoid signaling a recycled PID after a container's
+ * init has exited. Implemented in procutil.c (which needs <sys/user.h>,
+ * incompatible with this file's strict feature-test macros).
+ */
+extern bool pid_in_jail(pid_t pid, int jid);
+
 /* Global container registry */
 static struct ocifbsd_container **container_registry = NULL;
 static int container_registry_size = 0;
@@ -887,21 +895,30 @@ container_start(struct ocifbsd_container *c)
 	}
 	if (waitpid(pid, &status, WNOHANG) == 0) {
 		/* Process is still running */
-	} else if (WIFEXITED(status)) {
-		/* Process exited immediately */
-		c->exit_code = WEXITSTATUS(status);
+	} else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+		/*
+		 * The init process exited within the startup window. Drop the
+		 * host-side mounts and remove the jail so a failed start does
+		 * not leak a jail and nullfs/devfs mounts on every attempt
+		 * (they previously accumulated until a manual delete).
+		 */
+		if (WIFEXITED(status)) {
+			c->exit_code = WEXITSTATUS(status);
+		} else {
+			c->exit_code = 128 + WTERMSIG(status);
+			fprintf(stderr,
+			    "error: container init exited on signal %d\n",
+			    WTERMSIG(status));
+		}
 		c->state = OCIFBSD_STATE_STOPPED;
 		c->finished_at = time(NULL);
+		c->init_pid = 0;
+		(void)container_unmount_all(c);
+		if (c->jid > 0) {
+			(void)jail_remove(c->jid);
+			c->jid = 0;
+		}
 		state_save(c);
-		return (-1);
-	} else if (WIFSIGNALED(status)) {
-		c->exit_code = 128 + WTERMSIG(status);
-		c->state = OCIFBSD_STATE_STOPPED;
-		c->finished_at = time(NULL);
-		state_save(c);
-		fprintf(stderr,
-		    "error: container init exited on signal %d\n",
-		    WTERMSIG(status));
 		return (-1);
 	}
 
@@ -939,6 +956,21 @@ container_kill(struct ocifbsd_container *c, int sig)
 	if (c->init_pid <= 0) {
 		c->state = OCIFBSD_STATE_STOPPED;
 		c->finished_at = time(NULL);
+		state_save(c);
+		return (0);
+	}
+
+	/*
+	 * The stored init_pid is persisted across CLI invocations, and after
+	 * our first process exits the container init is reparented to init(8).
+	 * If it has since exited, its PID may have been recycled by an
+	 * unrelated process; signaling that would be a serious (root) bug.
+	 * Verify the PID still belongs to this container's jail first.
+	 */
+	if (!pid_in_jail(c->init_pid, c->jid)) {
+		c->state = OCIFBSD_STATE_STOPPED;
+		c->finished_at = time(NULL);
+		c->init_pid = 0;
 		state_save(c);
 		return (0);
 	}

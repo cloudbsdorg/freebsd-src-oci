@@ -36,9 +36,11 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <json.h>
 
@@ -122,12 +124,55 @@ execute_hook(const struct oci_hook *hook, const char *state_file)
 		_exit(127);
 	}
 
-	/* Parent: wait for hook to complete */
-	if (waitpid(pid, &status, 0) < 0) {
-		fprintf(stderr, "error: waitpid failed for hook: %s\n",
-		    strerror(errno));
-		ret = -1;
-		goto cleanup;
+	/*
+	 * Parent: wait for the hook, enforcing the OCI-specified timeout if
+	 * one is set. A hung or malicious hook must not block container
+	 * startup indefinitely. We poll with WNOHANG and SIGKILL the hook
+	 * once the timeout elapses.
+	 */
+	{
+		int timeout_sec = 0;
+		int waited_ms = 0;
+		struct timespec tick = { 0, 50 * 1000 * 1000 }; /* 50ms */
+		pid_t w;
+
+		if (hook->timeout != NULL)
+			timeout_sec = atoi(hook->timeout);
+
+		if (timeout_sec <= 0) {
+			/* No timeout: block until the hook exits. */
+			if (waitpid(pid, &status, 0) < 0) {
+				fprintf(stderr,
+				    "error: waitpid failed for hook: %s\n",
+				    strerror(errno));
+				ret = -1;
+				goto cleanup;
+			}
+		} else {
+			for (;;) {
+				w = waitpid(pid, &status, WNOHANG);
+				if (w == pid)
+					break;
+				if (w < 0) {
+					fprintf(stderr,
+					    "error: waitpid failed for hook: %s\n",
+					    strerror(errno));
+					ret = -1;
+					goto cleanup;
+				}
+				if (waited_ms >= timeout_sec * 1000) {
+					fprintf(stderr,
+					    "error: hook %s timed out after %ds; "
+					    "killing\n", hook->path, timeout_sec);
+					kill(pid, SIGKILL);
+					waitpid(pid, &status, 0);
+					ret = -1;
+					goto cleanup;
+				}
+				nanosleep(&tick, NULL);
+				waited_ms += 50;
+			}
+		}
 	}
 
 	if (WIFEXITED(status)) {
