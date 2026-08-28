@@ -302,19 +302,26 @@ list_empty_ok_body()
 atf_test_case images_respects_data_dir
 images_respects_data_dir_head()
 {
-	atf_set "descr" "images lists registry under OCIFBSD_DATA_DIR"
+	atf_set "descr" "images lists real image roots under OCIFBSD_DATA_DIR"
 }
 images_respects_data_dir_body()
 {
-	local bin store
+	local bin store img
 
 	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
 	if [ ! -x "${bin}" ]; then
 		atf_skip "ocifbsd binary not built at ${bin}"
 	fi
 	store=$(pwd)/imgstore-list
-	mkdir -p "${store}/ghcr.io/demo/latest"
-	atf_check -s exit:0 -o match:"ghcr.io" \
+	img="${store}/ghcr.io/demo/latest"
+	# A usable image root has config.json + rootfs/. A bare directory
+	# with neither must NOT be listed.
+	mkdir -p "${img}/rootfs"
+	echo '{}' > "${img}/config.json"
+	mkdir -p "${store}/ghcr.io/empty/notanimage"
+	atf_check -s exit:0 -o match:"ghcr.io/demo" -o match:"latest" \
+	    env OCIFBSD_DATA_DIR="${store}" "${bin}" images
+	atf_check -s exit:0 -o not-match:"notanimage" \
 	    env OCIFBSD_DATA_DIR="${store}" "${bin}" images
 }
 

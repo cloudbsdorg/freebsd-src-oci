@@ -984,16 +984,20 @@ out:
 }
 
 /*
- * images — list known image store roots (filesystem scan of OCIFBSD_DATA_DIR).
+ * images — list local images by walking the store for directories that are
+ * usable image roots (contain config.json and rootfs/). Each such directory
+ * is <base>/<registry>/<repo...>/<tag>; the row shows registry/repo, the tag
+ * (final component), and the path.
  */
 static int
 cmd_images(int argc, char **argv)
 {
-	DIR *dir;
-	struct dirent *ent;
 	const char *base;
-	char path[PATH_MAX];
-	int found = 0;
+	char basebuf[PATH_MAX];
+	char *paths[2];
+	FTS *fts;
+	FTSENT *ent;
+	int printed_header = 0;
 
 	(void)argc;
 	(void)argv;
@@ -1001,37 +1005,57 @@ cmd_images(int argc, char **argv)
 	base = getenv("OCIFBSD_DATA_DIR");
 	if (base == NULL || base[0] == '\0')
 		base = OCIFBSD_DATA_DIR;
+	strlcpy(basebuf, base, sizeof(basebuf));
 
-	/*
-	 * Image store layout (paths.c): /var/lib/ocifbsd/<registry>/...
-	 * Until a catalog DB exists, list top-level registry directories.
-	 */
-	dir = opendir(base);
-	if (dir == NULL) {
-		if (errno == ENOENT) {
-			/* empty store is success */
-			return (0);
-		}
+	paths[0] = basebuf;
+	paths[1] = NULL;
+	fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+	if (fts == NULL) {
+		if (errno == ENOENT)
+			return (0);	/* empty store is success */
 		fprintf(stderr, "error: cannot open %s: %s\n", base,
 		    strerror(errno));
 		return (1);
 	}
 
-	printf("REPOSITORY\tTAG\tPATH\n");
-	while ((ent = readdir(dir)) != NULL) {
+	while ((ent = fts_read(fts)) != NULL) {
+		char cfg[PATH_MAX], rfs[PATH_MAX];
 		struct stat st;
+		const char *rel, *tag, *lastslash;
 
-		if (ent->d_name[0] == '.')
+		if (ent->fts_info != FTS_D)
 			continue;
-		snprintf(path, sizeof(path), "%s/%s", base, ent->d_name);
-		if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+
+		/* Is this directory a usable image root? */
+		snprintf(cfg, sizeof(cfg), "%s/config.json", ent->fts_path);
+		snprintf(rfs, sizeof(rfs), "%s/rootfs", ent->fts_path);
+		if (stat(cfg, &st) != 0 || !S_ISREG(st.st_mode))
 			continue;
-		/* One row per registry root; finer listing comes with ZFS catalog */
-		printf("%s\t-\t%s\n", ent->d_name, path);
-		found++;
+		if (stat(rfs, &st) != 0 || !S_ISDIR(st.st_mode))
+			continue;
+
+		/* repo/tag are relative to base. Split off the final component
+		 * as the tag, the rest (registry/repo) as the repository. */
+		rel = ent->fts_path + strlen(base);
+		while (*rel == '/')
+			rel++;
+		lastslash = strrchr(rel, '/');
+		tag = (lastslash != NULL) ? lastslash + 1 : rel;
+
+		if (!printed_header) {
+			printf("REPOSITORY\tTAG\tPATH\n");
+			printed_header = 1;
+		}
+		if (lastslash != NULL)
+			printf("%.*s\t%s\t%s\n", (int)(lastslash - rel), rel,
+			    tag, ent->fts_path);
+		else
+			printf("%s\t%s\t%s\n", rel, tag, ent->fts_path);
+
+		/* Don't descend into an image's own rootfs. */
+		fts_set(fts, ent, FTS_SKIP);
 	}
-	closedir(dir);
-	(void)found;
+	fts_close(fts);
 	return (0);
 }
 
