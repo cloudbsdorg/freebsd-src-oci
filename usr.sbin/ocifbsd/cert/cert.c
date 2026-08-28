@@ -44,6 +44,8 @@
 #include <openssl/evp.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>
+#include <openssl/rand.h>
+#include <openssl/bn.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -95,6 +97,33 @@ mkdirp_local(const char *path, mode_t mode)
 }
 
 #define	mkdirp(path, mode)	mkdirp_local((path), (mode))
+
+/*
+ * Assign a random, positive 64-bit serial number to a certificate.
+ * Fixed/predictable serials (a constant, or time(NULL)) weaken defense
+ * against hash-collision forgery and violate CA/Browser Forum rules.
+ * Returns 0 on success, -1 on failure.
+ */
+static int
+cert_set_random_serial(X509 *cert)
+{
+	unsigned char bytes[8];
+	BIGNUM *bn = NULL;
+	ASN1_INTEGER *serial;
+	int ret = -1;
+
+	if (RAND_bytes(bytes, sizeof(bytes)) != 1)
+		return (-1);
+	bytes[0] &= 0x7f;	/* keep it positive */
+	bn = BN_bin2bn(bytes, sizeof(bytes), NULL);
+	if (bn == NULL)
+		return (-1);
+	serial = X509_get_serialNumber(cert);
+	if (serial != NULL && BN_to_ASN1_INTEGER(bn, serial) != NULL)
+		ret = 0;
+	BN_free(bn);
+	return (ret);
+}
 
 /* Forward declarations for functions defined later in this file */
 static struct cert_info *cert_parse_json(const char *json);
@@ -300,7 +329,11 @@ cert_create_ca(const char *name, int validity_days)
     }
 
     X509_set_version(cert, 2);  /* v3 */
-    ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+    if (cert_set_random_serial(cert) != 0) {
+        X509_free(cert);
+        EVP_PKEY_free(pkey);
+        return (-1);
+    }
     X509_gmtime_adj(X509_get_notBefore(cert), 0);
     X509_gmtime_adj(X509_get_notAfter(cert), validity_days * 86400L);
     X509_set_pubkey(cert, pkey);
@@ -330,7 +363,11 @@ cert_create_ca(const char *name, int validity_days)
     }
 
     /* Sign with CA key */
-    X509_sign(cert, pkey, EVP_sha256());
+    if (X509_sign(cert, pkey, EVP_sha256()) == 0) {
+        X509_free(cert);
+        EVP_PKEY_free(pkey);
+        return (-1);
+    }
 
     /* Save files */
     snprintf(key_path, sizeof(key_path), "%s/%s.key", cert_dir, name);
@@ -474,7 +511,12 @@ cert_create_signed(EVP_PKEY *pkey, const char *cn, const char *sans, int days)
     }
 
     X509_set_version(cert, 2);
-    ASN1_INTEGER_set(X509_get_serialNumber(cert), (long)time(NULL));
+    if (cert_set_random_serial(cert) != 0) {
+        X509_free(cert);
+        EVP_PKEY_free(ca_key);
+        X509_free(ca_cert);
+        return (NULL);
+    }
     X509_gmtime_adj(X509_get_notBefore(cert), 0);
     X509_gmtime_adj(X509_get_notAfter(cert), days * 86400L);
     X509_set_pubkey(cert, pkey);
@@ -485,7 +527,12 @@ cert_create_signed(EVP_PKEY *pkey, const char *cn, const char *sans, int days)
     X509_set_issuer_name(cert, X509_get_subject_name(ca_cert));
 
     /* Sign with CA */
-    X509_sign(cert, ca_key, EVP_sha256());
+    if (X509_sign(cert, ca_key, EVP_sha256()) == 0) {
+        X509_free(cert);
+        EVP_PKEY_free(ca_key);
+        X509_free(ca_cert);
+        return (NULL);
+    }
 
     EVP_PKEY_free(ca_key);
     X509_free(ca_cert);
@@ -574,7 +621,16 @@ cert_delete(const char *name)
 
     pthread_mutex_lock(&cert_lock);
 
-    cert = cert_get(name);
+    /*
+     * Look the node up directly under the lock. Calling cert_get() here
+     * would try to re-acquire the non-recursive cert_lock and deadlock.
+     */
+    {
+        struct cert_info key;
+
+        strlcpy(key.name, name, sizeof(key.name));
+        cert = RB_FIND(cert_tree, &cert_registry, &key);
+    }
     if (cert == NULL) {
         pthread_mutex_unlock(&cert_lock);
         return (-1);
@@ -806,10 +862,14 @@ cert_load(const char *name, char **key_pem, char **cert_pem)
         fseek(fp, 0, SEEK_END);
         size = ftell(fp);
         fseek(fp, 0, SEEK_SET);
+        if (size < 0) {		/* unseekable / error */
+            fclose(fp);
+            return (-1);
+        }
         *key_pem = malloc(size + 1);
         if (*key_pem) {
-            fread(*key_pem, 1, size, fp);
-            (*key_pem)[size] = '\0';
+            size_t got = fread(*key_pem, 1, size, fp);
+            (*key_pem)[got] = '\0';
         }
         fclose(fp);
     }
@@ -821,10 +881,14 @@ cert_load(const char *name, char **key_pem, char **cert_pem)
         fseek(fp, 0, SEEK_END);
         size = ftell(fp);
         fseek(fp, 0, SEEK_SET);
+        if (size < 0) {
+            fclose(fp);
+            return (-1);
+        }
         *cert_pem = malloc(size + 1);
         if (*cert_pem) {
-            fread(*cert_pem, 1, size, fp);
-            (*cert_pem)[size] = '\0';
+            size_t got = fread(*cert_pem, 1, size, fp);
+            (*cert_pem)[got] = '\0';
         }
         fclose(fp);
     }
@@ -864,6 +928,46 @@ cert_save_registry(void)
 }
 
 /*
+ * Copy a single file into destdir/<basename(src)>. Returns 0 on success.
+ * Uses plain read/write — never a shell — so a cert name containing shell
+ * metacharacters cannot cause command execution.
+ */
+static int
+cert_copy_into_dir(const char *src, const char *destdir)
+{
+    char dest[PATH_MAX];
+    const char *base;
+    int in = -1, out = -1, ret = -1;
+    char buf[8192];
+    ssize_t n;
+
+    base = strrchr(src, '/');
+    base = (base != NULL) ? base + 1 : src;
+    if ((size_t)snprintf(dest, sizeof(dest), "%s/%s", destdir, base) >=
+        sizeof(dest))
+        return (-1);
+
+    in = open(src, O_RDONLY);
+    if (in < 0)
+        return (-1);
+    out = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (out < 0)
+        goto done;
+    while ((n = read(in, buf, sizeof(buf))) > 0) {
+        if (write(out, buf, (size_t)n) != n)
+            goto done;
+    }
+    if (n == 0)
+        ret = 0;
+done:
+    if (in >= 0)
+        close(in);
+    if (out >= 0)
+        close(out);
+    return (ret);
+}
+
+/*
  * Create certificate backup
  */
 int
@@ -871,36 +975,43 @@ cert_backup_create(const char *name)
 {
     struct cert_info *cert;
     char backup_path[PATH_MAX];
-    char cmd[PATH_MAX * 2];
+    char manifest_path[PATH_MAX];
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     char timestamp[64];
+    char key_path[PATH_MAX], cert_path[PATH_MAX];
+    time_t expires;
 
     strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", tm);
 
     cert = cert_get(name);
     if (cert == NULL)
         return (-1);
+    /* Snapshot the fields we need; cert_get returns after unlocking. */
+    strlcpy(key_path, cert->key_path, sizeof(key_path));
+    strlcpy(cert_path, cert->cert_path, sizeof(cert_path));
+    expires = cert->expires;
 
     /* Create backup directory */
     snprintf(backup_path, sizeof(backup_path), "%s/%s-%s",
         backup_dir, name, timestamp);
     mkdirp(backup_path, 0700);
 
-    /* Copy files */
-    snprintf(cmd, sizeof(cmd), "cp %s %s/ && cp %s %s/",
-        cert->key_path, backup_path,
-        cert->cert_path, backup_path);
-    if (system(cmd) != 0)
+    /* Copy files in-process (no shell) */
+    if (cert_copy_into_dir(key_path, backup_path) != 0 ||
+        cert_copy_into_dir(cert_path, backup_path) != 0)
         return (-1);
 
-    /* Create backup manifest */
-    FILE *fp = fopen(backup_path, "w");
-    if (fp) {
-        fprintf(fp, "cert_name=%s\n", name);
-        fprintf(fp, "backed_up=%ld\n", (long)now);
-        fprintf(fp, "expires=%ld\n", (long)cert->expires);
-        fclose(fp);
+    /* Create backup manifest as a file inside the backup directory */
+    if ((size_t)snprintf(manifest_path, sizeof(manifest_path),
+        "%s/manifest.txt", backup_path) < sizeof(manifest_path)) {
+        FILE *fp = fopen(manifest_path, "w");
+        if (fp) {
+            fprintf(fp, "cert_name=%s\n", name);
+            fprintf(fp, "backed_up=%ld\n", (long)now);
+            fprintf(fp, "expires=%ld\n", (long)expires);
+            fclose(fp);
+        }
     }
 
     syslog(LOG_INFO, "Certificate backed up: %s to %s", name, backup_path);
