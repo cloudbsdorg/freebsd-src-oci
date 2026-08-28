@@ -46,6 +46,13 @@
 #define OCIFBSD_TPM_AES_KEY_SIZE 32
 #define OCIFBSD_TPM_SEALED_KEY_SIZE 256
 
+/* Software-fallback sealed-key magic. Must fit the 16-bit magic field
+ * (the previous 0x4F4346 truncated, so unseal could never match). */
+#define TPM_SEALED_MAGIC 0x4346
+
+/* Maximum number of PCR banks (matches struct tpm_quote's pcr_values). */
+#define TPM_MAX_PCRS 24
+
 /* TPM states */
 #define TPM_STATE_NOT_FOUND    0
 #define TPM_STATE_DISABLED     1

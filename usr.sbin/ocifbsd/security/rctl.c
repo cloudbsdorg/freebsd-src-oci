@@ -336,52 +336,48 @@ rctl_apply_rules(const char *jail_name, struct rctl_limits *limits)
 	/* Set default action */
 	strlcpy(action, "deny", sizeof(action));
 
-	/* Apply memory limits */
+	/*
+	 * Apply limits with the correct rctl(8) rule syntax and a matching
+	 * argument count. Rules are "jail:<name>:<resource>:<action>=<amount>"
+	 * added with `rctl -a <rule>`. The previous calls passed argc=6 with
+	 * only 4 arguments (reading two garbage va_arg pointers into the
+	 * execvp argv) and used an invalid "add resource -j ..." form, so the
+	 * limits silently never applied.
+	 */
 	if (limits->memory_limit > 0) {
-		snprintf(rule, sizeof(rule), "-j %s resource=%s "
-		    "memoryuse=resident=%llu,action=%s",
+		snprintf(rule, sizeof(rule), "jail:%s:%s:%s=%llu",
 		    jail_name,
 		    rctl_resource_name(RCTL_RESOURCE_MEMORYUSE),
-		    (unsigned long long)limits->memory_limit / 4096,  /* pages */
-		    action);
+		    action,
+		    (unsigned long long)limits->memory_limit);
 
-		ret |= run_rctl(6, "rctl", "add", "resource", rule);
+		ret |= run_rctl(3, "rctl", "-a", rule);
 	}
 
 	/* Apply process limits */
 	if (limits->proc_limit > 0) {
-		snprintf(rule, sizeof(rule), "-j %s resource=nproc "
-		    "max=%llu,action=%s",
-		    jail_name,
-		    (unsigned long long)limits->proc_limit,
-		    action);
+		snprintf(rule, sizeof(rule), "jail:%s:nproc:%s=%llu",
+		    jail_name, action,
+		    (unsigned long long)limits->proc_limit);
 
-		ret |= run_rctl(6, "rctl", "add", "resource", rule);
+		ret |= run_rctl(3, "rctl", "-a", rule);
 	}
 
 	/* Apply file limits */
 	if (limits->file_limit > 0) {
-		snprintf(rule, sizeof(rule), "-j %s resource=openfiles "
-		    "max=%llu,action=%s",
-		    jail_name,
-		    (unsigned long long)limits->file_limit,
-		    action);
+		snprintf(rule, sizeof(rule), "jail:%s:openfiles:%s=%llu",
+		    jail_name, action,
+		    (unsigned long long)limits->file_limit);
 
-		ret |= run_rctl(6, "rctl", "add", "resource", rule);
+		ret |= run_rctl(3, "rctl", "-a", rule);
 	}
 
-	/* Apply CPU limits via jail parameter */
-	if (limits->cpu_shares > 0 || limits->cpu_quota > 0) {
-		char cmd[256];
-
-		/* Set via jail command */
-		if (limits->cpu_quota > 0) {
-			snprintf(cmd, sizeof(cmd), "jail -r %s "
-			    "cputime=%llu",
-			    jail_name,
-			    (unsigned long long)limits->cpu_quota);
-			system(cmd);
-		}
+	/* Apply CPU limits via rctl pcpu (no shell; jail_name is untrusted). */
+	if (limits->cpu_quota > 0) {
+		snprintf(rule, sizeof(rule), "jail:%s:pcpu:%s=%llu",
+		    jail_name, action,
+		    (unsigned long long)limits->cpu_quota);
+		ret |= run_rctl(3, "rctl", "-a", rule);
 	}
 
 	return (ret);
@@ -393,7 +389,13 @@ rctl_apply_rules(const char *jail_name, struct rctl_limits *limits)
 int
 rctl_remove_rules(const char *jail_name)
 {
-	return (run_rctl(5, "rctl", "-j", jail_name, "remove"));
+	char filter[256];
+
+	/* Remove every rule whose subject is this jail: `rctl -r jail:<name>`.
+	 * The old call passed argc=5 with 4 args and an invalid "remove"
+	 * verb, reading a garbage va_arg pointer. */
+	snprintf(filter, sizeof(filter), "jail:%s", jail_name);
+	return (run_rctl(3, "rctl", "-r", filter));
 }
 
 /*
@@ -490,14 +492,13 @@ rctl_set_limit(const char *jail_name, rctl_resource_t resource,
 		strlcpy(action_str, "deny", sizeof(action_str));
 	}
 
-	snprintf(rule, sizeof(rule), "-j %s resource=%s "
-	    "max=%llu,action=%s",
+	snprintf(rule, sizeof(rule), "jail:%s:%s:%s=%llu",
 	    jail_name,
 	    rctl_resource_name(resource),
-	    (unsigned long long)limit,
-	    action_str);
+	    action_str,
+	    (unsigned long long)limit);
 
-	return (run_rctl(6, "rctl", "add", "resource", rule));
+	return (run_rctl(3, "rctl", "-a", rule));
 }
 
 /*
@@ -506,8 +507,12 @@ rctl_set_limit(const char *jail_name, rctl_resource_t resource,
 int
 rctl_remove_limit(const char *jail_name, rctl_resource_t resource)
 {
-	return (run_rctl(6, "rctl", "-j", jail_name, "-r",
-	    rctl_resource_name(resource)));
+	char filter[256];
+
+	/* `rctl -r jail:<name>:<resource>` (argc matches the 3 args). */
+	snprintf(filter, sizeof(filter), "jail:%s:%s", jail_name,
+	    rctl_resource_name(resource));
+	return (run_rctl(3, "rctl", "-r", filter));
 }
 
 /*

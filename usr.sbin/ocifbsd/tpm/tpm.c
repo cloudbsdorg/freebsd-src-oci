@@ -309,26 +309,38 @@ tpm_seal_data(const uint8_t *data, size_t data_len,
     if (data == NULL || sealed_data == NULL || sealed_len == NULL)
         return (-1);
     
+    /* Clamp the PCR count to the buffer capacity; reject a NULL PCR
+     * pointer with a positive count. */
+    if (n_pcrs < 0 || n_pcrs > TPM_MAX_PCRS)
+        return (-1);
+    if (n_pcrs > 0 && pcr_values == NULL)
+        return (-1);
+
     if (!tpm_present()) {
-        /* Software fallback - just hash the data */
-        key = malloc(sizeof(struct tpm_sealed_key) + data_len);
+        /*
+         * Software fallback: store a 32-byte SHA-256 over the data and
+         * PCRs. key_length and sealed_len describe exactly those 32
+         * bytes so the unseal side's bounds check stays consistent.
+         */
+        key = malloc(sizeof(struct tpm_sealed_key) + SHA256_DIGEST_LENGTH);
         if (key == NULL)
             return (-1);
-        
-        key->magic = 0x4F4346;  /* "OCF" */
+
+        key->magic = TPM_SEALED_MAGIC;
         key->version = 1;
-        key->key_length = data_len;
-        
-        /* Simple XOR "encryption" for software fallback */
+        key->key_length = SHA256_DIGEST_LENGTH;
+
         SHA256_CTX hash_ctx;
         SHA256_Init(&hash_ctx);
         SHA256_Update(&hash_ctx, data, data_len);
-        SHA256_Update(&hash_ctx, pcr_values, n_pcrs * 32);
+        if (n_pcrs > 0)
+            SHA256_Update(&hash_ctx, pcr_values,
+                (size_t)n_pcrs * 32);
         SHA256_Final(key->sealed_data, &hash_ctx);
-        
+
         *sealed_data = (uint8_t *)key;
-        *sealed_len = sizeof(struct tpm_sealed_key);
-        
+        *sealed_len = sizeof(struct tpm_sealed_key) + SHA256_DIGEST_LENGTH;
+
         return (0);
     }
     
@@ -358,29 +370,40 @@ tpm_unseal_data(const uint8_t *sealed_data, size_t sealed_len,
         return (-1);
     
     key = (struct tpm_sealed_key *)sealed_data;
-    
-    if (key->magic != 0x4F4346) {
+
+    if (key->magic != TPM_SEALED_MAGIC) {
         /* Not our sealed key format - try TPM unseal */
         /* TPM2_Unseal command would go here */
         return (-1);
     }
-    
+
+    /* Clamp PCRs and validate the attacker-controlled key_length against
+     * the bytes actually present, so it cannot drive a heap over-read. */
+    if (n_pcrs < 0 || n_pcrs > TPM_MAX_PCRS)
+        return (-1);
+    if (n_pcrs > 0 && pcr_values == NULL)
+        return (-1);
+
+    size_t avail = sealed_len - sizeof(struct tpm_sealed_key);
+    if (key->key_length > avail)
+        return (-1);
+
     /* Software fallback verification */
     SHA256_Init(&ctx);
     SHA256_Update(&ctx, key->sealed_data, key->key_length);
-    SHA256_Update(&ctx, pcr_values, n_pcrs * 32);
+    if (n_pcrs > 0)
+        SHA256_Update(&ctx, pcr_values, (size_t)n_pcrs * 32);
     SHA256_Final(expected_hash, &ctx);
-    
+
     decrypted = malloc(key->key_length);
     if (decrypted == NULL)
         return (-1);
-    
-    /* Simple XOR "decryption" for software fallback */
+
     memcpy(decrypted, key->sealed_data, key->key_length);
-    
+
     *data = decrypted;
     *data_len = key->key_length;
-    
+
     return (0);
 }
 
@@ -417,31 +440,39 @@ tpm_quote(const uint8_t *pcr_mask, int n_pcrs,
     
     if (quote == NULL)
         return (-1);
-    
+
     *quote = NULL;
-    
+
+    /* Clamp the PCR count to the quote buffer capacity (24 banks). */
+    if (n_pcrs < 0)
+        n_pcrs = 0;
+    if (n_pcrs > TPM_MAX_PCRS)
+        n_pcrs = TPM_MAX_PCRS;
+    if (n_pcrs > 0 && pcr_mask == NULL)
+        return (-1);
+
     q = calloc(1, sizeof(struct tpm_quote));
     if (q == NULL)
         return (-1);
-    
+
     /* Copy nonce */
     if (nonce != NULL && nonce_len <= 32) {
         memcpy(q->nonce, nonce, nonce_len);
     }
-    
-    /* Read PCR values */
-    for (i = 0; i < n_pcrs && i < 24; i++) {
-        size_t len = sizeof(q->pcr_values);
+
+    /* Read PCR values (32 bytes per bank into its slot). */
+    for (i = 0; i < n_pcrs; i++) {
+        size_t len = 32;
         if (tpm_pcr_read(pcr_mask[i], q->pcr_values + i * 32, &len) != 0) {
             memset(q->pcr_values + i * 32, 0, 32);
         }
     }
-    
+
     if (!tpm_present()) {
         /* Software fallback - just hash PCRs and nonce */
         SHA256_CTX ctx;
         SHA256_Init(&ctx);
-        SHA256_Update(&ctx, q->pcr_values, n_pcrs * 32);
+        SHA256_Update(&ctx, q->pcr_values, (size_t)n_pcrs * 32);
         SHA256_Update(&ctx, q->nonce, 32);
         SHA256_Final(q->quote, &ctx);
         
@@ -817,50 +848,50 @@ tpm_attest(char **quote_json, char **pcr_json)
     int n;
 
     n = snprintf(p, remaining, "{\n");
-    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
     p += n; remaining -= (size_t)n;
 
     n = snprintf(p, remaining, "  \"nonce\": \"");
-    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
     p += n; remaining -= (size_t)n;
 
     for (i = 0; i < 32; i++) {
         n = snprintf(p, remaining, "%02x", nonce[i]);
-        if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+        if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
         p += n; remaining -= (size_t)n;
     }
 
     n = snprintf(p, remaining, "\",\n");
-    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
     p += n; remaining -= (size_t)n;
 
     n = snprintf(p, remaining, "  \"pcrs\": [");
-    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
     p += n; remaining -= (size_t)n;
 
     for (i = 0; i < 24; i++) {
         int j;
         n = snprintf(p, remaining, "\"");
-        if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+        if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
         p += n; remaining -= (size_t)n;
 
         for (j = 0; j < 32; j++) {
             n = snprintf(p, remaining, "%02x", quote->pcr_values[i * 32 + j]);
-            if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+            if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
             p += n; remaining -= (size_t)n;
         }
 
         n = snprintf(p, remaining, "\"%s\n", i < 23 ? "," : "");
-        if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+        if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
         p += n; remaining -= (size_t)n;
     }
 
     n = snprintf(p, remaining, "  ]\n");
-    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
     p += n; remaining -= (size_t)n;
 
     n = snprintf(p, remaining, "}\n");
-    if (n < 0 || (size_t)n >= remaining) { free(json); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); free(quote); if (pcrs) free(pcrs); return (-1); }
 
     *quote_json = json;
     
@@ -874,32 +905,32 @@ tpm_attest(char **quote_json, char **pcr_json)
             int n;
 
             n = snprintf(p, remaining, "{\n  \"pcrs\": [\n");
-            if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+            if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); free(quote); return (-1); }
             p += n; remaining -= (size_t)n;
 
             for (i = 0; i < pcr_count; i++) {
                 int j;
                 n = snprintf(p, remaining, "    {\"index\": %d, \"value\": \"", pcrs[i].index);
-                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); free(quote); return (-1); }
                 p += n; remaining -= (size_t)n;
 
                 for (j = 0; j < 32; j++) {
                     n = snprintf(p, remaining, "%02x", pcrs[i].value[j]);
-                    if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                    if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); free(quote); return (-1); }
                     p += n; remaining -= (size_t)n;
                 }
 
                 n = snprintf(p, remaining, "\"");
-                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); free(quote); return (-1); }
                 p += n; remaining -= (size_t)n;
 
                 n = snprintf(p, remaining, "}%s\n", i < pcr_count - 1 ? "," : "");
-                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+                if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); free(quote); return (-1); }
                 p += n; remaining -= (size_t)n;
             }
 
             n = snprintf(p, remaining, "  ]\n}\n");
-            if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); return (-1); }
+            if (n < 0 || (size_t)n >= remaining) { free(json); free(pcrs); free(quote); return (-1); }
 
             *pcr_json = json;
             free(pcrs);
