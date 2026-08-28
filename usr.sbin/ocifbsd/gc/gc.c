@@ -954,10 +954,23 @@ gc_orphaned_volumes(void)
 
     while (fgets(line, sizeof(line), fp) != NULL) {
         char *name = line;
+        char *leaf;
         name[strcspn(name, "\n")] = '\0';
 
-        if (gc_is_volume_orphaned(name)) {
-            gc_queue_item(GC_TYPE_VOLUME, name, NULL, GC_PRIORITY_NORMAL);
+        /*
+         * `zfs list` prints the full dataset path (e.g.
+         * zroot/ocifbsd/volumes/myvol). The owner file and the volume
+         * command both key on the leaf name, so extract the final path
+         * component. Using the full path built a nonexistent owner path
+         * and flagged EVERY volume as orphaned — deleting them all.
+         */
+        leaf = strrchr(name, '/');
+        leaf = (leaf != NULL) ? leaf + 1 : name;
+        if (leaf[0] == '\0')
+            continue;
+
+        if (gc_is_volume_orphaned(leaf)) {
+            gc_queue_item(GC_TYPE_VOLUME, leaf, NULL, GC_PRIORITY_NORMAL);
             count++;
         }
     }
@@ -1054,11 +1067,23 @@ gc_orphan_bridge(void)
         return (0);
 
     while (fgets(line, sizeof(line), fp) != NULL) {
-        char bridge[64];
+        char *save = NULL;
+        char *tok;
 
-        if (sscanf(line, "bridge%63s", bridge) == 1) {
-            if (gc_is_bridge_orphaned(bridge)) {
-                gc_queue_item(GC_TYPE_NETWORK, bridge, NULL, GC_PRIORITY_NORMAL);
+        /*
+         * `ifconfig -l bridge` prints all bridge interfaces on one
+         * whitespace-separated line (bridge0 bridge1 ...). Tokenize and
+         * use each full interface name. The old sscanf("bridge%63s")
+         * stripped the "bridge" prefix (capturing just "0") and only
+         * read the first token.
+         */
+        for (tok = strtok_r(line, " \t\n", &save); tok != NULL;
+            tok = strtok_r(NULL, " \t\n", &save)) {
+            if (strncmp(tok, "bridge", 6) != 0)
+                continue;
+            if (gc_is_bridge_orphaned(tok)) {
+                gc_queue_item(GC_TYPE_NETWORK, tok, NULL,
+                    GC_PRIORITY_NORMAL);
                 count++;
             }
         }
@@ -1070,21 +1095,36 @@ gc_orphan_bridge(void)
 }
 
 /*
- * Check if bridge is orphaned
+ * Check if bridge is orphaned.
+ *
+ * A bridge is only a GC candidate if ocifbsd actually tracks it (a
+ * <STATE_DIR>/networks/<name> directory exists) but it has no live owner.
+ * If ocifbsd never created a state directory for the interface, it is a
+ * system- or operator-managed bridge and must never be destroyed.
  */
 static int
 gc_is_bridge_orphaned(const char *name)
 {
     char path[PATH_MAX];
+    struct stat st;
     FILE *fp;
+    bool has_owner;
+    char line[256];
 
-    snprintf(path, sizeof(path), "%s/networks/%s/owner", OCIFBSD_STATE_DIR, name);
+    snprintf(path, sizeof(path), "%s/networks/%s", OCIFBSD_STATE_DIR, name);
+    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
+        return (0);  /* not tracked by ocifbsd — leave it alone */
+
+    snprintf(path, sizeof(path), "%s/networks/%s/owner", OCIFBSD_STATE_DIR,
+        name);
     fp = fopen(path, "r");
     if (fp == NULL)
-        return (1);
+        return (1);  /* tracked but no owner file = orphaned */
 
+    has_owner = (fgets(line, sizeof(line), fp) != NULL &&
+        line[0] != '\0' && line[0] != '\n');
     fclose(fp);
-    return (0);
+    return (!has_owner);
 }
 
 /*
