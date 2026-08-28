@@ -112,13 +112,24 @@ save_namespace_state(struct namespace *ns)
     path = get_ns_state_path(ns->name);
     if (path == NULL)
         return (-1);
-    
-    /* Ensure directory exists */
-    if (mkdirp(path, 0755) != 0 && errno != EEXIST) {
-        free(path);
-        return (-1);
+
+    /*
+     * Ensure the *parent directory* exists. Calling mkdirp on the full
+     * path created a directory named "<name>.json", after which fopen
+     * failed with EISDIR and state was never saved.
+     */
+    {
+        char *slash = strrchr(path, '/');
+        if (slash != NULL) {
+            *slash = '\0';
+            if (mkdirp(path, 0755) != 0 && errno != EEXIST) {
+                free(path);
+                return (-1);
+            }
+            *slash = '/';
+        }
     }
-    
+
     fp = fopen(path, "w");
     free(path);
     
@@ -198,6 +209,36 @@ load_namespace_state(const char *name)
 }
 
 /*
+ * Validate a namespace name. It is interpolated into jail names, ZFS
+ * dataset paths, pf anchors, and (historically) shell commands run as
+ * root, so restrict it to a safe DNS-label-like charset. This is the
+ * primary defense against command/path injection via the namespace name:
+ * with metacharacters rejected, none of the downstream command builders
+ * can be subverted. Must be 1..63 chars of [A-Za-z0-9._-] and may not
+ * start with '.' or '-'.
+ */
+static bool
+ns_name_is_valid(const char *name)
+{
+    size_t i, len;
+
+    if (name == NULL)
+        return (false);
+    len = strlen(name);
+    if (len == 0 || len > 63)
+        return (false);
+    if (name[0] == '.' || name[0] == '-')
+        return (false);
+    for (i = 0; i < len; i++) {
+        char c = name[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+            return (false);
+    }
+    return (true);
+}
+
+/*
  * Create a new namespace
  */
 struct namespace *
@@ -206,10 +247,10 @@ ns_create(const char *name)
     struct namespace *ns, *existing;
     SHA256_CTX ctx;
     uint8_t hash[SHA256_DIGEST_LENGTH];
-    
+
     init_namespace_registry();
-    
-    if (name == NULL || name[0] == '\0') {
+
+    if (!ns_name_is_valid(name)) {
         errno = EINVAL;
         return (NULL);
     }
@@ -944,20 +985,54 @@ get_pod_rctl(const char *pod_name, struct rctl_limits *rlim)
 {
     if (pod_name == NULL || rlim == NULL)
         return (-1);
-    
-    memset(rlim, 0, sizeof(struct rctl_limits));
-    
-    /* Get RCTL values for pod jail */
-    char cmd[256];
-    FILE *fp;
-    char buf[256];
-    
-    snprintf(cmd, sizeof(cmd), "rctl -h jail:%s 2>/dev/null", pod_name);
-    fp = popen(cmd, "r");
-    
-    if (fp == NULL)
+
+    /*
+     * pod_name is a readdir(3) filename from the namespace's pods/
+     * directory — untrusted. Reject anything that is not a safe label so
+     * it cannot inject into the rctl invocation, and run rctl via
+     * fork/exec (no shell).
+     */
+    if (!ns_name_is_valid(pod_name))
         return (-1);
-    
+
+    memset(rlim, 0, sizeof(struct rctl_limits));
+
+    char filter[128];
+    char buf[256];
+    int fds[2];
+    pid_t pid;
+    FILE *fp;
+
+    snprintf(filter, sizeof(filter), "jail:%s", pod_name);
+
+    if (pipe(fds) != 0)
+        return (-1);
+    pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return (-1);
+    }
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        close(fds[0]);
+        if (dup2(fds[1], STDOUT_FILENO) < 0)
+            _exit(127);
+        if (devnull >= 0)
+            dup2(devnull, STDERR_FILENO);
+        if (fds[1] != STDOUT_FILENO)
+            close(fds[1]);
+        execlp("rctl", "rctl", "-h", filter, (char *)NULL);
+        _exit(127);
+    }
+    close(fds[1]);
+    fp = fdopen(fds[0], "r");
+    if (fp == NULL) {
+        close(fds[0]);
+        waitpid(pid, NULL, 0);
+        return (-1);
+    }
+
     while (fgets(buf, sizeof(buf), fp) != NULL) {
         if (strstr(buf, "vmemoryuse")) {
             sscanf(buf, "%*s %*s %lu", &rlim->memory_usage);
@@ -969,7 +1044,8 @@ get_pod_rctl(const char *pod_name, struct rctl_limits *rlim)
             sscanf(buf, "%*s %*s %lu", &rlim->file_count);
         }
     }
-    
-    pclose(fp);
+
+    fclose(fp);
+    waitpid(pid, NULL, 0);
     return (0);
 }
