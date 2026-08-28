@@ -440,7 +440,6 @@ k8s_convert_multi(const char *yaml, char **output,
 	char *result = NULL;
 	size_t result_cap = 0;
 	size_t result_len = 0;
-	const char *doc_start;
 	const char *p;
 	
 	/* Add header */
@@ -454,24 +453,36 @@ k8s_convert_multi(const char *yaml, char **output,
 	result_len = strlen(result);
 	result_cap = result_len + 1;
 	
-	/* Split by document separator */
+	/*
+	 * Split into documents on the "---" separator. Documents may appear
+	 * before the first separator, between separators, and after the last
+	 * separator; every non-empty segment must be converted (a naive
+	 * "find --- then process what follows" loop drops both the leading
+	 * and trailing documents).
+	 */
 	p = yaml;
-	while ((doc_start = strstr(p, "---")) != NULL) {
+	while (*p != '\0') {
 		char *doc;
 		size_t doc_len;
+		const char *doc_start;
 		const char *doc_end;
 		k8s_kind_t kind;
 		char *converted = NULL;
 		int ret;
-		
-		doc_start += 3;
-		while (isspace(*doc_start))
-			doc_start++;
-		
+
+		/* Skip a leading separator and any surrounding whitespace. */
+		if (strncmp(p, "---", 3) == 0)
+			p += 3;
+		while (*p != '\0' && isspace((unsigned char)*p))
+			p++;
+		if (*p == '\0')
+			break;
+
+		doc_start = p;
 		doc_end = strstr(doc_start, "---");
 		if (doc_end == NULL)
 			doc_end = doc_start + strlen(doc_start);
-		
+
 		doc_len = doc_end - doc_start;
 		doc = malloc(doc_len + 1);
 		if (doc == NULL)
@@ -531,9 +542,11 @@ k8s_convert_multi(const char *yaml, char **output,
 		
 		free(converted);
 		free(doc);
-		p = doc_end + 3;
+		/* Advance to the separator (or end); the top of the loop
+		 * consumes the "---" and leading whitespace. */
+		p = doc_end;
 	}
-	
+
 	*output = result;
 	return (CONVERT_SUCCESS);
 }

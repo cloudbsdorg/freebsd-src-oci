@@ -10,7 +10,7 @@
 # GNU make will barf on the first BSD-specific directive and the user
 # will get a confusing parse error deep in the file.
 
-.if !defined(.MAKE.VERSION) || ${.MAKE.VERSION:MGNUmake*}
+.if !defined(MAKE_VERSION)
 .error *** GNU make is not supported. Use BSD make (bmake). On FreeBSD: 'make' (base system). On macOS: 'brew install bmake' then 'bmake'. On Linux: 'apt install bmake' then 'bmake'. ***
 .endif
 

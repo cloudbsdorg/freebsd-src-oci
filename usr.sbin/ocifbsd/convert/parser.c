@@ -74,21 +74,21 @@ yaml_escape(const char *str)
 	size_t len;
 	
 	if (str == NULL)
-		return (strdup(""));
-	
-	/* Calculate needed space */
-	len = strlen(str) + 2;  /* quotes + null */
-	
+		return (strdup("\"\""));
+
+	/* Calculate needed space: open quote + body + close quote + NUL. */
+	len = strlen(str) + 3;
+
 	/* Check for characters that need escaping */
 	for (p = (char *)str; *p; p++) {
 		if (*p == '"' || *p == '\\' || *p == '\n' || *p == '\r' || *p == '\t')
 			len++;
 	}
-	
+
 	result = malloc(len);
 	if (result == NULL)
 		return (NULL);
-	
+
 	/* Add quotes and escape special chars */
 	*result = '"';
 	q = result + 1;
@@ -132,30 +132,41 @@ json_escape(const char *str)
 	size_t len;
 	
 	if (str == NULL)
-		return (strdup(""));
-	
-	/* Calculate needed space */
-	len = strlen(str) + 2;  /* quotes + null */
-	
+		return (strdup("\"\""));
+
+	/*
+	 * Calculate needed space: open quote + body + close quote + NUL.
+	 * A control character other than \n \r \t expands to "\uXXXX" (6
+	 * bytes), so it needs 5 extra beyond its own byte.
+	 */
+	len = strlen(str) + 3;
+
 	/* Check for characters that need escaping */
 	for (p = (char *)str; *p; p++) {
-		if (*p == '"' || *p == '\\' || *p < 32)
+		unsigned char c = (unsigned char)*p;
+
+		if (c == '"' || c == '\\' || c == '\n' || c == '\r' ||
+		    c == '\t')
 			len++;
+		else if (c < 32)
+			len += 5;
 	}
-	
+
 	result = malloc(len);
 	if (result == NULL)
 		return (NULL);
-	
+
 	/* Add quotes and escape special chars */
 	*result = '"';
 	q = result + 1;
 	for (p = (char *)str; *p; p++) {
-		switch (*p) {
+		unsigned char c = (unsigned char)*p;
+
+		switch (c) {
 		case '"':
 		case '\\':
 			*q++ = '\\';
-			*q++ = *p;
+			*q++ = c;
 			break;
 		case '\n':
 			*q++ = '\\';
@@ -170,12 +181,12 @@ json_escape(const char *str)
 			*q++ = 't';
 			break;
 		default:
-			if (*p < 32) {
+			if (c < 32) {
 				/* Control character - escape as unicode */
-				sprintf(q, "\\u%04x", *p);
+				sprintf(q, "\\u%04x", c);
 				q += 6;
 			} else {
-				*q++ = *p;
+				*q++ = c;
 			}
 		}
 	}

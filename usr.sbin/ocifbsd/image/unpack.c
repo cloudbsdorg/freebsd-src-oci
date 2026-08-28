@@ -44,10 +44,95 @@
 #include <fts.h>
 #include <libgen.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/*
+ * Reject tar-entry pathnames that would escape the destination directory.
+ * This is the primary defense against the classic container-runtime layer
+ * path-traversal CVE class: a malicious registry can ship a layer whose
+ * entry names contain "../" components or are absolute, causing files to
+ * be written outside the container rootfs onto the host (we run as root).
+ *
+ * Returns true when the (relative) pathname stays within dest.
+ */
+static bool
+entry_path_is_safe(const char *pathname)
+{
+	const char *p = pathname;
+
+	if (pathname == NULL || pathname[0] == '\0')
+		return (false);
+
+	/* Absolute paths escape the dest/ prefix entirely. */
+	if (pathname[0] == '/')
+		return (false);
+
+	/*
+	 * Walk each '/'-separated component and reject any ".." component.
+	 * A bare "." or embedded "..text" is harmless; only a whole ".."
+	 * component traverses upward.
+	 */
+	for (;;) {
+		if (p[0] == '.' && p[1] == '.' &&
+		    (p[2] == '/' || p[2] == '\0'))
+			return (false);
+		p = strchr(p, '/');
+		if (p == NULL)
+			break;
+		p++;
+	}
+	return (true);
+}
+
+/*
+ * A symlink target is unsafe if it is absolute or escapes the rootfs via
+ * "..". Such a target lets a later layer entry ("link/etc/passwd") write
+ * through the symlink onto the host. We compute the net directory depth
+ * of the (relative) target and reject if it ever goes above the root.
+ */
+static bool
+symlink_target_is_safe(const char *linkpath, const char *target)
+{
+	const char *p;
+	int depth;
+
+	if (target == NULL || target[0] == '\0')
+		return (false);
+	if (target[0] == '/')
+		return (false);
+
+	/*
+	 * Starting depth is the number of directories the link itself sits
+	 * below the root (each '/' in linkpath), minus one for the link's
+	 * own basename.
+	 */
+	depth = 0;
+	for (p = linkpath; *p != '\0'; p++)
+		if (*p == '/')
+			depth++;
+
+	for (p = target; *p != '\0'; ) {
+		if (p[0] == '.' && p[1] == '.' &&
+		    (p[2] == '/' || p[2] == '\0')) {
+			if (--depth < 0)
+				return (false);
+			p += (p[2] == '/') ? 3 : 2;
+		} else if (p[0] == '.' && (p[1] == '/' || p[1] == '\0')) {
+			p += (p[1] == '/') ? 2 : 1;
+		} else {
+			const char *slash = strchr(p, '/');
+			if (slash == NULL)
+				break;		/* final basename component */
+			depth++;
+			p = slash + 1;
+		}
+	}
+	return (true);
+}
 
 static int mkdirp_local(const char *path, mode_t mode);
 static int
@@ -329,6 +414,16 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 	if (is_whiteout(pathname))
 		return (0);
 
+	/*
+	 * Reject entries that would escape dest via absolute paths or ".."
+	 * traversal. A hostile layer must never write outside the rootfs.
+	 */
+	if (!entry_path_is_safe(pathname)) {
+		fprintf(stderr,
+		    "error: rejecting unsafe layer path: %s\n", pathname);
+		return (-1);
+	}
+
 	/* Build destination path */
 	snprintf(path, sizeof(path), "%s/%s", dest, pathname);
 
@@ -351,7 +446,11 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 			return (-1);
 		}
 
-		fd = open(path, O_CREAT | O_WRONLY | O_TRUNC,
+		/*
+		 * O_NOFOLLOW on the final component prevents writing through
+		 * a symlink planted by an earlier entry in the same layer.
+		 */
+		fd = open(path, O_CREAT | O_WRONLY | O_TRUNC | O_NOFOLLOW,
 		    archive_entry_mode(entry));
 		if (fd < 0) {
 			fprintf(stderr, "error: cannot create file: %s: %s\n",
@@ -404,6 +503,17 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 
 		if (link == NULL)
 			break;
+
+		/*
+		 * Reject symlinks whose target escapes the rootfs. Otherwise
+		 * a later entry could write through the link onto the host.
+		 */
+		if (!symlink_target_is_safe(pathname, link)) {
+			fprintf(stderr,
+			    "error: rejecting unsafe symlink %s -> %s\n",
+			    pathname, link);
+			return (-1);
+		}
 
 		/* dirname(3) mutates its argument — copy first */
 		strlcpy(path_copy, path, sizeof(path_copy));

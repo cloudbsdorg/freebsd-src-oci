@@ -4,6 +4,11 @@
 SRCS=	cert.c rotation.c backup.c recovery.c acme.c external_ca.c
 INC=	cert.h
 
+# SRCDIR is the ocifbsd source root (parent of this subdir). Without this
+# definition it expanded to the empty string, so shared include paths became
+# root-relative (e.g. -I/include), silently missing the real headers.
+SRCDIR?=	${.CURDIR:H}
+
 .PATH:	${SRCDIR}/cert
 
 PROG=	ocifbsd-cert

@@ -40,6 +40,7 @@
 #include <fts.h>
 #include <getopt.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,7 @@
 
 #include "include/ocifbsd.h"
 #include "image/pull.h"
+#include "image/push.h"
 #include "image/zfs_store.h"
 
 /* Global verbosity flag */
@@ -84,7 +86,12 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "  list                               List containers\n");
 		fprintf(stderr, "  inspect <container-id>            Show container details\n");
 		fprintf(stderr, "  run [--name N] [--image REF|bundle]     Create and start\n");
+		fprintf(stderr, "  exec [--cwd D] <container-id> <cmd> [args]  Run command in container\n");
+		fprintf(stderr, "  stop [--timeout S] <container-id> Gracefully stop (TERM, then KILL)\n");
+		fprintf(stderr, "  pause <container-id>              Pause a running container\n");
+		fprintf(stderr, "  resume <container-id>             Resume a paused container\n");
 		fprintf(stderr, "  pull <reference> [--dry-run]      Resolve/pull OCI image reference\n");
+		fprintf(stderr, "  push <reference>                  Push local image to its registry\n");
 		fprintf(stderr, "  images                            List local image store paths\n");
 		fprintf(stderr, "  rmi <reference>                   Remove a local image store\n");
 		fprintf(stderr, "\nRun '%s help <command>' for more information on a command.\n",
@@ -102,6 +109,33 @@ version(void)
 }
 
 /*
+ * Reject an image reference component that could traverse outside the
+ * image store. A ".." component in a repository or tag would, after path
+ * concatenation, let commands like `rmi` recursively delete a chosen host
+ * directory as root. Empty and absolute components are refused too.
+ */
+static int
+ref_component_is_safe(const char *s)
+{
+	const char *p;
+
+	if (s == NULL || s[0] == '\0')
+		return (1);	/* NULL/empty handled by the path builder */
+	if (s[0] == '/')
+		return (0);
+	for (p = s;;) {
+		if (p[0] == '.' && p[1] == '.' &&
+		    (p[2] == '/' || p[2] == '\0'))
+			return (0);
+		p = strchr(p, '/');
+		if (p == NULL)
+			break;
+		p++;
+	}
+	return (1);
+}
+
+/*
  * Resolve an image reference to a local store path (OCIFBSD_DATA_DIR layout).
  */
 static char *
@@ -114,6 +148,15 @@ resolve_image_store(const char *ref)
 		return (NULL);
 	if (parse_reference(ref, &registry, &repo, &tag, &digest) != 0)
 		return (NULL);
+	if (!ref_component_is_safe(registry) || !ref_component_is_safe(repo) ||
+	    !ref_component_is_safe(tag)) {
+		fprintf(stderr, "error: unsafe image reference: %s\n", ref);
+		free(registry);
+		free(repo);
+		free(tag);
+		free(digest);
+		return (NULL);
+	}
 	path = zfs_image_path(registry, repo, tag);
 	free(registry);
 	free(repo);
@@ -140,6 +183,32 @@ image_store_ready(const char *store)
 	if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
 		return (0);
 	return (1);
+}
+
+/*
+ * Parse a signal specification: a number ("15"), a name ("TERM"), or a
+ * name with SIG prefix ("SIGTERM"), case-insensitive. Returns the signal
+ * number, or -1 if unrecognized.
+ */
+static int
+parse_signal(const char *spec)
+{
+	int i;
+
+	if (spec == NULL || spec[0] == '\0')
+		return (-1);
+	if (isdigit((unsigned char)spec[0])) {
+		i = atoi(spec);
+		return (i > 0 && i < NSIG ? i : -1);
+	}
+	if (strncasecmp(spec, "SIG", 3) == 0)
+		spec += 3;
+	for (i = 1; i < NSIG; i++) {
+		if (sys_signame[i] != NULL &&
+		    strcasecmp(spec, sys_signame[i]) == 0)
+			return (i);
+	}
+	return (-1);
 }
 
 /* Recursive remove for rmi (depth-first). */
@@ -395,14 +464,11 @@ cmd_kill(int argc, char **argv)
 	while ((ch = getopt_long(argc, argv, "+s:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's':
-			/* Convert signal name to number */
-			if (isdigit(optarg[0])) {
-				sig = atoi(optarg);
-			} else if (strncasecmp(optarg, "SIG", 3) == 0) {
-				sig = atoi(optarg + 3);
-			} else {
-				/* Try signal name without SIG prefix */
-				sig = atoi(optarg);
+			sig = parse_signal(optarg);
+			if (sig <= 0) {
+				fprintf(stderr, "error: unknown signal: %s\n",
+				    optarg);
+				return (1);
 			}
 			break;
 		case 'h':
@@ -862,6 +928,11 @@ cmd_pull(int argc, char **argv)
 		fprintf(stderr, "error: invalid image reference: %s\n", ref);
 		return (1);
 	}
+	if (!ref_component_is_safe(registry) || !ref_component_is_safe(repo) ||
+	    !ref_component_is_safe(tag)) {
+		fprintf(stderr, "error: unsafe image reference: %s\n", ref);
+		goto out;
+	}
 
 	printf("reference=%s\n", ref);
 	printf("registry=%s\n", registry ? registry : "");
@@ -1027,6 +1098,281 @@ cmd_rmi(int argc, char **argv)
 	return (0);
 }
 
+/*
+ * exec — run a command inside a running container.
+ */
+static int
+cmd_exec(int argc, char **argv)
+{
+	struct ocifbsd_container *c;
+	const char *id;
+	const char *cwd = NULL;
+	int ch, ret;
+
+	static struct option longopts[] = {
+		{ "cwd",	required_argument,	NULL, 'w' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+w:h", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'w':
+			cwd = optarg;
+			break;
+		case 'h':
+			usage(argv[0],
+			    "exec [--cwd dir] <container-id> <command> [args...]");
+			return (0);
+		default:
+			usage(argv[0], "exec");
+			return (1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc < 2) {
+		fprintf(stderr, "error: container id and command required\n");
+		usage("ocifbsd",
+		    "exec [--cwd dir] <container-id> <command> [args...]");
+		return (1);
+	}
+
+	id = argv[0];
+	c = container_get_by_id(id);
+	if (c == NULL) {
+		fprintf(stderr, "error: container not found: %s\n", id);
+		return (1);
+	}
+
+	if (verbose)
+		fprintf(stderr, "Executing in container %s: %s\n", id, argv[1]);
+
+	ret = container_exec(c, argv + 1, cwd);
+	if (ret < 0) {
+		fprintf(stderr, "error: exec failed: %s\n", strerror(errno));
+		container_free(c);
+		return (1);
+	}
+
+	container_free(c);
+	return (ret);
+}
+
+/*
+ * stop — graceful shutdown: SIGTERM, wait, then SIGKILL.
+ */
+static int
+cmd_stop(int argc, char **argv)
+{
+	struct ocifbsd_container *c;
+	const char *id;
+	int timeout = 10;
+	int ch, ret;
+
+	static struct option longopts[] = {
+		{ "timeout",	required_argument,	NULL, 't' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+t:h", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 't':
+			timeout = atoi(optarg);
+			if (timeout <= 0) {
+				fprintf(stderr, "error: invalid timeout: %s\n",
+				    optarg);
+				return (1);
+			}
+			break;
+		case 'h':
+			usage(argv[0],
+			    "stop [--timeout sec] <container-id>");
+			return (0);
+		default:
+			usage(argv[0], "stop");
+			return (1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc < 1) {
+		fprintf(stderr, "error: container id required\n");
+		usage("ocifbsd", "stop [--timeout sec] <container-id>");
+		return (1);
+	}
+
+	id = argv[0];
+	c = container_get_by_id(id);
+	if (c == NULL) {
+		fprintf(stderr, "error: container not found: %s\n", id);
+		return (1);
+	}
+
+	if (verbose)
+		fprintf(stderr, "Stopping container: %s\n", id);
+
+	ret = container_stop(c, timeout);
+	if (ret != 0) {
+		fprintf(stderr, "error: failed to stop container: %s\n",
+		    strerror(errno));
+		container_free(c);
+		return (1);
+	}
+
+	printf("%s\n", c->id);
+	container_free(c);
+	return (0);
+}
+
+/*
+ * pause/resume — freeze/thaw the container init process.
+ */
+static int
+cmd_pause_resume(int argc, char **argv, bool do_pause)
+{
+	struct ocifbsd_container *c;
+	const char *id;
+	const char *name = do_pause ? "pause" : "resume";
+	int ch, ret;
+
+	static struct option longopts[] = {
+		{ "help",	no_argument,	NULL, 'h' },
+		{ NULL,		0,		NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'h':
+		default:
+			usage(argv[0], do_pause ?
+			    "pause <container-id>" : "resume <container-id>");
+			return (ch == 'h' ? 0 : 1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc < 1) {
+		fprintf(stderr, "error: container id required\n");
+		return (1);
+	}
+
+	id = argv[0];
+	c = container_get_by_id(id);
+	if (c == NULL) {
+		fprintf(stderr, "error: container not found: %s\n", id);
+		return (1);
+	}
+
+	if (verbose)
+		fprintf(stderr, "%s container: %s\n", name, id);
+
+	ret = do_pause ? container_pause(c) : container_resume(c);
+	if (ret != 0) {
+		fprintf(stderr, "error: failed to %s container: %s\n",
+		    name, strerror(errno));
+		container_free(c);
+		return (1);
+	}
+
+	printf("%s\n", c->id);
+	container_free(c);
+	return (0);
+}
+
+static int
+cmd_pause(int argc, char **argv)
+{
+	return (cmd_pause_resume(argc, argv, true));
+}
+
+static int
+cmd_resume(int argc, char **argv)
+{
+	return (cmd_pause_resume(argc, argv, false));
+}
+
+/*
+ * push — upload a local image store to its registry.
+ */
+static int
+cmd_push(int argc, char **argv)
+{
+	const char *ref = NULL;
+	char *store_path = NULL;
+	struct registry reg;
+	int ch, ret = 1;
+
+	static struct option longopts[] = {
+		{ "help",	no_argument,	NULL, 'h' },
+		{ NULL,		0,		NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'h':
+			usage(argv[0], "push <reference>");
+			return (0);
+		default:
+			usage(argv[0], "push");
+			return (1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+	if (argc < 1) {
+		usage("ocifbsd", "push <reference>");
+		return (1);
+	}
+	ref = argv[0];
+
+	store_path = resolve_image_store(ref);
+	if (store_path == NULL) {
+		fprintf(stderr, "error: invalid image reference: %s\n", ref);
+		return (1);
+	}
+	if (!image_store_ready(store_path)) {
+		fprintf(stderr, "error: image not found locally: %s\n"
+		    "  store=%s\n", ref, store_path);
+		free(store_path);
+		return (1);
+	}
+
+	if (registry_init(&reg, ref) != 0) {
+		fprintf(stderr, "error: registry_init failed for %s\n", ref);
+		free(store_path);
+		return (1);
+	}
+
+	if (verbose)
+		fprintf(stderr, "pushing %s <- %s\n", ref, store_path);
+
+	if (push_image(&reg, ref, store_path, NULL, NULL) != 0) {
+		fprintf(stderr, "error: push failed for %s\n", ref);
+		registry_free(&reg);
+		free(store_path);
+		return (1);
+	}
+
+	registry_free(&reg);
+	printf("status=ok\n");
+	ret = 0;
+	free(store_path);
+	return (ret);
+}
+
 /* Command table */
 struct command {
 	const char *name;
@@ -1043,7 +1389,12 @@ static struct command commands[] = {
 	{ "list",	cmd_list,	"List containers" },
 	{ "inspect",	cmd_inspect,	"Show container details" },
 	{ "run",	cmd_run,	"Create and start container" },
+	{ "exec",	cmd_exec,	"Run a command in a running container" },
+	{ "stop",	cmd_stop,	"Gracefully stop a container" },
+	{ "pause",	cmd_pause,	"Pause a running container" },
+	{ "resume",	cmd_resume,	"Resume a paused container" },
 	{ "pull",	cmd_pull,	"Resolve or pull an OCI image" },
+	{ "push",	cmd_push,	"Push a local image to a registry" },
 	{ "images",	cmd_images,	"List local image store" },
 	{ "rmi",	cmd_rmi,	"Remove a local image" },
 	{ NULL,		NULL,		NULL },

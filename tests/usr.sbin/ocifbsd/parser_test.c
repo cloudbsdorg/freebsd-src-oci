@@ -25,19 +25,19 @@
 ATF_TC(yaml_escape_null);
 ATF_TC_HEAD(yaml_escape_null, tc)
 {
-	atf_tc_set_md_var(tc, "descr", "yaml_escape(NULL) returns empty string");
+	atf_tc_set_md_var(tc, "descr",
+	    "yaml_escape(NULL) returns the quoted empty string");
 }
 ATF_TC_BODY(yaml_escape_null, tc)
 {
 	/*
-	 * NOTE: The current source returns strdup("") for NULL input
-	 * (an empty string, not the quoted empty string ""). This is
-	 * arguably a bug — quoting an absent value should yield "" —
-	 * but we test the actual behavior here. See convert/parser.c.
+	 * A NULL (absent) value must serialize to the quoted empty string
+	 * "" so the emitted YAML stays valid; a bare empty string would
+	 * produce a dangling "key:" with no value.
 	 */
 	char *r = yaml_escape(NULL);
 	ATF_REQUIRE(r != NULL);
-	ATF_CHECK_STREQ(r, "");
+	ATF_CHECK_STREQ(r, "\"\"");
 	free(r);
 }
 
@@ -137,14 +137,15 @@ ATF_TC_BODY(yaml_escape_cr, tc)
 ATF_TC(json_escape_null);
 ATF_TC_HEAD(json_escape_null, tc)
 {
-	atf_tc_set_md_var(tc, "descr", "json_escape(NULL) returns empty string");
+	atf_tc_set_md_var(tc, "descr",
+	    "json_escape(NULL) returns the quoted empty string");
 }
 ATF_TC_BODY(json_escape_null, tc)
 {
-	/* See note in yaml_escape_null about the strdup("") behavior. */
+	/* NULL must serialize to "" so the emitted JSON stays valid. */
 	char *r = json_escape(NULL);
 	ATF_REQUIRE(r != NULL);
-	ATF_CHECK_STREQ(r, "");
+	ATF_CHECK_STREQ(r, "\"\"");
 	free(r);
 }
 

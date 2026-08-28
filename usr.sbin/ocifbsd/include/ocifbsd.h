@@ -176,6 +176,9 @@ int	container_create(struct ocifbsd_container **cp,
 int	container_start(struct ocifbsd_container *c);
 int	container_kill(struct ocifbsd_container *c, int sig);
 int	container_delete(struct ocifbsd_container *c);
+int	container_exec(struct ocifbsd_container *c, char **args,
+		    const char *cwd);
+int	container_stop(struct ocifbsd_container *c, int timeout_sec);
 int	container_pause(struct ocifbsd_container *c);
 int	container_resume(struct ocifbsd_container *c);
 int	container_wait(struct ocifbsd_container *c);

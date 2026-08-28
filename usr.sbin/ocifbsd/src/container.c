@@ -827,6 +827,34 @@ container_start(struct ocifbsd_container *c)
 			}
 		}
 
+		/*
+		 * Drop to the configured process.user gid/uid. Must set the
+		 * group (and clear supplementary groups) before dropping the
+		 * uid, since setgid(2)/setgroups(2) require privilege. Without
+		 * this the entrypoint would run as root regardless of the
+		 * bundle's "user" spec — an isolation/privilege defect.
+		 */
+		if (c->spec->process.gid != 0) {
+			if (setgroups(1, &c->spec->process.gid) != 0)
+				fprintf(stderr,
+				    "warning: setgroups failed: %s\n",
+				    strerror(errno));
+			if (setgid(c->spec->process.gid) != 0) {
+				fprintf(stderr, "error: setgid(%u) failed: %s\n",
+				    (unsigned)c->spec->process.gid,
+				    strerror(errno));
+				_exit(126);
+			}
+		}
+		if (c->spec->process.uid != 0) {
+			if (setuid(c->spec->process.uid) != 0) {
+				fprintf(stderr, "error: setuid(%u) failed: %s\n",
+				    (unsigned)c->spec->process.uid,
+				    strerror(errno));
+				_exit(126);
+			}
+		}
+
 		/* Set process title */
 		setproctitle("ocifbsd: %s [%s]",
 		    c->name ? c->name : "(unnamed)",
@@ -930,6 +958,123 @@ container_kill(struct ocifbsd_container *c, int sig)
 }
 
 /*
+ * Execute a command inside a running container (jail_attach + execvp).
+ * Returns the command's exit code (0-255, 128+sig on signal death),
+ * or -1 with errno set if the exec could not be arranged.
+ */
+int
+container_exec(struct ocifbsd_container *c, char **args, const char *cwd)
+{
+	pid_t pid;
+	int status;
+
+	if (c == NULL || args == NULL || args[0] == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	if (c->state != OCIFBSD_STATE_RUNNING || c->jid <= 0) {
+		errno = EINVAL;
+		fprintf(stderr, "error: container %s is not running\n",
+		    c->id ? c->id : "(no-id)");
+		return (-1);
+	}
+
+	/* Reload the spec so the exec inherits the container environment. */
+	if (c->spec == NULL && c->config_path != NULL)
+		c->spec = oci_parse_config(c->config_path);
+
+	pid = fork();
+	if (pid < 0) {
+		fprintf(stderr, "error: fork failed: %s\n", strerror(errno));
+		return (-1);
+	}
+
+	if (pid == 0) {
+		if (jail_attach(c->jid) != 0) {
+			fprintf(stderr, "error: failed to attach to jail: %s\n",
+			    strerror(errno));
+			_exit(126);
+		}
+
+		if (cwd == NULL && c->spec != NULL)
+			cwd = c->spec->process.cwd;
+		if (chdir(cwd != NULL ? cwd : "/") != 0) {
+			fprintf(stderr, "error: failed to change directory: %s\n",
+			    strerror(errno));
+		}
+
+		if (c->spec != NULL)
+			setup_process_env(c);
+
+		execvp(args[0], args);
+		fprintf(stderr, "error: failed to exec %s: %s\n", args[0],
+		    strerror(errno));
+		_exit(127);
+	}
+
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	if (WIFEXITED(status))
+		return (WEXITSTATUS(status));
+	if (WIFSIGNALED(status))
+		return (128 + WTERMSIG(status));
+	return (-1);
+}
+
+/*
+ * Gracefully stop a container: SIGTERM the init process, poll for exit
+ * up to timeout_sec seconds, then SIGKILL. The caller is usually not
+ * the parent of init, so exit is detected via kill(pid, 0) rather than
+ * waitpid. Idempotent for already-stopped containers.
+ */
+int
+container_stop(struct ocifbsd_container *c, int timeout_sec)
+{
+	struct timespec tick = { 0, 100 * 1000 * 1000 }; /* 100ms */
+	int waited_ms, timeout_ms;
+
+	if (c == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	if (c->state != OCIFBSD_STATE_RUNNING)
+		return (container_kill(c, SIGTERM));
+
+	if (c->init_pid <= 0) {
+		c->state = OCIFBSD_STATE_STOPPED;
+		c->finished_at = time(NULL);
+		state_save(c);
+		return (0);
+	}
+
+	if (kill(c->init_pid, SIGTERM) != 0 && errno != ESRCH)
+		return (-1);
+
+	timeout_ms = (timeout_sec > 0 ? timeout_sec : 10) * 1000;
+	for (waited_ms = 0; waited_ms < timeout_ms; waited_ms += 100) {
+		if (kill(c->init_pid, 0) != 0 && errno == ESRCH)
+			break;
+		/* Reap if we happen to be the parent (run/stop same process) */
+		(void)waitpid(c->init_pid, NULL, WNOHANG);
+		nanosleep(&tick, NULL);
+	}
+
+	if (kill(c->init_pid, 0) == 0) {
+		(void)kill(c->init_pid, SIGKILL);
+		(void)waitpid(c->init_pid, NULL, WNOHANG);
+	}
+
+	c->state = OCIFBSD_STATE_STOPPED;
+	c->finished_at = time(NULL);
+	c->init_pid = 0;
+	state_save(c);
+
+	return (0);
+}
+
+/*
  * Delete a container
  */
 int
@@ -937,13 +1082,22 @@ container_delete(struct ocifbsd_container *c)
 {
 	int ret;
 
+	bool was_started;
+
 	if (c == NULL) {
 		errno = EINVAL;
 		return (-1);
 	}
 
-	/* Run poststop hooks */
-	hooks_run_poststop(c);
+	/*
+	 * poststop hooks run only for containers that actually reached the
+	 * running state, and only after the process is stopped and mounts
+	 * are dropped — per the OCI runtime lifecycle. Running them first
+	 * (as the previous code did) exposed hooks to a still-live process
+	 * and still-mounted filesystems, and fired them for never-started
+	 * containers.
+	 */
+	was_started = (c->started_at != 0);
 
 	/* Stop container if running */
 	if (c->state == OCIFBSD_STATE_RUNNING) {
@@ -955,6 +1109,10 @@ container_delete(struct ocifbsd_container *c)
 
 	/* Drop host-side mounts before removing the jail */
 	(void)container_unmount_all(c);
+
+	/* Run poststop hooks (after the process is gone and unmounted) */
+	if (was_started)
+		hooks_run_poststop(c);
 
 	/* Remove jail */
 	if (c->jid > 0) {

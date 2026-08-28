@@ -4,6 +4,9 @@
 SRCS=	logd.c ringbuf.c forward.c alerting.c
 INC=	logd.h ringbuf.h
 
+# SRCDIR is the ocifbsd source root (parent of this subdir).
+SRCDIR?=	${.CURDIR:H}
+
 .PATH:	${SRCDIR}/logd
 
 PROG=	ocifbsd-logd

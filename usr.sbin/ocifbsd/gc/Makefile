@@ -4,6 +4,9 @@
 SRCS=	gc.c container.c image.c volume.c network.c cluster.c
 INC=	gc.h
 
+# SRCDIR is the ocifbsd source root (parent of this subdir).
+SRCDIR?=	${.CURDIR:H}
+
 .PATH:	${SRCDIR}/gc
 
 PROG=	ocifbsd-gc

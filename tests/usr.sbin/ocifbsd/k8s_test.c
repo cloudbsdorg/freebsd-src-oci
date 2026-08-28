@@ -273,16 +273,16 @@ ATF_TC(k8s_convert_multi_two_docs);
 ATF_TC_HEAD(k8s_convert_multi_two_docs, tc)
 {
 	atf_tc_set_md_var(tc, "descr",
-	    "k8s_convert_multi: only the first of two docs is converted (KNOWN BUG)");
+	    "k8s_convert_multi converts every document in a multi-doc stream");
 }
 ATF_TC_BODY(k8s_convert_multi_two_docs, tc)
 {
 	/*
-	 * KNOWN BUG in convert/k8s.c k8s_convert_multi(): the loop
-	 * only processes documents that are followed by another `---`
-	 * separator. The LAST document (no trailing `---`) is silently
-	 * dropped. So a 2-doc YAML produces only the first doc.
-	 * Test pins the actual behavior. Fix the source separately.
+	 * Both documents in a two-document stream must be converted,
+	 * including the trailing document that has no following "---".
+	 * (This previously dropped the last doc; the fix walks each
+	 * "---"-separated segment rather than requiring a trailing
+	 * separator.)
 	 */
 	const char *yaml =
 	    "---\n"
@@ -302,7 +302,7 @@ ATF_TC_BODY(k8s_convert_multi_two_docs, tc)
 	ATF_CHECK_EQ(rc, CONVERT_SUCCESS);
 	ATF_REQUIRE(out != NULL);
 	ATF_CHECK(strstr(out, "name: ns1") != NULL);
-	ATF_CHECK(strstr(out, "name: cfg1") == NULL);
+	ATF_CHECK(strstr(out, "name: cfg1") != NULL);
 	free(out);
 }
 

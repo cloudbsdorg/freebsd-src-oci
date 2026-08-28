@@ -111,6 +111,64 @@ ATF_TC_BODY(unpack_dirname_safe, tc)
 	unlink(tgz);
 }
 
+ATF_TC(unpack_rejects_dotdot_traversal);
+ATF_TC_HEAD(unpack_rejects_dotdot_traversal, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "unpack_layer refuses a layer entry that escapes dest via ..");
+}
+ATF_TC_BODY(unpack_rejects_dotdot_traversal, tc)
+{
+	const char *tgz = "evil.tgz";
+	struct stat st;
+
+	/*
+	 * A hostile layer names an entry ../escaped. Unpacking into out/
+	 * must NOT create out/../escaped (i.e. ./escaped next to out/).
+	 * The unpack should fail and the escaped file must not exist.
+	 * Build a tar that literally contains a "../escaped" member.
+	 */
+	ATF_REQUIRE_EQ(mkdir("out", 0755), 0);
+	ATF_REQUIRE_EQ(system(
+	    "set -e; d=$(mktemp -d /tmp/ocifbsd-evil.XXXXXX); cd \"$d\"; "
+	    "mkdir -p real; printf pwned > real/x; "
+	    "tar czf evil.tgz -C real --transform 's,^x,../escaped,' x "
+	    "2>/dev/null || tar czf evil.tgz -s ',^x,../escaped,' -C real x; "
+	    "mv evil.tgz \"$OLDPWD/evil.tgz\"; cd /; rm -rf \"$d\""), 0);
+	(void)unpack_layer(tgz, "out", NULL);
+	/* The escaped file must not have been written outside out/. */
+	ATF_CHECK(stat("escaped", &st) != 0);
+	ATF_CHECK(stat("out/../escaped", &st) != 0);
+	unlink(tgz);
+}
+
+ATF_TC(entry_path_safety_unit);
+ATF_TC_HEAD(entry_path_safety_unit, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "entry_path_is_safe / symlink_target_is_safe classify paths");
+}
+ATF_TC_BODY(entry_path_safety_unit, tc)
+{
+	/* Safe relative paths. */
+	ATF_CHECK(entry_path_is_safe("bin/sh"));
+	ATF_CHECK(entry_path_is_safe("a/b/c"));
+	ATF_CHECK(entry_path_is_safe("file..name"));	/* .. inside a name */
+	/* Unsafe: absolute and .. traversal. */
+	ATF_CHECK(!entry_path_is_safe("/etc/passwd"));
+	ATF_CHECK(!entry_path_is_safe("../escaped"));
+	ATF_CHECK(!entry_path_is_safe("a/../../etc/x"));
+	ATF_CHECK(!entry_path_is_safe(".."));
+
+	/* Symlink targets: absolute or escaping targets are unsafe. */
+	ATF_CHECK(!symlink_target_is_safe("link", "/"));
+	ATF_CHECK(!symlink_target_is_safe("link", "/etc"));
+	ATF_CHECK(!symlink_target_is_safe("a/link", "../../etc"));
+	/* A target that stays within the tree is fine. */
+	ATF_CHECK(symlink_target_is_safe("a/b/link", "../c"));
+	ATF_CHECK(symlink_target_is_safe("link", "sibling"));
+}
+
 ATF_TC(whiteout_helpers_path_forms);
 ATF_TC_HEAD(whiteout_helpers_path_forms, tc)
 {
@@ -138,6 +196,8 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, unpack_simple_file);
 	ATF_TP_ADD_TC(tp, unpack_missing_tarball);
 	ATF_TP_ADD_TC(tp, unpack_dirname_safe);
+	ATF_TP_ADD_TC(tp, unpack_rejects_dotdot_traversal);
+	ATF_TP_ADD_TC(tp, entry_path_safety_unit);
 	ATF_TP_ADD_TC(tp, whiteout_helpers_path_forms);
 	return (atf_no_error());
 }

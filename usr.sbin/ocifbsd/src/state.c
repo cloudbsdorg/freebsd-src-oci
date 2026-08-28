@@ -334,7 +334,7 @@ state_list(int *n)
 		return (NULL);
 
 	while ((entry = readdir(dir)) != NULL) {
-		const char *ext;
+		char *ext;
 
 		/* Skip . and .. */
 		if (entry->d_name[0] == '.')
@@ -345,8 +345,8 @@ state_list(int *n)
 		if (ext == NULL || strcmp(ext, ".json") != 0)
 			continue;
 
-		/* Load container state */
-		*entry->d_name = '\0';  /* Remove .json extension */
+		/* Load container state (strip the ".json" extension) */
+		*ext = '\0';
 		c = state_load(entry->d_name);
 		if (c == NULL)
 			continue;

@@ -4,6 +4,9 @@
 SRCS=	export.c aws.c gcp.c azure.c network.c jail.c
 INC=	export.h
 
+# SRCDIR is the ocifbsd source root (parent of this subdir).
+SRCDIR?=	${.CURDIR:H}
+
 .PATH:	${SRCDIR}/export
 
 PROG=	ocifbsd-export

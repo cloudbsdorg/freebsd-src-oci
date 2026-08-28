@@ -228,6 +228,31 @@ json_join_string_array(struct json_object *arr)
 }
 
 /*
+ * Return true if `token` appears as a whole comma-separated option in the
+ * mount option string `opts` (e.g. "ro" in "nosuid,ro,noexec"), rather than
+ * merely as a substring of some larger option.
+ */
+static bool
+option_token_present(const char *opts, const char *token)
+{
+	size_t tlen = strlen(token);
+	const char *p = opts;
+
+	while (p != NULL && *p != '\0') {
+		const char *comma = strchr(p, ',');
+		size_t seglen = (comma != NULL) ? (size_t)(comma - p)
+		    : strlen(p);
+
+		if (seglen == tlen && strncmp(p, token, tlen) == 0)
+			return (true);
+		if (comma == NULL)
+			break;
+		p = comma + 1;
+	}
+	return (false);
+}
+
+/*
  * Parse OCI mounts array. options may be a string or string array.
  */
 static struct oci_mount *
@@ -279,9 +304,14 @@ parse_mounts(struct json_object *val, int *n_mounts)
 		else
 			m->options = NULL;
 		m->readonly = json_get_bool(elem, "readonly", false);
-		/* OCI often encodes ro in options rather than readonly */
+		/*
+		 * OCI often encodes ro in options rather than readonly. Match
+		 * "ro" as a whole comma-separated option token, not a substring
+		 * — otherwise options like "errors=..." or "proto=tcp" would
+		 * falsely force a writable mount to read-only.
+		 */
 		if (!m->readonly && m->options != NULL &&
-		    (strstr(m->options, "ro") != NULL))
+		    option_token_present(m->options, "ro"))
 			m->readonly = true;
 	}
 	*n_mounts = (int)json_object_array_length(arr);
@@ -305,22 +335,22 @@ parse_hooks(struct json_object *val)
 	if (val == NULL || json_object_get_type(val) != json_type_object)
 		return (NULL);
 
-	obj = (val);
-	if (obj == NULL)
-		return (NULL);
-
-	val = json_object_object_get(obj, "hooks");
-	if (val == NULL || json_object_get_type(val) != json_type_object)
+	obj = json_object_object_get(val, "hooks");
+	if (obj == NULL || json_object_get_type(obj) != json_type_object)
 		return (NULL);
 
 	hooks = calloc(1, sizeof(*hooks));
 	if (hooks == NULL)
 		return (NULL);
 
+	/*
+	 * Look each hook array up from the stable "hooks" object (obj).
+	 * The previous version reassigned the shared cursor to the prestart
+	 * array, after which "poststart"/"poststop" were never found.
+	 */
 #define PARSE_HOOK_ARRAY(hook_type, field, count_field) do {			\
-	val = json_object_object_get(val, hook_type);			\
-	if (val != NULL && json_object_get_type(val) == json_type_array) {			\
-		arr = (val);					\
+	arr = json_object_object_get(obj, hook_type);			\
+	if (arr != NULL && json_object_get_type(arr) == json_type_array) {			\
 		hooks->count_field = (int)json_object_array_length(arr);			\
 		hooks->field = calloc(json_object_array_length(arr) + 1, sizeof(*h));	\
 		if (hooks->field == NULL)					\
