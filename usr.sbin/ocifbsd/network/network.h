@@ -135,6 +135,12 @@ struct vnet_config {
  * Network initialization and cleanup
  */
 int	 network_init(void);
+
+/*
+ * Run a command (NULL-terminated argv) via fork/exec, capturing stdout
+ * into *output (caller frees). No shell — safe for untrusted arguments.
+ */
+int	 net_capture_argv(char **output, char *const argv[]);
 int	 network_cleanup(void);
 
 /*

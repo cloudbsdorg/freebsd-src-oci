@@ -48,7 +48,8 @@
 
 #include "network.h"
 
-/* run_cmd is static in network.c, forward-declare for use here */
+/* run_cmd lives in network.c (static there); forward-declare it.
+ * net_capture_argv is declared in network.h. */
 int run_cmd(int argc, ...);
 
 /*
@@ -145,24 +146,31 @@ bridge_get_fdb(const char *bridge, char ***entries, int *nentries)
 	*entries = NULL;
 	*nentries = 0;
 
-	/* Get FDB entries via ifconfig */
-	char cmd[128];
-	snprintf(cmd, sizeof(cmd), "ifconfig %s | grep -A 100 'fdb:'", bridge);
-
-	FILE *fp = popen(cmd, "r");
-	if (fp == NULL)
+	/*
+	 * Get FDB entries via `ifconfig <bridge>` captured without a shell
+	 * (bridge name is untrusted). Filter lines in C instead of `| grep`.
+	 */
+	char *out = NULL;
+	char *argv[] = { "ifconfig", (char *)bridge, NULL };
+	if (net_capture_argv(&out, argv) != 0 || out == NULL) {
+		free(out);
 		return (-1);
-
-	while (fgets(cmd, sizeof(cmd), fp) != NULL) {
-		if (strstr(cmd, "00:00:00:00:00:00"))
-			continue;  /* Skip empty entries */
-
-		list = realloc(list, (count + 1) * sizeof(char *));
-		if (list == NULL) continue;
-		list[count++] = strdup(cmd);
 	}
 
-	pclose(fp);
+	char *save = NULL;
+	char *line = strtok_r(out, "\n", &save);
+	while (line != NULL) {
+		if (strstr(line, "00:00:00:00:00:00") == NULL) {
+			char **grown = realloc(list,
+			    (count + 1) * sizeof(char *));
+			if (grown != NULL) {
+				list = grown;
+				list[count++] = strdup(line);
+			}
+		}
+		line = strtok_r(NULL, "\n", &save);
+	}
+	free(out);
 
 	*entries = list;
 	*nentries = count;
@@ -199,33 +207,32 @@ bridge_get_port_stats(const char *bridge, const char *port,
     uint64_t *rx_packets, uint64_t *tx_packets,
     uint64_t *rx_bytes, uint64_t *tx_bytes)
 {
-	char cmd[256];
+	char *out = NULL;
 
 	*rx_packets = *tx_packets = *rx_bytes = *tx_bytes = 0;
 
-	/* Get interface statistics */
-	snprintf(cmd, sizeof(cmd), "netstat -I %s -b -w 1 -h 2", port);
-
-	FILE *fp = popen(cmd, "r");
-	if (fp == NULL)
+	/* Get interface statistics without a shell (port name untrusted). */
+	char *argv[] = { "netstat", "-I", (char *)port, "-b", "-w", "1",
+	    "-h", "2", NULL };
+	if (net_capture_argv(&out, argv) != 0 || out == NULL) {
+		free(out);
 		return (-1);
-
-	/* Parse output - first line is header, second is data */
-	char buf[256];
-	int line = 0;
-	while (fgets(buf, sizeof(buf), fp) && line < 2) {
-		if (line == 1) {
-			/* Parse statistics */
-			sscanf(buf, "%*s %llu %llu %llu %llu",
-			    (unsigned long long *)rx_packets,
-			    (unsigned long long *)tx_packets,
-			    (unsigned long long *)rx_bytes,
-			    (unsigned long long *)tx_bytes);
-		}
-		line++;
 	}
 
-	pclose(fp);
+	/* Parse output - first line is header, second is data. */
+	char *save = NULL;
+	char *line = strtok_r(out, "\n", &save);
+	if (line != NULL)
+		line = strtok_r(NULL, "\n", &save);	/* second: data */
+	if (line != NULL) {
+		sscanf(line, "%*s %llu %llu %llu %llu",
+		    (unsigned long long *)rx_packets,
+		    (unsigned long long *)tx_packets,
+		    (unsigned long long *)rx_bytes,
+		    (unsigned long long *)tx_bytes);
+	}
+
+	free(out);
 
 	return (0);
 }

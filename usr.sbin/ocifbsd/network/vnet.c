@@ -51,7 +51,8 @@ extern int mkdirp(const char *path, mode_t mode);
 
 #include "network.h"
 
-/* run_cmd is static in network.c, forward-declare for use here */
+/* run_cmd lives in network.c (static there); forward-declare it.
+ * net_capture_argv is declared in network.h. */
 int run_cmd(int argc, ...);
 
 /*
@@ -93,38 +94,37 @@ vnet_get_jail_status(const char *jail_name, bool *has_vnet, char ***interfaces, 
 	*interfaces = NULL;
 	*ninterfaces = 0;
 
-	/* Check if jail exists and has vnet */
-	char cmd[256];
-	snprintf(cmd, sizeof(cmd), "jls -v -j %s | grep vnet", jail_name);
-
-	FILE *fp = popen(cmd, "r");
-	if (fp == NULL)
-		return (-1);
-
-	char buf[256];
-	if (fgets(buf, sizeof(buf), fp) != NULL) {
-		if (strstr(buf, "vnet")) {
+	/*
+	 * Check if the jail has vnet. Capture `jls -v -j <name>` without a
+	 * shell (jail_name is untrusted) and match "vnet" in C rather than
+	 * piping through grep.
+	 */
+	char *out = NULL;
+	char *jls_argv[] = { "jls", "-v", "-j", (char *)jail_name, NULL };
+	if (net_capture_argv(&out, jls_argv) == 0 && out != NULL) {
+		if (strstr(out, "vnet") != NULL)
 			*has_vnet = true;
-		}
 	}
-	pclose(fp);
+	free(out);
+	out = NULL;
 
-	/* Get interfaces */
-	snprintf(cmd, sizeof(cmd), "jexec %s ifconfig -l", jail_name);
-	fp = popen(cmd, "r");
-	if (fp) {
-		if (fgets(buf, sizeof(buf), fp) != NULL) {
-			char *save, *token;
-			token = strtok_r(buf, " \t\n", &save);
-			while (token) {
-				ifaces = realloc(ifaces, (count + 1) * sizeof(char *));
-				if (ifaces == NULL) continue;
-				ifaces[count++] = strdup(token);
-				token = strtok_r(NULL, " \t\n", &save);
-			}
+	/* Get interfaces via jexec <name> ifconfig -l (no shell). */
+	char *ifc_argv[] = { "jexec", (char *)jail_name, "ifconfig", "-l",
+	    NULL };
+	if (net_capture_argv(&out, ifc_argv) == 0 && out != NULL) {
+		char *save, *token;
+		token = strtok_r(out, " \t\n", &save);
+		while (token) {
+			char **grown = realloc(ifaces,
+			    (count + 1) * sizeof(char *));
+			if (grown == NULL)
+				break;
+			ifaces = grown;
+			ifaces[count++] = strdup(token);
+			token = strtok_r(NULL, " \t\n", &save);
 		}
-		pclose(fp);
 	}
+	free(out);
 
 	*interfaces = ifaces;
 	*ninterfaces = count;
@@ -202,27 +202,33 @@ static int
 vnet_get_interface_stats(const char *jail_name, const char *interface,
     uint64_t *rx_bytes, uint64_t *tx_bytes, uint64_t *rx_packets, uint64_t *tx_packets)
 {
-	char cmd[512];
 	char buf[256];
+	char *out = NULL;
 
 	*rx_bytes = *tx_bytes = *rx_packets = *tx_packets = 0;
 
-	/* Get interface statistics via jexec */
-	snprintf(cmd, sizeof(cmd), "jexec %s netstat -I %s -i", jail_name, interface);
-
-	FILE *fp = popen(cmd, "r");
-	if (fp == NULL)
+	/* Get interface statistics via jexec (no shell; names untrusted). */
+	char *ns_argv[] = { "jexec", (char *)jail_name, "netstat", "-I",
+	    (char *)interface, "-i", NULL };
+	if (net_capture_argv(&out, ns_argv) != 0 || out == NULL) {
+		free(out);
 		return (-1);
+	}
 
-	/* Skip header lines */
-	fgets(buf, sizeof(buf), fp);
-	fgets(buf, sizeof(buf), fp);
-
-	/* Read data line */
-	if (fgets(buf, sizeof(buf), fp) != NULL) {
-		/* Parse: Name Mtu Network Address Ibytes Ipkts Obytes Opkts */
+	/* Read the third line (after two header lines). */
+	char *save = NULL;
+	char *line = strtok_r(out, "\n", &save);
+	if (line != NULL)
+		line = strtok_r(NULL, "\n", &save);	/* second */
+	if (line != NULL)
+		line = strtok_r(NULL, "\n", &save);	/* third: data */
+	if (line != NULL) {
+		strlcpy(buf, line, sizeof(buf));
+		/* Parse: Name Mtu Network Address Ibytes Ipkts Obytes Opkts.
+		 * Width-limit the %s conversions to avoid overrunning the
+		 * fixed field buffers. */
 		char name[64], mtu[16], network[64], addr[64];
-		sscanf(buf, "%s %s %s %s %llu %llu %llu %llu",
+		sscanf(buf, "%63s %15s %63s %63s %llu %llu %llu %llu",
 		    name, mtu, network, addr,
 		    (unsigned long long *)rx_bytes,
 		    (unsigned long long *)rx_packets,
@@ -230,7 +236,7 @@ vnet_get_interface_stats(const char *jail_name, const char *interface,
 		    (unsigned long long *)tx_packets);
 	}
 
-	pclose(fp);
+	free(out);
 	return (0);
 }
 

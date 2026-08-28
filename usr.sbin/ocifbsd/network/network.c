@@ -131,49 +131,65 @@ run_cmd_output(char **output, int argc, ...)
 	va_end(ap);
 	argv[argc] = NULL;
 
-	char *cmd = NULL;
-	size_t cmd_len = 0;
-	for (int i = 0; i < argc; i++) {
-		size_t alen = strlen(argv[i]);
-		size_t need = cmd_len + (i > 0 ? 1 : 0) + alen + 1;
-		char *newcmd = realloc(cmd, need);
-		if (newcmd == NULL) {
-			free(cmd);
-			free(argv);
-			return (-1);
-		}
-		cmd = newcmd;
-		if (i > 0) {
-			cmd[cmd_len++] = ' ';
-		}
-		memcpy(cmd + cmd_len, argv[i], alen);
-		cmd_len += alen;
-		cmd[cmd_len] = '\0';
-	}
+	/*
+	 * Execute via fork/exec with the argv directly — never through a
+	 * shell. Interface, jail, and endpoint names flow into these
+	 * commands; joining them into a popen() string allowed root command
+	 * injection (e.g. a name containing ';', '$(...)', or backticks).
+	 */
+	int fds[2];
+	pid_t pid;
 
-	fp = popen(cmd, "r");
-	free(cmd);
-	if (fp == NULL) {
+	if (pipe(fds) != 0) {
 		free(argv);
 		return (-1);
 	}
 
-	while (fgets(buf, sizeof(buf), fp) != NULL) {
-		size_t len = strlen(buf);
-		char *newp = realloc(result, result_len + len + 1);
-		if (newp == NULL) {
-			free(result);
-			pclose(fp);
-			free(argv);
-			return (-1);
-		}
-		result = newp;
-		memcpy(result + result_len, buf, len + 1);
-		result_len += len;
+	pid = fork();
+	if (pid < 0) {
+		close(fds[0]);
+		close(fds[1]);
+		free(argv);
+		return (-1);
+	}
+	if (pid == 0) {
+		close(fds[0]);
+		if (dup2(fds[1], STDOUT_FILENO) < 0)
+			_exit(127);
+		if (fds[1] != STDOUT_FILENO)
+			close(fds[1]);
+		execvp(argv[0], argv);
+		_exit(127);
 	}
 
-	status = pclose(fp);
+	close(fds[1]);
+	(void)fp;
+	for (;;) {
+		ssize_t n = read(fds[0], buf, sizeof(buf));
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		if (n == 0)
+			break;
+		char *newp = realloc(result, result_len + (size_t)n + 1);
+		if (newp == NULL) {
+			free(result);
+			result = NULL;
+			result_len = 0;
+			break;
+		}
+		result = newp;
+		memcpy(result + result_len, buf, (size_t)n);
+		result_len += (size_t)n;
+		result[result_len] = '\0';
+	}
+	close(fds[0]);
 	free(argv);
+
+	if (waitpid(pid, &status, 0) < 0)
+		status = -1;
 
 	if (output != NULL && result != NULL) {
 		*output = result;
@@ -184,6 +200,75 @@ run_cmd_output(char **output, int argc, ...)
 	if (WIFEXITED(status))
 		return (WEXITSTATUS(status));
 
+	return (-1);
+}
+
+/*
+ * Run a command (NULL-terminated argv) via fork/exec and capture its
+ * stdout into *output (caller frees). No shell is involved, so arguments
+ * containing shell metacharacters are safe. Returns the child exit code,
+ * or -1 on failure. Shared with vnet.c/bridge.c to replace popen().
+ */
+int
+net_capture_argv(char **output, char *const argv[])
+{
+	int fds[2];
+	pid_t pid;
+	int status;
+	char buf[1024];
+	char *result = NULL;
+	size_t result_len = 0;
+
+	if (output != NULL)
+		*output = NULL;
+	if (pipe(fds) != 0)
+		return (-1);
+	pid = fork();
+	if (pid < 0) {
+		close(fds[0]);
+		close(fds[1]);
+		return (-1);
+	}
+	if (pid == 0) {
+		close(fds[0]);
+		if (dup2(fds[1], STDOUT_FILENO) < 0)
+			_exit(127);
+		if (fds[1] != STDOUT_FILENO)
+			close(fds[1]);
+		execvp(argv[0], argv);
+		_exit(127);
+	}
+	close(fds[1]);
+	for (;;) {
+		ssize_t n = read(fds[0], buf, sizeof(buf));
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		if (n == 0)
+			break;
+		char *newp = realloc(result, result_len + (size_t)n + 1);
+		if (newp == NULL) {
+			free(result);
+			result = NULL;
+			result_len = 0;
+			break;
+		}
+		result = newp;
+		memcpy(result + result_len, buf, (size_t)n);
+		result_len += (size_t)n;
+		result[result_len] = '\0';
+	}
+	close(fds[0]);
+	if (waitpid(pid, &status, 0) < 0)
+		status = -1;
+	if (output != NULL && result != NULL)
+		*output = result;
+	else
+		free(result);
+	if (WIFEXITED(status))
+		return (WEXITSTATUS(status));
 	return (-1);
 }
 
