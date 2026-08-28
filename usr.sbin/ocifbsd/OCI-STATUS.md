@@ -4,7 +4,51 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-06-05 14:25 UTC (09:25 CDT) — live status
+> **Last updated**: 2026-08-28 — correctness & security hardening pass
+
+## 🔒 **2026-08-28 — Full correctness & security hardening pass**
+
+A comprehensive review of every subdirectory was completed and every
+confirmed bug fixed. The whole tree builds clean on FreeBSD 15.1-STABLE
+(`/usr/bin/make`, json-c installed) and the test suite passes **128/128**
+via `kyua test -k Kyuafile` (including the root-only jail-lifecycle tests
+run under sudo). New CLI verbs landed: `exec`, `stop`, `pause`, `resume`,
+`push`.
+
+**Fixed (by area):**
+
+- **Build**: the GNU-make guard tested `.MAKE.VERSION` (undefined under real
+  bmake) and aborted every native build — now `MAKE_VERSION`. Undefined
+  `SRCDIR` expanded to root-relative `-I/include` in five subdir Makefiles.
+- **Layer unpack** (remote-triggerable, root): tar path-traversal and
+  symlink-escape are now rejected; files open with `O_NOFOLLOW`. Manifest
+  layer digests are validated (`sha256:<hex>`) before use as paths.
+- **Command injection (root RCE)**: eliminated across `network`/`vnet`/
+  `bridge` (popen→fork/exec), `namespace` (strict name validation + exec),
+  `security/mac`, `cert` backup, and `orchestration/health` (exec probes).
+- **Registry push/pull/zfs**: fixed libcurl read/write callback misuse
+  (crashes), a `char**`→`oci_layer**` type confusion, `popen` injection and
+  an uninitialized-dataset destroy in `zfs_store`.
+- **Core runtime**: apply `process.user` uid/gid (containers ran as root),
+  PID-reuse-safe kill, hook-timeout enforcement, atomic state writes,
+  parse poststart/poststop hooks, working `list`.
+- **Orchestration**: NULL-deref crashes (`service_start`, `scheduler_init`),
+  unbounded `pod_get`/`pod_list` recursion, and registry use-after-free.
+- **logd**: ring-buffer infinite loop and forwarder self-deadlock (logging
+  was fully broken), plus unbounded array indexing.
+- **gc**: no longer deletes every volume/bridge; spares untracked interfaces.
+- **rctl / tpm / convert / clustering**: correct rctl(8) syntax, TPM
+  length/PCR bounds, YAML/JSON escaper overflows and k8s multi-doc/kind
+  bugs, and a reference-counted cluster-node lifetime (fixes a UAF) with
+  validated gossip/JOIN network input.
+
+**Remaining (feature work, not bugs — mostly comment-only stub files):**
+real ACME/Let's Encrypt (`cert/acme.c`), cloud export for AWS/GCP/Azure
+(`export/*.c`), HTTP log forwarding (`logd/forward.c`), real TPM 2.0
+operations (software fallback only today), and full Raft. These are
+greenfield implementations that need external resources (credentials,
+registry/cloud endpoints, TPM hardware) and product decisions; they are the
+natural next targets once prioritized.
 
 ## 🎉🎉🎉 **ALL 15 SUBDIRs RE-ENABLED — BOOTSTRAP 100% COMPLETE!**
 
