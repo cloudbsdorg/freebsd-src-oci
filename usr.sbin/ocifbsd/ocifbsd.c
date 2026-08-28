@@ -50,6 +50,7 @@
 #include "include/ocifbsd.h"
 #include "image/pull.h"
 #include "image/push.h"
+#include "image/load.h"
 #include "image/zfs_store.h"
 
 /* Global verbosity flag */
@@ -92,6 +93,7 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "  resume <container-id>             Resume a paused container\n");
 		fprintf(stderr, "  pull <reference> [--dry-run]      Resolve/pull OCI image reference\n");
 		fprintf(stderr, "  push <reference>                  Push local image to its registry\n");
+		fprintf(stderr, "  load [--name ref] <archive|dir>   Import a local OCI image archive\n");
 		fprintf(stderr, "  images                            List local image store paths\n");
 		fprintf(stderr, "  rmi <reference>                   Remove a local image store\n");
 		fprintf(stderr, "\nRun '%s help <command>' for more information on a command.\n",
@@ -1373,6 +1375,61 @@ cmd_push(int argc, char **argv)
 	return (ret);
 }
 
+/*
+ * load — import a local OCI image archive (oci-layout dir or .txz/.tar) into
+ * the image store so `create --image`/`run --image` can use it.
+ */
+static int
+cmd_load(int argc, char **argv)
+{
+	const char *archive = NULL;
+	const char *ref = NULL;
+	char *store_path = NULL;
+	int ch;
+
+	static struct option longopts[] = {
+		{ "name",	required_argument,	NULL, 'n' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+n:h", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'n':
+			ref = optarg;
+			break;
+		case 'h':
+			usage(argv[0], "load [--name ref] <oci-archive|dir>");
+			return (0);
+		default:
+			usage(argv[0], "load");
+			return (1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+	if (argc < 1) {
+		usage("ocifbsd", "load [--name ref] <oci-archive|dir>");
+		return (1);
+	}
+	archive = argv[0];
+
+	if (verbose)
+		fprintf(stderr, "loading OCI archive %s%s%s\n", archive,
+		    ref ? " as " : "", ref ? ref : "");
+
+	if (load_oci_archive(archive, ref, &store_path) != 0) {
+		fprintf(stderr, "error: failed to load %s\n", archive);
+		return (1);
+	}
+
+	printf("loaded=%s\n", store_path ? store_path : "");
+	free(store_path);
+	return (0);
+}
+
 /* Command table */
 struct command {
 	const char *name;
@@ -1395,6 +1452,7 @@ static struct command commands[] = {
 	{ "resume",	cmd_resume,	"Resume a paused container" },
 	{ "pull",	cmd_pull,	"Resolve or pull an OCI image" },
 	{ "push",	cmd_push,	"Push a local image to a registry" },
+	{ "load",	cmd_load,	"Import a local OCI image archive" },
 	{ "images",	cmd_images,	"List local image store" },
 	{ "rmi",	cmd_rmi,	"Remove a local image" },
 	{ NULL,		NULL,		NULL },

@@ -146,7 +146,7 @@ ATF_TC(entry_path_safety_unit);
 ATF_TC_HEAD(entry_path_safety_unit, tc)
 {
 	atf_tc_set_md_var(tc, "descr",
-	    "entry_path_is_safe / symlink_target_is_safe classify paths");
+	    "entry_path_is_safe classifies traversal in entry names");
 }
 ATF_TC_BODY(entry_path_safety_unit, tc)
 {
@@ -160,13 +160,11 @@ ATF_TC_BODY(entry_path_safety_unit, tc)
 	ATF_CHECK(!entry_path_is_safe("a/../../etc/x"));
 	ATF_CHECK(!entry_path_is_safe(".."));
 
-	/* Symlink targets: absolute or escaping targets are unsafe. */
-	ATF_CHECK(!symlink_target_is_safe("link", "/"));
-	ATF_CHECK(!symlink_target_is_safe("link", "/etc"));
-	ATF_CHECK(!symlink_target_is_safe("a/link", "../../etc"));
-	/* A target that stays within the tree is fine. */
-	ATF_CHECK(symlink_target_is_safe("a/b/link", "../c"));
-	ATF_CHECK(symlink_target_is_safe("link", "sibling"));
+	/*
+	 * Symlink targets are intentionally unrestricted (absolute and "../"
+	 * targets are legitimate in real images); the traversal defense is on
+	 * entry names plus O_NOFOLLOW, not on symlink targets.
+	 */
 }
 
 ATF_TC(whiteout_helpers_path_forms);

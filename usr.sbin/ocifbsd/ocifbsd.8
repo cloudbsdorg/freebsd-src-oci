@@ -86,6 +86,29 @@ only resolve and print.
 Without
 .Fl n ,
 fetch the manifest and layers via the OCI Distribution API into that path.
+.It Cm load Oo Fl n Ar reference Oc Ar archive
+Import a local OCI image into the image store.
+.Ar archive
+may be a directory in OCI image-layout form
+.Pq Pa oci-layout , index.json , blobs/
+or a
+.Pa .tar , .tar.gz ,
+or
+.Pa .tar.xz
+archive of that layout, such as the container images published at
+.Pa https://download.freebsd.org/releases/OCI-IMAGES/ .
+The image layers are verified against their manifest digests and unpacked
+into a rootfs, and a runtime
+.Pa config.json
+is generated from the image configuration, so the result can be run with
+.Cm create Fl Fl image
+or
+.Cm run Fl Fl image .
+With
+.Fl n
+the store entry is named by the given reference instead of the archive's
+.Li org.opencontainers.image.ref.name
+annotation.
 .It Cm images
 List top-level entries under the local image store
 .Pq Pa /var/lib/ocifbsd .

@@ -88,52 +88,6 @@ entry_path_is_safe(const char *pathname)
 	return (true);
 }
 
-/*
- * A symlink target is unsafe if it is absolute or escapes the rootfs via
- * "..". Such a target lets a later layer entry ("link/etc/passwd") write
- * through the symlink onto the host. We compute the net directory depth
- * of the (relative) target and reject if it ever goes above the root.
- */
-static bool
-symlink_target_is_safe(const char *linkpath, const char *target)
-{
-	const char *p;
-	int depth;
-
-	if (target == NULL || target[0] == '\0')
-		return (false);
-	if (target[0] == '/')
-		return (false);
-
-	/*
-	 * Starting depth is the number of directories the link itself sits
-	 * below the root (each '/' in linkpath), minus one for the link's
-	 * own basename.
-	 */
-	depth = 0;
-	for (p = linkpath; *p != '\0'; p++)
-		if (*p == '/')
-			depth++;
-
-	for (p = target; *p != '\0'; ) {
-		if (p[0] == '.' && p[1] == '.' &&
-		    (p[2] == '/' || p[2] == '\0')) {
-			if (--depth < 0)
-				return (false);
-			p += (p[2] == '/') ? 3 : 2;
-		} else if (p[0] == '.' && (p[1] == '/' || p[1] == '\0')) {
-			p += (p[1] == '/') ? 2 : 1;
-		} else {
-			const char *slash = strchr(p, '/');
-			if (slash == NULL)
-				break;		/* final basename component */
-			depth++;
-			p = slash + 1;
-		}
-	}
-	return (true);
-}
-
 static int mkdirp_local(const char *path, mode_t mode);
 static int
 mkdirp_local(const char *path, mode_t mode)
@@ -505,15 +459,15 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 			break;
 
 		/*
-		 * Reject symlinks whose target escapes the rootfs. Otherwise
-		 * a later entry could write through the link onto the host.
+		 * Symlink targets are NOT restricted: absolute and "../"
+		 * targets (e.g. etc/termcap -> /usr/share/misc/termcap, or
+		 * /bin -> /usr/bin) are legitimate and ubiquitous in real
+		 * images, and a symlink resolves relative to the container's
+		 * own root at runtime. The traversal defense is on the entry
+		 * *name* (rejected above) plus O_NOFOLLOW on file creation,
+		 * which prevents a later entry from writing *through* a planted
+		 * symlink as its final component.
 		 */
-		if (!symlink_target_is_safe(pathname, link)) {
-			fprintf(stderr,
-			    "error: rejecting unsafe symlink %s -> %s\n",
-			    pathname, link);
-			return (-1);
-		}
 
 		/* dirname(3) mutates its argument — copy first */
 		strlcpy(path_copy, path, sizeof(path_copy));
