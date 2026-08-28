@@ -965,7 +965,23 @@ container_start(struct ocifbsd_container *c)
 			c->jid = 0;
 		}
 		state_save(c);
-		return (-1);
+
+		/*
+		 * Distinguish a genuine start failure from a container that
+		 * simply ran and exited quickly. The start child uses exit code
+		 * 126 (jail_attach failed) and 127 (execvp failed) to signal that
+		 * the process never actually started; report those as an error
+		 * (with a meaningful errno). Any other exit — including 0 — means
+		 * the container started and exited on its own, which is a normal
+		 * outcome (like `docker run` of a short-lived command), so return
+		 * success and let the recorded exit_code/STOPPED state stand.
+		 */
+		if (WIFEXITED(status) &&
+		    (WEXITSTATUS(status) == 126 || WEXITSTATUS(status) == 127)) {
+			errno = (WEXITSTATUS(status) == 127) ? ENOENT : EACCES;
+			return (-1);
+		}
+		return (0);
 	}
 
 	/* Update state */
