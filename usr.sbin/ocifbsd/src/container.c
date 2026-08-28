@@ -1220,8 +1220,18 @@ container_delete(struct ocifbsd_container *c)
 	/* Unregister from memory */
 	container_unregister(c->id);
 
-	/* Delete state file */
+	/* Delete state file and the container log (else logs accumulate in
+	 * the state dir after the container is gone). Derive the log path from
+	 * the id — it matches container_create and works even when the
+	 * container was reloaded from state (which does not persist log_path). */
 	state_delete(c->id);
+	if (c->id != NULL) {
+		char logbuf[PATH_MAX];
+
+		snprintf(logbuf, sizeof(logbuf), "%s/%s.log",
+		    OCIFBSD_STATE_DIR, c->id);
+		(void)unlink(logbuf);
+	}
 
 	/* Update state */
 	c->state = OCIFBSD_STATE_STOPPED;
