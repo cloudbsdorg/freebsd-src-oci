@@ -240,6 +240,15 @@ rm_rf(const char *path)
 	while ((ent = fts_read(fts)) != NULL) {
 		switch (ent->fts_info) {
 		case FTS_D:
+			/*
+			 * Entering a directory (pre-order): clear any immutable
+			 * flags on the directory itself so its entries can be
+			 * removed. A schg/uchg directory blocks deletion of the
+			 * files inside it, and children are visited before this
+			 * dir's post-order (FTS_DP), so the flag must be cleared
+			 * on the way down. Best-effort; ignore errors.
+			 */
+			(void)lchflags(ent->fts_accpath, 0);
 			break;
 		case FTS_DP:
 		case FTS_F:
@@ -248,6 +257,18 @@ rm_rf(const char *path)
 		case FTS_DEFAULT:
 		case FTS_NSOK:
 			if (remove(ent->fts_accpath) != 0 && errno != ENOENT) {
+				/*
+				 * FreeBSD image rootfs commonly contains files
+				 * with immutable/append flags (schg/uchg/…). Clear
+				 * the flags and retry — otherwise the whole image
+				 * removal fails and leaves the store half-deleted.
+				 * (Cannot succeed at securelevel >= 1, which is a
+				 * system policy the runtime cannot override.)
+				 */
+				if (errno == EPERM &&
+				    lchflags(ent->fts_accpath, 0) == 0 &&
+				    remove(ent->fts_accpath) == 0)
+					break;
 				fprintf(stderr, "error: cannot remove %s: %s\n",
 				    ent->fts_accpath, strerror(errno));
 				ret = -1;
