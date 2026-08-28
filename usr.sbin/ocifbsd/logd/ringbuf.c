@@ -172,33 +172,32 @@ ringbuf_read(struct log_ringbuf *rb, uint64_t id)
 struct log_entry *
 ringbuf_iterate(struct log_ringbuf *rb, uint64_t *cursor)
 {
+    uint64_t slot;
+    struct log_entry *entry;
+
     if (rb == NULL || cursor == NULL)
         return (NULL);
 
     pthread_mutex_lock(&rb->lock);
 
-    if (*cursor == 0) {
-        /* Start from oldest entry */
-        *cursor = rb->tail;
-    } else {
-        /* Advance to next */
-        *cursor = (*cursor + 1) % rb->size;
-
-        /* Check if we've wrapped around */
-        if (*cursor == rb->head || rb->count == 0) {
-            pthread_mutex_unlock(&rb->lock);
-            return (NULL);
-        }
-    }
-
-    if (*cursor == rb->head || rb->ids[*cursor] == 0) {
+    /*
+     * *cursor is the opaque count of entries already returned (0 to
+     * start). This avoids overloading slot index 0 as a "start" sentinel,
+     * which caused an infinite loop returning entries[0] forever whenever
+     * tail == 0 (i.e. until the buffer first wraps).
+     */
+    if (*cursor >= rb->count) {
         pthread_mutex_unlock(&rb->lock);
         return (NULL);
     }
 
+    slot = (rb->tail + *cursor) % rb->size;
+    (*cursor)++;
+    entry = &rb->entries[slot];
+
     pthread_mutex_unlock(&rb->lock);
 
-    return (&rb->entries[*cursor]);
+    return (entry);
 }
 
 /*

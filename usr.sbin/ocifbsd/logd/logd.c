@@ -203,6 +203,29 @@ static const char *source_names[] = {
 };
 
 /*
+ * Bounds-checked name lookups. entry->severity and entry->source can come
+ * from untrusted log submitters; an out-of-range value would index past
+ * these arrays and read a bogus pointer into formatted output.
+ */
+static const char *
+severity_name(int severity)
+{
+    if (severity < 0 ||
+        (size_t)severity >= sizeof(severity_names) / sizeof(severity_names[0]))
+        return ("unknown");
+    return (severity_names[severity]);
+}
+
+static const char *
+source_name(int source)
+{
+    if (source < 0 ||
+        (size_t)source >= sizeof(source_names) / sizeof(source_names[0]))
+        return ("unknown");
+    return (source_names[source]);
+}
+
+/*
  * Initialize log daemon
  */
 int
@@ -485,8 +508,8 @@ log_format_entry(struct log_entry *entry, int format)
             "{\"timestamp\":\"%s\",\"severity\":\"%s\",\"source\":\"%s\","
             "\"hostname\":\"%s\",\"message\":\"%s\",\"id\":%lu}",
             ts,
-            severity_names[entry->severity],
-            source_names[entry->source],
+            severity_name(entry->severity),
+            source_name(entry->source),
             entry->hostname,
             entry->message,
             (unsigned long)entry->id);
@@ -495,7 +518,7 @@ log_format_entry(struct log_entry *entry, int format)
     case LOG_FORMAT_TEXT:
         snprintf(buf, sizeof(buf), "%s %s[%s]: %s",
             ts,
-            severity_names[entry->severity],
+            severity_name(entry->severity),
             entry->source_name,
             entry->message);
         break;
@@ -531,8 +554,14 @@ log_stats_get(struct log_stats *stats)
     memset(stats, 0, sizeof(*stats));
     stats->entries_total = main_ringbuf->total_written;
     stats->entries_written = main_ringbuf->count;
-    stats->oldest_entry = main_ringbuf->entries[main_ringbuf->tail].timestamp;
-    stats->newest_entry = main_ringbuf->entries[main_ringbuf->head].timestamp;
+    if (main_ringbuf->count > 0) {
+        uint64_t newest = (main_ringbuf->head + main_ringbuf->size - 1) %
+            main_ringbuf->size;
+        stats->oldest_entry =
+            main_ringbuf->entries[main_ringbuf->tail].timestamp;
+        /* head is the next unwritten slot; newest is the one before it. */
+        stats->newest_entry = main_ringbuf->entries[newest].timestamp;
+    }
 
     pthread_mutex_unlock(&main_ringbuf->lock);
 
@@ -1272,9 +1301,12 @@ forwarder_flush(void)
     if (main_ringbuf == NULL)
         return (0);
 
-    pthread_mutex_lock(&main_ringbuf->lock);
-
-    /* Iterate through recent entries and forward them */
+    /*
+     * Do NOT hold main_ringbuf->lock here: ringbuf_iterate acquires the
+     * same non-recursive lock internally, so holding it deadlocked the
+     * forward worker (and, transitively, every log_write). ringbuf_iterate
+     * is self-synchronizing.
+     */
     uint64_t count = 0;
     cursor = 0;
     while ((entry = ringbuf_iterate(main_ringbuf, &cursor)) != NULL) {
@@ -1285,8 +1317,6 @@ forwarder_flush(void)
         if (count >= (uint64_t)config.forward_batch_size)
             break;
     }
-
-    pthread_mutex_unlock(&main_ringbuf->lock);
 
     return (0);
 }
