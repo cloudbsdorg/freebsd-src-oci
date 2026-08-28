@@ -329,21 +329,22 @@ bridge_delete(const char *name)
 int
 bridge_add_interface(const char *bridge, const char *iface)
 {
-	return (run_cmd(5, "ifconfig", bridge, "addm", iface));
+	return (run_cmd(4, "ifconfig", bridge, "addm", iface));
 }
 
 int
 bridge_remove_interface(const char *bridge, const char *iface)
 {
-	return (run_cmd(5, "ifconfig", bridge, "deletem", iface));
+	return (run_cmd(4, "ifconfig", bridge, "deletem", iface));
 }
 
 int
 bridge_set_mtu(const char *bridge, int mtu)
 {
 	char mtu_str[16];
-	snprintf(mtu_str, sizeof(mtu_str), "mtu %d", mtu);
-	return (run_cmd(4, "ifconfig", bridge, mtu_str));
+	/* "mtu" and the value must be separate argv elements. */
+	snprintf(mtu_str, sizeof(mtu_str), "%d", mtu);
+	return (run_cmd(4, "ifconfig", bridge, "mtu", mtu_str));
 }
 
 int
@@ -453,7 +454,7 @@ epair_create(const char *prefix, char **side_a, char **side_b)
 int
 epair_delete(const char *epair)
 {
-	return (run_cmd(4, "ifconfig", epair, "destroy"));
+	return (run_cmd(3, "ifconfig", epair, "destroy"));
 }
 
 int
@@ -461,26 +462,33 @@ epair_set_mtu(const char *epair, int mtu)
 {
 	char mtu_str[16];
 	char a_name[IFNAMSIZ], b_name[IFNAMSIZ];
-	char *p;
+	size_t l;
 
-	/* Get side a and b names */
+	/*
+	 * The two epair interfaces differ only in the trailing 'a'/'b'
+	 * (e.g. epair0a / epair0b). Derive the peer from the LAST character;
+	 * strchr(a_name, 'a') matched the 'a' inside the "epair" prefix and
+	 * produced a bogus peer name.
+	 */
 	strlcpy(a_name, epair, sizeof(a_name));
-	p = strchr(a_name, 'a');
-	if (p) {
-		*p = 'b';
-		strlcpy(b_name, p, sizeof(b_name));
-		*p = 'a';
-	} else {
+	strlcpy(b_name, epair, sizeof(b_name));
+	l = strlen(b_name);
+	if (l == 0)
 		return (-1);
-	}
-
-	snprintf(mtu_str, sizeof(mtu_str), "mtu %d", mtu);
-
-	/* Set MTU on both sides */
-	if (run_cmd(4, "ifconfig", a_name, mtu_str) != 0)
+	if (b_name[l - 1] == 'a')
+		b_name[l - 1] = 'b';
+	else if (b_name[l - 1] == 'b')
+		b_name[l - 1] = 'a';
+	else
 		return (-1);
 
-	return (run_cmd(4, "ifconfig", b_name, mtu_str));
+	snprintf(mtu_str, sizeof(mtu_str), "%d", mtu);
+
+	/* Set MTU on both sides (mtu and value are separate argv elements). */
+	if (run_cmd(4, "ifconfig", a_name, "mtu", mtu_str) != 0)
+		return (-1);
+
+	return (run_cmd(4, "ifconfig", b_name, "mtu", mtu_str));
 }
 
 bool
@@ -630,7 +638,7 @@ int
 network_delete(const char *network_id)
 {
 	char state_file[PATH_MAX];
-	char bridge_name[64];
+	char bridge_name[64] = "";	/* must be empty if not parsed below */
 
 	snprintf(state_file, sizeof(state_file), "%s/%s.json",
 	    OCIFBSD_NETWORK_STATE_DIR, network_id);
@@ -930,7 +938,7 @@ nat_enable(const char *jail_name, const char *external_iface)
 	fclose(f);
 
 	/* Reload pf rules */
-	return (run_cmd(2, "pfctl", "-f /etc/pf.conf"));
+	return (run_cmd(3, "pfctl", "-f", "/etc/pf.conf"));
 }
 
 int
@@ -949,7 +957,7 @@ nat_disable(const char *jail_name)
 
 	in = fopen(pf_ocifbsd, "r");
 	if (in == NULL) {
-		return (run_cmd(2, "pfctl", "-f", "/etc/pf.conf"));
+		return (run_cmd(3, "pfctl", "-f", "/etc/pf.conf"));
 	}
 
 	out = fopen("/etc/pf.conf.ocifbsd.tmp", "w");
@@ -967,7 +975,7 @@ nat_disable(const char *jail_name)
 	if (len == 0) {
 		fclose(out);
 		unlink("/etc/pf.conf.ocifbsd.tmp");
-		return (run_cmd(2, "pfctl", "-f", "/etc/pf.conf"));
+		return (run_cmd(3, "pfctl", "-f", "/etc/pf.conf"));
 	}
 
 	const char *p = buf;
@@ -1001,14 +1009,14 @@ nat_disable(const char *jail_name)
 		unlink("/etc/pf.conf.ocifbsd.tmp");
 	}
 
-	return (run_cmd(2, "pfctl", "-f", "/etc/pf.conf.ocifbsd"));
+	return (run_cmd(3, "pfctl", "-f", "/etc/pf.conf.ocifbsd"));
 }
 
 int
 nat_check(void)
 {
 	int ret;
-	ret = run_cmd(2, "pfctl", "-s nat");
+	ret = run_cmd(3, "pfctl", "-s", "nat");
 	return (ret);
 }
 
