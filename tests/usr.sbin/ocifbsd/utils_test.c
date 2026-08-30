@@ -142,6 +142,63 @@ ATF_TC_BODY(state_strings, tc)
 	    "unknown");
 }
 
+/* ----- ocifbsd_reconcile_state ----- */
+
+ATF_TC(reconcile_running_dead_jail);
+ATF_TC_HEAD(reconcile_running_dead_jail, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "a running container whose jail is gone reconciles to stopped");
+}
+ATF_TC_BODY(reconcile_running_dead_jail, tc)
+{
+	ATF_CHECK_EQ(ocifbsd_reconcile_state(OCIFBSD_STATE_RUNNING, false),
+	    OCIFBSD_STATE_STOPPED);
+}
+
+ATF_TC(reconcile_running_live_jail);
+ATF_TC_HEAD(reconcile_running_live_jail, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "a running container with a live jail stays running");
+}
+ATF_TC_BODY(reconcile_running_live_jail, tc)
+{
+	ATF_CHECK_EQ(ocifbsd_reconcile_state(OCIFBSD_STATE_RUNNING, true),
+	    OCIFBSD_STATE_RUNNING);
+}
+
+ATF_TC(reconcile_paused_dead_jail);
+ATF_TC_HEAD(reconcile_paused_dead_jail, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "a paused container whose jail is gone reconciles to stopped");
+}
+ATF_TC_BODY(reconcile_paused_dead_jail, tc)
+{
+	ATF_CHECK_EQ(ocifbsd_reconcile_state(OCIFBSD_STATE_PAUSED, false),
+	    OCIFBSD_STATE_STOPPED);
+	ATF_CHECK_EQ(ocifbsd_reconcile_state(OCIFBSD_STATE_PAUSED_HIGH, false),
+	    OCIFBSD_STATE_STOPPED);
+}
+
+ATF_TC(reconcile_nonrunning_unaffected);
+ATF_TC_HEAD(reconcile_nonrunning_unaffected, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "created/stopped states are authoritative regardless of jail");
+}
+ATF_TC_BODY(reconcile_nonrunning_unaffected, tc)
+{
+	/* A created container has no jail yet; liveness must not matter. */
+	ATF_CHECK_EQ(ocifbsd_reconcile_state(OCIFBSD_STATE_CREATED, false),
+	    OCIFBSD_STATE_CREATED);
+	ATF_CHECK_EQ(ocifbsd_reconcile_state(OCIFBSD_STATE_STOPPED, false),
+	    OCIFBSD_STATE_STOPPED);
+	ATF_CHECK_EQ(ocifbsd_reconcile_state(OCIFBSD_STATE_STOPPED, true),
+	    OCIFBSD_STATE_STOPPED);
+}
+
 /* ----- ensure_directory / resolve_bundle_path ----- */
 
 ATF_TC(ensure_directory_create);
@@ -202,6 +259,10 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, canonical_keeps_alnum_underscore);
 	ATF_TP_ADD_TC(tp, canonical_empty_after_trim);
 	ATF_TP_ADD_TC(tp, state_strings);
+	ATF_TP_ADD_TC(tp, reconcile_running_dead_jail);
+	ATF_TP_ADD_TC(tp, reconcile_running_live_jail);
+	ATF_TP_ADD_TC(tp, reconcile_paused_dead_jail);
+	ATF_TP_ADD_TC(tp, reconcile_nonrunning_unaffected);
 	ATF_TP_ADD_TC(tp, ensure_directory_create);
 	ATF_TP_ADD_TC(tp, resolve_bundle_absolute);
 	ATF_TP_ADD_TC(tp, resolve_bundle_null);

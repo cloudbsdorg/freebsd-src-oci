@@ -196,6 +196,8 @@ struct oci_runtime_spec *oci_parse_config(const char *config_path);
 void	oci_free_spec(struct oci_runtime_spec *spec);
 struct jailparam *oci_spec_to_jail_params(const struct oci_runtime_spec *spec,
 		    size_t *nparams);
+void	oci_spec_default_hostname(struct oci_runtime_spec *spec,
+		    const char *fallback);
 int	oci_validate_spec(const struct oci_runtime_spec *spec);
 
 /* State management */
@@ -228,6 +230,7 @@ void	ocifbsd_set_verbose(bool verbose);
 
 /* Error handling */
 const char *ocifbsd_state_to_string(ocifbsd_state_t state);
+ocifbsd_state_t ocifbsd_reconcile_state(ocifbsd_state_t stored, bool jail_alive);
 const char *ocifbsd_strerror(int error);
 
 /*

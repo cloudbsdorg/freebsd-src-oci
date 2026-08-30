@@ -672,6 +672,29 @@ oci_free_spec(struct oci_runtime_spec *spec)
 }
 
 /*
+ * Default the spec hostname when the image/bundle config did not set one.
+ *
+ * A container should come up with a hostname even when its OCI config omits
+ * one — a bare FreeBSD base image, for instance, carries no hostname, which
+ * otherwise leaves kern.hostname empty inside the jail. The fallback (the
+ * container name, or its id) is only applied when neither the top-level
+ * hostname nor a FreeBSD-extension hostname is present, so an explicit
+ * hostname from either source always wins. A NULL or empty fallback leaves
+ * the hostname unset rather than inventing one.
+ */
+void
+oci_spec_default_hostname(struct oci_runtime_spec *spec, const char *fallback)
+{
+	if (spec == NULL || fallback == NULL || fallback[0] == '\0')
+		return;
+	if (spec->hostname != NULL)
+		return;
+	if (spec->freebsd != NULL && spec->freebsd->hostname != NULL)
+		return;
+	spec->hostname = strdup(fallback);
+}
+
+/*
  * Translate OCI Runtime Spec to FreeBSD jail parameters
  */
 struct jailparam *

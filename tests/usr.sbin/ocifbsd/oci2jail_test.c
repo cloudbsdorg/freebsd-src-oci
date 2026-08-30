@@ -382,6 +382,99 @@ ATF_TC_BODY(parse_rlimits, tc)
 	oci_free_spec(spec);
 }
 
+ATF_TC(default_hostname_sets_when_absent);
+ATF_TC_HEAD(default_hostname_sets_when_absent, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "oci_spec_default_hostname fills an absent hostname and it reaches "
+	    "the jail parameters as host.hostname");
+}
+ATF_TC_BODY(default_hostname_sets_when_absent, tc)
+{
+	struct oci_runtime_spec *spec;
+	struct jailparam *params;
+	size_t nparams, i;
+	int saw_host = 0;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_REQUIRE(spec->hostname == NULL);	/* absent in config */
+
+	oci_spec_default_hostname(spec, "web");
+	ATF_REQUIRE(spec->hostname != NULL);
+	ATF_CHECK_STREQ(spec->hostname, "web");
+
+	params = oci_spec_to_jail_params(spec, &nparams);
+	ATF_REQUIRE(params != NULL);
+	for (i = 0; i < nparams; i++) {
+		if (params[i].jp_name != NULL &&
+		    strcmp(params[i].jp_name, "host.hostname") == 0)
+			saw_host = 1;
+	}
+	ATF_CHECK(saw_host);
+	jailparam_free(params, nparams);
+	oci_free_spec(spec);
+}
+
+ATF_TC(default_hostname_keeps_explicit);
+ATF_TC_HEAD(default_hostname_keeps_explicit, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "oci_spec_default_hostname does not override an explicit hostname");
+}
+ATF_TC_BODY(default_hostname_keeps_explicit, tc)
+{
+	struct oci_runtime_spec *spec;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"hostname\": \"jp-host\",\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+
+	oci_spec_default_hostname(spec, "web");
+	ATF_REQUIRE(spec->hostname != NULL);
+	ATF_CHECK_STREQ(spec->hostname, "jp-host");
+	oci_free_spec(spec);
+}
+
+ATF_TC(default_hostname_null_fallback_safe);
+ATF_TC_HEAD(default_hostname_null_fallback_safe, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "oci_spec_default_hostname with a NULL/empty fallback leaves the "
+	    "hostname unset rather than crashing");
+}
+ATF_TC_BODY(default_hostname_null_fallback_safe, tc)
+{
+	struct oci_runtime_spec *spec;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+
+	oci_spec_default_hostname(spec, NULL);
+	ATF_CHECK(spec->hostname == NULL);
+	oci_spec_default_hostname(spec, "");
+	ATF_CHECK(spec->hostname == NULL);
+	oci_free_spec(spec);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, parse_minimal);
@@ -397,5 +490,8 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, jailparams_vnet);
 	ATF_TP_ADD_TC(tp, jailparams_null);
 	ATF_TP_ADD_TC(tp, parse_rlimits);
+	ATF_TP_ADD_TC(tp, default_hostname_sets_when_absent);
+	ATF_TP_ADD_TC(tp, default_hostname_keeps_explicit);
+	ATF_TP_ADD_TC(tp, default_hostname_null_fallback_safe);
 	return (atf_no_error());
 }

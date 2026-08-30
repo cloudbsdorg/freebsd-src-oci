@@ -370,6 +370,30 @@ ocifbsd_state_to_string(ocifbsd_state_t state)
 }
 
 /*
+ * Reconcile a persisted lifecycle state against observed jail liveness.
+ *
+ * State files record the last state the CLI wrote, but a jail can vanish
+ * out from under that record: a host reboot clears every jail, and an
+ * operator (or the kernel) can remove a jail without ocifbsd noticing.
+ * A container recorded as running or paused whose jail no longer exists
+ * is really stopped; every other state is authoritative on its own
+ * (a created container has no jail yet, and stopped/unknown never depend
+ * on liveness), so those are returned unchanged.
+ */
+ocifbsd_state_t
+ocifbsd_reconcile_state(ocifbsd_state_t stored, bool jail_alive)
+{
+	switch (stored) {
+	case OCIFBSD_STATE_RUNNING:
+	case OCIFBSD_STATE_PAUSED:
+	case OCIFBSD_STATE_PAUSED_HIGH:
+		return (jail_alive ? stored : OCIFBSD_STATE_STOPPED);
+	default:
+		return (stored);
+	}
+}
+
+/*
  * Get error string for ocifbsd errors.
  */
 const char *

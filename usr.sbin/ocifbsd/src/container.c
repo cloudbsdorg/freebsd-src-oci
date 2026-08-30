@@ -670,6 +670,14 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		c->log_path = strdup(logbuf);
 	}
 
+	/*
+	 * If the image/bundle config specified no hostname, default it to the
+	 * container name so the jail comes up with a meaningful kern.hostname
+	 * instead of an empty one. c->name is always set by this point (it
+	 * falls back to the container id above).
+	 */
+	oci_spec_default_hostname(spec, c->name);
+
 	/* Generate jail parameters from OCI spec */
 	params = oci_spec_to_jail_params(spec, &nparams);
 	if (params == NULL) {

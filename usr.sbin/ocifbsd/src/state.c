@@ -49,6 +49,9 @@
 
 #include "ocifbsd.h"
 
+/* Process/jail liveness probe (src/procutil.c). */
+extern bool pid_in_jail(pid_t pid, int jid);
+
 static const char *state_dir = OCIFBSD_STATE_DIR;
 static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -286,6 +289,18 @@ state_load(const char *id)
 	}
 
 	json_object_put(root);
+
+	/*
+	 * Reconcile the persisted state against reality. The state file records
+	 * the last status the CLI wrote, but a jail can disappear without our
+	 * knowledge (host reboot, an operator running jail -r, init exiting
+	 * while no ocifbsd process was watching). A container recorded as
+	 * running or paused whose init PID no longer lives in its jail is
+	 * really stopped; report it that way instead of trusting a stale file.
+	 * This mirrors the liveness signal the kill/stop paths already use.
+	 */
+	c->state = ocifbsd_reconcile_state(c->state,
+	    pid_in_jail(c->init_pid, c->jid));
 
 	/*
 	 * State files store lifecycle metadata only. Reload the full OCI
