@@ -18,12 +18,15 @@
 # structuredOutput). Non-finding chatter goes to stderr.
 #
 # Environment:
-#   GROK_MODEL    model id (default: qwen2.5-coder:14b)
+#   GROK_MODEL    model id (default: grok-4.6). The cloud models (grok-4.6,
+#                 grok-4.5, …) require `grok login` first; if you see a 401,
+#                 either log in or set GROK_MODEL to a local ollama model
+#                 (e.g. qwen2.5-coder:14b) — see `ollama list`.
 #   GROK_TIMEOUT  per-call timeout seconds (default: 600)
 
 set -eu
 
-MODEL="${GROK_MODEL:-qwen2.5-coder:14b}"
+MODEL="${GROK_MODEL:-grok-4.6}"
 TIMEOUT="${GROK_TIMEOUT:-600}"
 MODE="files"
 

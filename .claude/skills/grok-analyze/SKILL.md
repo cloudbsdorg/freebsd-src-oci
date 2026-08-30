@@ -21,15 +21,20 @@ are fast and private but fallible: treat every finding as a *lead*, not a fact.
 - Helper: `.claude/skills/grok-analyze/grok-analyze.sh`
   - `grok-analyze.sh <file> [<file>...]` — audit specific files.
   - `grok-analyze.sh --diff` — audit the current working-tree diff + changed files.
-  - `--model M` or `GROK_MODEL=M` — pick the model (default `qwen2.5-coder:14b`).
+  - `--model M` or `GROK_MODEL=M` — pick the model (default `grok-4.6`).
   - `GROK_TIMEOUT=<sec>` — per-call timeout (default 600).
   - Prints `{"findings":[{file,line,severity,category,summary,failure_scenario,suggested_fix}]}`.
-- Grok's default **cloud** model needs credentials and will 401. Always pass a
-  **local** ollama model. Good choices, larger = slower:
-  - `qwen2.5-coder:14b` (fast, solid) — default
+- **Preferred: the `grok-4.6` cloud model** — the strongest auditor here. It
+  requires a signed-in session: run `grok login` (`--device-auth` for headless)
+  once; a 401 "Invalid or expired credentials" means the session lapsed and
+  needs `grok login` again. You (Claude) cannot complete the interactive login —
+  ask the user to run it.
+- **Offline fallback: local ollama models** (no login, nothing leaves the box).
+  Pass one via `--model` when the cloud is unavailable. Larger = slower:
+  - `qwen2.5-coder:14b` (fast, solid, verified to catch real bugs)
   - `qwen3.8:27b`, `granite4.1:30b` (stronger, slower)
-  - `qwen3-coder-next:latest` / `qwen3-coder:480b` (best, very slow on CPU)
-  - `granite4.1:8b` (fastest, use for a quick pass)
+  - `qwen3-coder-next:latest` / `qwen3-coder:480b` (best local, very slow on CPU)
+  - `granite4.1:8b` (fastest, quick pass)
   - Confirm what is present with `ollama list`.
 - Big inputs are slow. Prefer one file (or a focused diff) per call over the
   whole tree. Split large sweeps into per-file calls.
