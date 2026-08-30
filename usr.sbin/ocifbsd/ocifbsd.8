@@ -56,6 +56,11 @@ so it remains until
 or
 .Cm delete .
 Prints the 64-hex container id on stdout.
+If the bundle or image configuration does not specify a hostname, the
+container's hostname defaults to its name (or, absent a name, its id) so
+.Xr sysctl 8
+.Va kern.hostname
+inside the jail is never empty.
 .It Cm start Ar container-id
 Start a created container (attach init process, apply mounts).
 .It Cm kill Ar container-id Op Fl s Ar signal
@@ -69,8 +74,22 @@ Use
 to force deletion of a running container.
 .It Cm state Ar container-id
 Show the current state of a container.
+The reported state is reconciled against the live jail: a container
+recorded as
+.Cm running
+or
+.Cm paused
+whose jail no longer exists (for example after a host reboot or an
+external
+.Xr jail 8
+removal) is reported as
+.Cm stopped .
 .It Cm list
 List known containers from the state directory.
+As with
+.Cm state ,
+each container's status reflects actual jail liveness rather than only
+the last value written to the state file.
 .It Cm inspect Ar container-id
 Show detailed container metadata as JSON.
 .It Cm run Oo Fl n Ar name Oc Ar bundle
