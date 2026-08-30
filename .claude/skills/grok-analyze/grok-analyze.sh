@@ -1,4 +1,6 @@
 #!/bin/sh
+# Copyright (c) 2026 REVYTECH, Inc.
+#
 # grok-analyze.sh — run the local Grok CLI (FreeGrok) as a headless code
 # auditor and print structured findings as JSON.
 #

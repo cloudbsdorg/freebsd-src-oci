@@ -12,6 +12,8 @@ description: >-
 
 # grok-analyze — Grok-assisted analyze → verify → fix loop
 
+<!-- Copyright (c) 2026 REVYTECH, Inc. -->
+
 This skill drives the local `grok` CLI (FreeGrok) as an independent code
 auditor whose findings you then **verify yourself** before fixing. Local models
 are fast and private but fallible: treat every finding as a *lead*, not a fact.

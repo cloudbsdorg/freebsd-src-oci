@@ -1,9 +1,6 @@
 /*-
- * Copyright (c) 2024 The FreeBSD Foundation
+ * Copyright (c) 2026 REVYTECH, Inc.
  * SPDX-License-Identifier: BSD-2-Clause
- *
- * This software was developed by Klara, Inc. under sponsorship
- * from the FreeBSD Foundation.
  *
  * $FreeBSD$
  *
