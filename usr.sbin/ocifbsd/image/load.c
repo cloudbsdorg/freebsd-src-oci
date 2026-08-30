@@ -95,7 +95,18 @@ load_extract_archive(const char *archive_path, const char *destdir)
 {
 	struct archive *a, *ext;
 	struct archive_entry *entry;
-	int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM;
+	/*
+	 * Extraction runs as root, so enable libarchive's secure-extraction
+	 * guards: SECURE_SYMLINKS refuses to write through a symlinked path
+	 * component (the crafted "symlink x -> /etc, then file x/crontab"
+	 * escape), and SECURE_NODOTDOT rejects any ".." in the path. We do NOT
+	 * set SECURE_NOABSOLUTEPATHS: entry pathnames are rewritten to an
+	 * absolute destdir/<name> below, and that flag would strip the leading
+	 * '/', dropping files relative to the CWD. Absolute *entry* names are
+	 * instead screened by the name check below (name[0] == '/').
+	 */
+	int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |
+	    ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT;
 	int ret = -1;
 	int r;
 
@@ -161,6 +172,39 @@ out:
 		archive_write_free(ext);
 	}
 	return (ret);
+}
+
+/*
+ * Reject a reference component that could traverse outside the image store.
+ * The registry/repo/tag come from an untrusted archive annotation (or a
+ * user-supplied --name) and are concatenated into a store path written as
+ * root, so an empty, absolute, or ".."-bearing component must be refused.
+ * Slashes are allowed inside repo (docker.io/library/foo), but no component
+ * between slashes may be "", ".", or "..".
+ */
+static bool
+ref_part_safe(const char *s)
+{
+	const char *start = s;
+	const char *p;
+
+	if (s == NULL || s[0] == '\0' || s[0] == '/')
+		return (false);
+	for (p = s;; p++) {
+		if (*p == '/' || *p == '\0') {
+			size_t len = (size_t)(p - start);
+			if (len == 0)
+				return (false);			/* empty */
+			if (len == 1 && start[0] == '.')
+				return (false);			/* "." */
+			if (len == 2 && start[0] == '.' && start[1] == '.')
+				return (false);			/* ".." */
+			if (*p == '\0')
+				break;
+			start = p + 1;
+		}
+	}
+	return (true);
 }
 
 /* Build blobs/sha256/<hex> path from a "sha256:<hex>" digest. */
@@ -311,7 +355,26 @@ write_runtime_config(const char *storedir, const char *config_blob)
 	fprintf(fp, "  },\n");
 	fprintf(fp, "  \"root\": { \"path\": \"rootfs\", \"readonly\": false }\n");
 	fprintf(fp, "}\n");
-	fclose(fp);
+
+	/*
+	 * A short write (disk full/quota) would leave a truncated, invalid
+	 * config.json that create/run would later choke on. Detect any stream
+	 * error and a failing close, and remove the partial file so the import
+	 * fails cleanly rather than producing a broken image.
+	 */
+	if (ferror(fp) != 0) {
+		fclose(fp);
+		unlink(path);
+		if (cfg != NULL)
+			json_object_put(cfg);
+		return (-1);
+	}
+	if (fclose(fp) != 0) {
+		unlink(path);
+		if (cfg != NULL)
+			json_object_put(cfg);
+		return (-1);
+	}
 
 	if (cfg != NULL)
 		json_object_put(cfg);
@@ -337,6 +400,7 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 	char *store = NULL;
 	const char *ref;
 	bool made_tmp = false;
+	bool created_store = false;
 	int ret = -1;
 	int i, nlayers;
 
@@ -396,11 +460,21 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 		fprintf(stderr, "error: invalid reference: %s\n", ref);
 		goto out;
 	}
+	if (!ref_part_safe(registry) || !ref_part_safe(repo) ||
+	    !ref_part_safe(tag)) {
+		fprintf(stderr, "error: unsafe image reference: %s\n", ref);
+		goto out;
+	}
 	store = zfs_image_path(registry, repo, tag);
 	if (store == NULL)
 		goto out;
 
-	/* Read the image manifest. */
+	/* Read the image manifest. Validate the digest first — it becomes a
+	 * blob path, so an unchecked "sha256:../.." would escape layoutdir. */
+	if (!digest_is_valid(json_object_get_string(mdigest))) {
+		fprintf(stderr, "error: invalid manifest digest in index\n");
+		goto out;
+	}
 	if (blob_path(layoutdir, json_object_get_string(mdigest), mpath,
 	    sizeof(mpath)) != 0)
 		goto out;
@@ -415,13 +489,31 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 		goto out;
 	}
 
-	/* Prepare the store rootfs. */
-	snprintf(rootfs, sizeof(rootfs), "%s/rootfs", store);
+	/*
+	 * Refuse to import into an existing store entry: unpacking on top of a
+	 * populated rootfs merges trees (whiteouts only remove names present in
+	 * the new layers), yielding a hybrid image reported as success. Require
+	 * an explicit `rmi` first. Only a store we create ourselves is rolled
+	 * back on failure below.
+	 */
+	if (stat(store, &st) == 0) {
+		fprintf(stderr, "error: image already present at %s (rmi first)\n",
+		    store);
+		goto out;
+	}
+
+	/* Prepare a fresh store rootfs (guard path truncation). */
+	if ((size_t)snprintf(rootfs, sizeof(rootfs), "%s/rootfs", store) >=
+	    sizeof(rootfs)) {
+		fprintf(stderr, "error: store path too long: %s/rootfs\n", store);
+		goto out;
+	}
 	if (load_mkdirp(rootfs, 0755) != 0) {
 		fprintf(stderr, "error: cannot create %s: %s\n", rootfs,
 		    strerror(errno));
 		goto out;
 	}
+	created_store = true;
 
 	/* Verify and unpack each layer in order. */
 	nlayers = json_object_array_length(layers);
@@ -433,8 +525,14 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 
 		layer = json_object_array_get_idx(layers, i);
 		if (layer == NULL ||
-		    !json_object_object_get_ex(layer, "digest", &ldigest))
-			continue;
+		    !json_object_object_get_ex(layer, "digest", &ldigest)) {
+			/* A layer with no digest cannot be fetched/verified;
+			 * dropping it would silently produce an incomplete
+			 * rootfs. Fail the whole import instead. */
+			fprintf(stderr, "error: manifest layer %d has no digest\n",
+			    i);
+			goto out;
+		}
 		ds = json_object_get_string(ldigest);
 		if (!digest_is_valid(ds)) {
 			fprintf(stderr, "error: invalid layer digest: %s\n",
@@ -461,9 +559,21 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 	/* Write the runtime config.json from the image config blob. */
 	cpath[0] = '\0';
 	if (json_object_object_get_ex(manifest, "config", &config) &&
-	    json_object_object_get_ex(config, "digest", &cdigest))
-		blob_path(layoutdir, json_object_get_string(cdigest), cpath,
-		    sizeof(cpath));
+	    json_object_object_get_ex(config, "digest", &cdigest)) {
+		const char *cds = json_object_get_string(cdigest);
+
+		/* Validate before it becomes a blob path, and treat a
+		 * truncated/overflowing path as fatal rather than reading the
+		 * wrong file or silently falling back to defaults. */
+		if (!digest_is_valid(cds)) {
+			fprintf(stderr, "error: invalid config digest\n");
+			goto out;
+		}
+		if (blob_path(layoutdir, cds, cpath, sizeof(cpath)) != 0) {
+			fprintf(stderr, "error: config blob path too long\n");
+			goto out;
+		}
+	}
 	if (write_runtime_config(store, cpath[0] ? cpath : NULL) != 0) {
 		fprintf(stderr, "error: cannot write config.json\n");
 		goto out;
@@ -476,6 +586,14 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 	ret = 0;
 
 out:
+	/*
+	 * Transactional import: if we created a fresh store and the import did
+	 * not complete, remove it so a partial/half-unpacked rootfs is never
+	 * left behind and mistaken for a valid image. A pre-existing store is
+	 * never touched (we refuse to import over one above).
+	 */
+	if (ret != 0 && created_store && store != NULL)
+		load_rm_rf(store);
 	if (made_tmp)
 		load_rm_rf(layoutdir);
 	if (index != NULL)
