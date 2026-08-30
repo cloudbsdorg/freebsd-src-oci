@@ -33,6 +33,7 @@ www:*:80:
 u2f:*:116:
 ntpd:*:123:
 _ypldap:*:160:
+ocifbsd:*:213:
 hast:*:845:
 tests:*:977:
 vmm:*:978:
