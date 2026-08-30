@@ -188,10 +188,15 @@ image_store_ready(const char *store)
 
 	if (store == NULL)
 		return (0);
-	snprintf(path, sizeof(path), "%s/config.json", store);
+	/* A truncated path would stat the wrong file; treat as not ready. */
+	if ((size_t)snprintf(path, sizeof(path), "%s/config.json", store) >=
+	    sizeof(path))
+		return (0);
 	if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
 		return (0);
-	snprintf(path, sizeof(path), "%s/rootfs", store);
+	if ((size_t)snprintf(path, sizeof(path), "%s/rootfs", store) >=
+	    sizeof(path))
+		return (0);
 	if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
 		return (0);
 	return (1);
@@ -343,7 +348,7 @@ cmd_create(int argc, char **argv)
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+n:i:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "n:i:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			name = optarg;
@@ -448,7 +453,7 @@ cmd_start(int argc, char **argv)
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "start <container-id>");
@@ -513,7 +518,7 @@ cmd_kill(int argc, char **argv)
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+s:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "s:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 's':
 			sig = parse_signal(optarg);
@@ -542,6 +547,21 @@ cmd_kill(int argc, char **argv)
 	}
 
 	id = argv[0];
+
+	/*
+	 * A positional signal (kill <id> TERM / kill <id> 9) is documented in
+	 * the usage and accepted alongside --signal. Parse it here; a second,
+	 * unrecognized operand is an error.
+	 */
+	if (argc >= 2) {
+		int psig = parse_signal(argv[1]);
+
+		if (psig <= 0) {
+			fprintf(stderr, "error: unknown signal: %s\n", argv[1]);
+			return (1);
+		}
+		sig = psig;
+	}
 
 	/* Get container */
 	c = container_get_by_id(id);
@@ -586,7 +606,7 @@ cmd_delete(int argc, char **argv)
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+fh", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "fh", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'f':
 			force = true;
@@ -658,7 +678,7 @@ cmd_state(int argc, char **argv)
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "state <container-id>");
@@ -710,7 +730,7 @@ cmd_list(int argc, char **argv)
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "list");
@@ -771,7 +791,7 @@ cmd_inspect(int argc, char **argv)
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "inspect <container-id>");
@@ -839,7 +859,7 @@ cmd_run(int argc, char **argv)
 	int ch;
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+n:i:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "n:i:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			name = optarg;
@@ -928,8 +948,14 @@ cmd_run(int argc, char **argv)
 
 	ret = container_start(c);
 	if (ret != 0) {
-		fprintf(stderr, "error: failed to start container: %s\n",
-		    strerror(errno));
+		/*
+		 * `run` is create+start; the start failed, so tear the created
+		 * container back down rather than leaving an orphaned container
+		 * on disk that a later run could collide with.
+		 */
+		fprintf(stderr, "error: failed to start container %s: %s\n",
+		    c->id, strerror(errno));
+		container_delete(c);
 		container_free(c);
 		return (1);
 	}
@@ -962,7 +988,7 @@ cmd_pull(int argc, char **argv)
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+nh", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "nh", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			dry_run = 1;
@@ -1084,10 +1110,33 @@ cmd_images(int argc, char **argv)
 		return (1);
 	}
 
+	int walk_err = 0;
+
+	errno = 0;
 	while ((ent = fts_read(fts)) != NULL) {
 		char cfg[PATH_MAX], rfs[PATH_MAX];
 		struct stat st;
 		const char *rel, *tag, *lastslash;
+
+		/*
+		 * A genuine read error mid-walk (FTS_ERR) must not look like a
+		 * complete listing, so flag it. But a missing store root or an
+		 * unreadable/cyclic subdir (FTS_NS/FTS_DNR/FTS_DC) is a
+		 * can't-see-this-part condition — a listing tolerates it like
+		 * ls(1): skip it without failing the whole command (this is also
+		 * the empty/missing-store case, which must exit 0).
+		 */
+		if (ent->fts_info == FTS_ERR) {
+			fprintf(stderr, "error: %s: %s\n", ent->fts_path,
+			    strerror(ent->fts_errno));
+			walk_err = 1;
+			continue;
+		}
+		if (ent->fts_info == FTS_DNR || ent->fts_info == FTS_DC) {
+			fprintf(stderr, "warning: %s: %s\n", ent->fts_path,
+			    strerror(ent->fts_errno));
+			continue;
+		}
 
 		if (ent->fts_info != FTS_D)
 			continue;
@@ -1121,9 +1170,15 @@ cmd_images(int argc, char **argv)
 
 		/* Don't descend into an image's own rootfs. */
 		fts_set(fts, ent, FTS_SKIP);
+		errno = 0;
+	}
+	if (errno != 0) {	/* fts_read() aborted the walk */
+		fprintf(stderr, "error: store walk failed: %s\n",
+		    strerror(errno));
+		walk_err = 1;
 	}
 	fts_close(fts);
-	return (0);
+	return (walk_err ? 1 : 0);
 }
 
 /*
@@ -1144,7 +1199,7 @@ cmd_rmi(int argc, char **argv)
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "rmi <reference>");
@@ -1274,16 +1329,24 @@ cmd_stop(int argc, char **argv)
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+t:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "t:h", longopts, NULL)) != -1) {
 		switch (ch) {
-		case 't':
-			timeout = atoi(optarg);
-			if (timeout <= 0) {
-				fprintf(stderr, "error: invalid timeout: %s\n",
-				    optarg);
+		case 't': {
+			char *end = NULL;
+			long v = strtol(optarg, &end, 10);
+
+			/* Reject junk and cap the value: container_stop converts
+			 * seconds to milliseconds in an int, so an unbounded
+			 * timeout would overflow and skip the graceful wait. */
+			if (end == optarg || *end != '\0' || v <= 0 ||
+			    v > 86400) {
+				fprintf(stderr, "error: invalid timeout: %s "
+				    "(1..86400 seconds)\n", optarg);
 				return (1);
 			}
+			timeout = (int)v;
 			break;
+		}
 		case 'h':
 			usage(argv[0],
 			    "stop [--timeout sec] <container-id>");
@@ -1343,7 +1406,7 @@ cmd_pause_resume(int argc, char **argv, bool do_pause)
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 		default:
@@ -1413,7 +1476,7 @@ cmd_push(int argc, char **argv)
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(argv[0], "push <reference>");
@@ -1486,7 +1549,7 @@ cmd_load(int argc, char **argv)
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+n:h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "n:h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			ref = optarg;

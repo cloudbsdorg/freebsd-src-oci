@@ -234,6 +234,22 @@ ref_part_safe(const char *s)
 	return (true);
 }
 
+/*
+ * True only if path is an existing *regular* file (via lstat, so a symlink is
+ * rejected, not followed). The index/blob files are opened by name with
+ * follow semantics (json_object_from_file, verify_layer, unpack_layer); for a
+ * directory-form layout an attacker could otherwise plant index.json or a blob
+ * as a symlink, FIFO, or device and make a root open hang, read host storage,
+ * or feed a host file into the digest check.
+ */
+static bool
+is_regular_file(const char *path)
+{
+	struct stat st;
+
+	return (lstat(path, &st) == 0 && S_ISREG(st.st_mode));
+}
+
 /* Build blobs/sha256/<hex> path from a "sha256:<hex>" digest. */
 static int
 blob_path(const char *layoutdir, const char *digest, char *out, size_t outlen)
@@ -475,8 +491,13 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 			goto out;
 	}
 
-	/* Read index.json. */
+	/* Read index.json (must be a plain file, not a symlink/FIFO/device). */
 	snprintf(idxpath, sizeof(idxpath), "%s/index.json", layoutdir);
+	if (!is_regular_file(idxpath)) {
+		fprintf(stderr, "error: %s has no regular index.json\n",
+		    archive_path);
+		goto out;
+	}
 	index = json_object_from_file(idxpath);
 	if (index == NULL ||
 	    !json_object_object_get_ex(index, "manifests", &manifests) ||
@@ -523,6 +544,17 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 	if (blob_path(layoutdir, json_object_get_string(mdigest), mpath,
 	    sizeof(mpath)) != 0)
 		goto out;
+	/* The manifest is content-addressed by the index digest; require a
+	 * regular file and verify its bytes before trusting its contents
+	 * (layers/config are verified below, but the manifest was not). */
+	if (!is_regular_file(mpath)) {
+		fprintf(stderr, "error: manifest blob is not a regular file\n");
+		goto out;
+	}
+	if (verify_layer(mpath, json_object_get_string(mdigest)) != 0) {
+		fprintf(stderr, "error: manifest digest mismatch\n");
+		goto out;
+	}
 	manifest = json_object_from_file(mpath);
 	if (manifest == NULL) {
 		fprintf(stderr, "error: cannot read manifest blob\n");
@@ -548,7 +580,11 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 		char parent[PATH_MAX];
 		char *slash;
 
-		strlcpy(parent, store, sizeof(parent));
+		/* Truncation here would mkdirp a stray, wrong prefix; fail. */
+		if (strlcpy(parent, store, sizeof(parent)) >= sizeof(parent)) {
+			fprintf(stderr, "error: store path too long: %s\n", store);
+			goto out;
+		}
 		slash = strrchr(parent, '/');
 		if (slash != NULL) {
 			*slash = '\0';
@@ -609,6 +645,13 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 		}
 		if (blob_path(layoutdir, ds, lpath, sizeof(lpath)) != 0)
 			goto out;
+		/* Require a regular file before hashing: a symlink to /dev/zero
+		 * or a FIFO would otherwise make verify_layer hang/OOM as root. */
+		if (!is_regular_file(lpath)) {
+			fprintf(stderr, "error: layer blob is not a regular file: "
+			    "%s\n", ds);
+			goto out;
+		}
 		if (verify_layer(lpath, ds) != 0) {
 			fprintf(stderr, "error: layer digest mismatch: %s\n",
 			    ds);
@@ -639,6 +682,10 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 		}
 		if (blob_path(layoutdir, cds, cpath, sizeof(cpath)) != 0) {
 			fprintf(stderr, "error: config blob path too long\n");
+			goto out;
+		}
+		if (!is_regular_file(cpath)) {
+			fprintf(stderr, "error: config blob is not a regular file\n");
 			goto out;
 		}
 		/* The config blob is content-addressed by its digest; verify it
