@@ -53,6 +53,7 @@
 #include "image/push.h"
 #include "image/load.h"
 #include "image/zfs_store.h"
+#include "network/netcfg.h"
 
 /* Global verbosity flag */
 static bool verbose = false;
@@ -97,6 +98,7 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "  load [--name ref] <archive|dir>   Import a local OCI image archive\n");
 		fprintf(stderr, "  images                            List local image store paths\n");
 		fprintf(stderr, "  rmi <reference>                   Remove a local image store\n");
+		fprintf(stderr, "  network <list|set> [args]         View/modify container network config\n");
 		fprintf(stderr, "\nRun '%s help <command>' for more information on a command.\n",
 		    prog);
 	} else {
@@ -1585,6 +1587,364 @@ cmd_load(int argc, char **argv)
 	return (0);
 }
 
+/*
+ * Build the path to a container's persisted network configuration:
+ * <DATA_DIR>/networks/<id>.json. Returns 0 on success.
+ */
+static int
+network_config_path(const char *id, char *buf, size_t len)
+{
+	const char *base;
+
+	base = getenv("OCIFBSD_DATA_DIR");
+	if (base == NULL || base[0] == '\0')
+		base = OCIFBSD_DATA_DIR;
+	if ((size_t)snprintf(buf, len, "%s/networks/%s.json", base, id) >= len) {
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
+	return (0);
+}
+
+/*
+ * Resolve an id-or-name argument to a container by scanning on-disk state
+ * (container_get_by_name only consults the in-memory registry, which is
+ * empty for a fresh CLI invocation). Matches an exact name, an exact id, or
+ * an unambiguous id prefix of at least 6 hex digits. The returned container
+ * is owned by the caller, which frees it with container_free().
+ */
+static struct ocifbsd_container *
+network_resolve(const char *ref)
+{
+	struct ocifbsd_container **list;
+	struct ocifbsd_container *match = NULL;
+	size_t reflen;
+	int n, i;
+
+	if (ref == NULL)
+		return (NULL);
+	list = state_list(&n);
+	if (list == NULL || n <= 0) {
+		free(list);
+		return (NULL);
+	}
+	reflen = strlen(ref);
+	for (i = 0; i < n; i++) {
+		struct ocifbsd_container *c = list[i];
+		bool hit = false;
+
+		if (c->name != NULL && strcmp(c->name, ref) == 0)
+			hit = true;
+		else if (c->id != NULL && (strcmp(c->id, ref) == 0 ||
+		    (reflen >= 6 && strncmp(c->id, ref, reflen) == 0)))
+			hit = true;
+
+		if (hit && match == NULL)
+			match = c;
+		else
+			container_free(c);
+	}
+	free(list);
+	return (match);
+}
+
+static void
+network_print_list(const char *label, char **arr, size_t n)
+{
+	size_t i;
+
+	printf("  %-10s ", label);
+	if (n == 0) {
+		printf("(none)\n");
+		return;
+	}
+	for (i = 0; i < n; i++)
+		printf("%s%s", arr[i], (i + 1 < n) ? ", " : "");
+	printf("\n");
+}
+
+/* Print one container's network configuration in human-readable form. */
+static void
+network_show(struct ocifbsd_container *c)
+{
+	char path[PATH_MAX];
+	struct netcfg nc;
+	char *json;
+	size_t jlen;
+
+	netcfg_init(&nc);
+	if (network_config_path(c->id, path, sizeof(path)) == 0) {
+		json = read_file(path, &jlen);
+		if (json != NULL) {
+			(void)netcfg_parse(json, &nc);
+			free(json);
+		}
+	}
+
+	printf("CONTAINER: %s (id %.12s)\n",
+	    c->name ? c->name : "(unnamed)", c->id);
+	printf("  %-10s %s\n", "vnet:",
+	    nc.vnet == 1 ? "enabled" : nc.vnet == 0 ? "disabled" : "(unset)");
+	network_print_list("ip4:", nc.ip4, nc.n_ip4);
+	network_print_list("ip6:", nc.ip6, nc.n_ip6);
+	printf("  %-10s %s\n", "gateway4:",
+	    nc.gateway4 ? nc.gateway4 : "(none)");
+	printf("  %-10s %s\n", "gateway6:",
+	    nc.gateway6 ? nc.gateway6 : "(none)");
+	network_print_list("dns:", nc.dns, nc.n_dns);
+	netcfg_free(&nc);
+}
+
+/*
+ * network list [<container>] — show one or all containers' network config.
+ * Requires view privilege (root or the admin group).
+ */
+static int
+cmd_network_list(int argc, char **argv)
+{
+	struct ocifbsd_container *c;
+
+	if (ocifbsd_require_access(OCIFBSD_OP_VIEW) != 0) {
+		fprintf(stderr, "error: permission denied: viewing container "
+		    "network configuration requires root or the %s group\n",
+		    OCIFBSD_ADMIN_GROUP);
+		return (1);
+	}
+
+	if (argc >= 1) {
+		c = network_resolve(argv[0]);
+		if (c == NULL) {
+			fprintf(stderr, "error: no such container: %s\n",
+			    argv[0]);
+			return (1);
+		}
+		network_show(c);
+		container_free(c);
+		return (0);
+	}
+
+	/* No argument: list every known container. */
+	{
+		struct ocifbsd_container **list;
+		int n, i;
+
+		list = state_list(&n);
+		if (list == NULL || n <= 0) {
+			free(list);
+			return (0);
+		}
+		for (i = 0; i < n; i++) {
+			network_show(list[i]);
+			if (i + 1 < n)
+				printf("\n");
+			container_free(list[i]);
+		}
+		free(list);
+	}
+	return (0);
+}
+
+/*
+ * network set <container> [options] — modify persisted network config.
+ * Requires modify privilege (root or the admin group).
+ */
+static int
+cmd_network_set(int argc, char **argv)
+{
+	struct ocifbsd_container *c;
+	struct netcfg nc;
+	char path[PATH_MAX], dir[PATH_MAX];
+	const char *base, *id;
+	char *json;
+	size_t jlen;
+	int ch, ret = 1;
+	bool changed = false;
+
+	enum {
+		OPT_VNET = 256, OPT_IP4, OPT_IP6, OPT_GW4, OPT_GW6, OPT_DNS,
+		OPT_CLEAR_IP4, OPT_CLEAR_IP6, OPT_CLEAR_DNS, OPT_CLEAR
+	};
+	static struct option longopts[] = {
+		{ "vnet",	required_argument,	NULL, OPT_VNET },
+		{ "ip4",	required_argument,	NULL, OPT_IP4 },
+		{ "ip6",	required_argument,	NULL, OPT_IP6 },
+		{ "gateway4",	required_argument,	NULL, OPT_GW4 },
+		{ "gateway6",	required_argument,	NULL, OPT_GW6 },
+		{ "dns",	required_argument,	NULL, OPT_DNS },
+		{ "clear-ip4",	no_argument,		NULL, OPT_CLEAR_IP4 },
+		{ "clear-ip6",	no_argument,		NULL, OPT_CLEAR_IP6 },
+		{ "clear-dns",	no_argument,		NULL, OPT_CLEAR_DNS },
+		{ "clear",	no_argument,		NULL, OPT_CLEAR },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	if (ocifbsd_require_access(OCIFBSD_OP_MODIFY) != 0) {
+		fprintf(stderr, "error: permission denied: modifying container "
+		    "network configuration requires root or the %s group\n",
+		    OCIFBSD_ADMIN_GROUP);
+		return (1);
+	}
+
+	if (argc < 1) {
+		usage("ocifbsd", "network set <container> [options]");
+		return (1);
+	}
+	c = network_resolve(argv[0]);
+	if (c == NULL) {
+		fprintf(stderr, "error: no such container: %s\n", argv[0]);
+		return (1);
+	}
+	id = c->id;
+
+	/* Load any existing config so options accumulate onto it. */
+	netcfg_init(&nc);
+	if (network_config_path(id, path, sizeof(path)) != 0) {
+		fprintf(stderr, "error: network config path too long\n");
+		container_free(c);
+		return (1);
+	}
+	json = read_file(path, &jlen);
+	if (json != NULL) {
+		(void)netcfg_parse(json, &nc);
+		free(json);
+	}
+
+	/* getopt consumes from argv[0]; keep the container name at argv[0]. */
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "+h", longopts, NULL)) != -1) {
+		int rc = 0;
+
+		switch (ch) {
+		case OPT_VNET:
+			if (strcasecmp(optarg, "on") == 0 ||
+			    strcasecmp(optarg, "true") == 0 ||
+			    strcmp(optarg, "1") == 0)
+				rc = netcfg_set_vnet(&nc, true);
+			else if (strcasecmp(optarg, "off") == 0 ||
+			    strcasecmp(optarg, "false") == 0 ||
+			    strcmp(optarg, "0") == 0)
+				rc = netcfg_set_vnet(&nc, false);
+			else {
+				fprintf(stderr, "error: --vnet expects "
+				    "on|off\n");
+				goto out;
+			}
+			break;
+		case OPT_IP4:
+			rc = netcfg_add_ip4(&nc, optarg);
+			break;
+		case OPT_IP6:
+			rc = netcfg_add_ip6(&nc, optarg);
+			break;
+		case OPT_GW4:
+			rc = netcfg_set_gateway4(&nc, optarg);
+			break;
+		case OPT_GW6:
+			rc = netcfg_set_gateway6(&nc, optarg);
+			break;
+		case OPT_DNS:
+			rc = netcfg_add_dns(&nc, optarg);
+			break;
+		case OPT_CLEAR_IP4:
+			netcfg_clear_ip4(&nc);
+			break;
+		case OPT_CLEAR_IP6:
+			netcfg_clear_ip6(&nc);
+			break;
+		case OPT_CLEAR_DNS:
+			netcfg_clear_dns(&nc);
+			break;
+		case OPT_CLEAR:
+			netcfg_clear_ip4(&nc);
+			netcfg_clear_ip6(&nc);
+			netcfg_clear_dns(&nc);
+			break;
+		case 'h':
+			usage(argv[0], "network set <container> "
+			    "[--vnet on|off] [--ip4 CIDR] [--ip6 CIDR] "
+			    "[--gateway4 ADDR] [--gateway6 ADDR] [--dns ADDR] "
+			    "[--clear|--clear-ip4|--clear-ip6|--clear-dns]");
+			ret = 0;
+			goto out;
+		default:
+			usage(argv[0], "network set");
+			goto out;
+		}
+		if (rc != 0) {
+			fprintf(stderr, "error: invalid value: %s\n",
+			    optarg ? optarg : "(none)");
+			goto out;
+		}
+		changed = true;
+	}
+
+	if (!changed) {
+		fprintf(stderr, "error: nothing to set (see 'network set -h')\n");
+		goto out;
+	}
+
+	/* Ensure the per-runtime networks directory exists and is private. */
+	base = getenv("OCIFBSD_DATA_DIR");
+	if (base == NULL || base[0] == '\0')
+		base = OCIFBSD_DATA_DIR;
+	if ((size_t)snprintf(dir, sizeof(dir), "%s/networks", base) >=
+	    sizeof(dir)) {
+		fprintf(stderr, "error: networks dir path too long\n");
+		goto out;
+	}
+	if (ensure_directory(dir, OCIFBSD_STATE_DIR_MODE) != 0) {
+		fprintf(stderr, "error: cannot create %s: %s\n", dir,
+		    strerror(errno));
+		goto out;
+	}
+	ocifbsd_secure_path(dir, OCIFBSD_STATE_DIR_MODE);
+
+	json = netcfg_to_json(&nc);
+	if (json == NULL) {
+		fprintf(stderr, "error: cannot serialize network config\n");
+		goto out;
+	}
+	if (write_file(path, json, strlen(json)) != 0) {
+		fprintf(stderr, "error: cannot write %s: %s\n", path,
+		    strerror(errno));
+		free(json);
+		goto out;
+	}
+	free(json);
+	ocifbsd_secure_path(path, OCIFBSD_STATE_FILE_MODE);
+
+	printf("updated network configuration for %s\n",
+	    c->name ? c->name : id);
+	network_show(c);
+	ret = 0;
+out:
+	netcfg_free(&nc);
+	container_free(c);
+	return (ret);
+}
+
+/*
+ * network — list and modify container network configuration.
+ */
+static int
+cmd_network(int argc, char **argv)
+{
+	if (argc < 2) {
+		fprintf(stderr,
+		    "usage: ocifbsd network <list|set> [args]\n");
+		return (1);
+	}
+	if (strcmp(argv[1], "list") == 0)
+		return (cmd_network_list(argc - 2, argv + 2));
+	if (strcmp(argv[1], "set") == 0)
+		return (cmd_network_set(argc - 2, argv + 2));
+	fprintf(stderr, "error: unknown network subcommand: %s\n", argv[1]);
+	fprintf(stderr, "usage: ocifbsd network <list|set> [args]\n");
+	return (1);
+}
+
 /* Command table */
 struct command {
 	const char *name;
@@ -1610,6 +1970,7 @@ static struct command commands[] = {
 	{ "load",	cmd_load,	"Import a local OCI image archive" },
 	{ "images",	cmd_images,	"List local image store" },
 	{ "rmi",	cmd_rmi,	"Remove a local image" },
+	{ "network",	cmd_network,	"List/modify container network config" },
 	{ NULL,		NULL,		NULL },
 };
 

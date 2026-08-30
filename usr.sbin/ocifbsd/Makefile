@@ -27,7 +27,8 @@ SRCS=	\
 	src/state.c \
 	src/hooks.c \
 	src/procutil.c \
-	src/utils.c
+	src/utils.c \
+	network/netcfg.c
 
 # procutil.c needs <sys/user.h> (struct kinfo_proc), which is incompatible
 # with the strict _POSIX_C_SOURCE feature-test macro applied tree-wide.

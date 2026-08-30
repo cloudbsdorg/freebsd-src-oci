@@ -3,7 +3,7 @@
 # Makefile for ocifbsd networking module
 #
 
-SRCS=		network.c bridge.c vnet.c cni.c
+SRCS=		network.c bridge.c vnet.c cni.c netcfg.c
 
 LIB=		ocifbsd_network
 SHLIB_NAME=	ocifbsd_network.so.1
@@ -14,6 +14,7 @@ MAN=		ocifbsd_network.3
 # paths, LDADD adds -ljson-c. Install on VM with:
 #   sudo pkg install json-c
 CFLAGS+=	-I/usr/local/include
+CFLAGS+=	-I/usr/local/include/json-c
 LDFLAGS+=	-L/usr/local/lib
 LDADD+=		-ljson-c
 

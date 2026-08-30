@@ -133,7 +133,53 @@ annotation.
 List top-level entries under the local image store
 .Pq Pa /var/lib/ocifbsd .
 An empty or missing store is not an error.
+.It Cm network Cm list Op Ar container
+Show the network configuration (VNET, IPv4/IPv6 addresses, gateways, and
+DNS servers) of one container, or of every container when no argument is
+given.
+Requires view privilege
+.Pq root or the Sy ocifbsd No group .
+.It Cm network Cm set Ar container Oo options Oc
+Modify a container's persisted network configuration.
+Options accumulate onto the existing configuration:
+.Bl -tag -width ".Fl Fl gateway4 Ar addr" -compact
+.It Fl Fl vnet Ar on Ns | Ns Ar off
+Enable or disable VNET (network stack isolation).
+.It Fl Fl ip4 Ar cidr , Fl Fl ip6 Ar cidr
+Add an IPv4 or IPv6 address in CIDR form
+.Pq Ar addr Ns / Ns Ar prefix ;
+may be repeated.
+.It Fl Fl gateway4 Ar addr , Fl Fl gateway6 Ar addr
+Set the default IPv4 or IPv6 gateway.
+.It Fl Fl dns Ar addr
+Add a DNS nameserver; may be repeated.
+.It Fl Fl clear , Fl Fl clear-ip4 , Fl Fl clear-ip6 , Fl Fl clear-dns
+Remove all, or a specific class of, address/DNS entries.
 .El
+Every value is validated before being stored; an invalid address is
+rejected and the configuration is left unchanged.
+The configuration is written to
+.Pa /var/lib/ocifbsd/networks/ Ns Ao Ar id Ac Ns Pa .json
+with mode 0640, group-owned by the
+.Sy ocifbsd
+group.
+Requires modify privilege
+.Pq root or the Sy ocifbsd No group .
+.El
+.Sh SECURITY
+Runtime state under
+.Pa /var/run/ocifbsd
+and generated
+.Pa config.json
+files are created mode 0750/0640 and group-owned by the
+.Sy ocifbsd
+administrative group when it exists, so that only root and members of
+that group can view or modify container configuration.
+When the group does not exist, access is restricted to root only.
+The
+.Cm network
+subcommands additionally enforce this policy in-process: viewing requires
+membership in that set, and modifying requires it as well.
 .Sh OPTIONS
 Global options (before the command):
 .Bl -tag -width ".Fl v"
