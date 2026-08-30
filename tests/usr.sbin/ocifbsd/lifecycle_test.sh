@@ -1,7 +1,7 @@
 #-
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# Copyright (c) 2026 CloudBSD
+# Copyright (c) 2026 REVYTECH, Inc.
 #
 # Integration test: create → start → state → kill → delete using a
 # minimal OCI bundle and a static /rescue binary as the jail rootfs.

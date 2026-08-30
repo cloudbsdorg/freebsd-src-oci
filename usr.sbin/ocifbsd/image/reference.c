@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2024 The FreeBSD Foundation
- * Copyright (c) 2026 CloudBSD
+ * Copyright (c) 2026 REVYTECH, Inc.
  *
  * Pure OCI/Docker reference parsing (no network).
  */

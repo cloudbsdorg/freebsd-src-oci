@@ -1,7 +1,7 @@
 #-
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# Copyright (c) 2026 CloudBSD
+# Copyright (c) 2026 REVYTECH, Inc.
 #
 # CLI smoke tests for the ocifbsd binary using atf_check.
 # Requires a built binary at ../../../usr.sbin/ocifbsd/ocifbsd

@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2026 CloudBSD
+ * Copyright (c) 2026 REVYTECH, Inc.
  *
  * Unit tests for usr.sbin/ocifbsd/src/hooks.c
  */

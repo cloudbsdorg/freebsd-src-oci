@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2026 CloudBSD
+ * Copyright (c) 2026 REVYTECH, Inc.
  *
  * Pure path helpers for the ocifbsd image store (no ZFS CLI).
  * Override base with OCIFBSD_DATA_DIR for non-root / test installs.

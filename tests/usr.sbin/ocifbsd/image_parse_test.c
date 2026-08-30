@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2026 CloudBSD
+ * Copyright (c) 2026 REVYTECH, Inc.
  *
  * Unit tests for pure/network-free image parse + digest helpers in
  * image/pull.c (manifest, config, verify_layer, compute_digest).
