@@ -46,6 +46,17 @@
 #define OCIFBSD_DATA_DIR	"/var/lib/ocifbsd"
 #define OCIFBSD_CONFIG_DIR	"/etc/ocifbsd"
 
+/*
+ * Administrative group. Members of this group (in addition to root) may
+ * view and modify container/runtime state via ocifbsd. If the group does
+ * not exist on the host, access is restricted to root only.
+ */
+#define OCIFBSD_ADMIN_GROUP	"ocifbsd"
+
+/* Directory/file modes for runtime state (root:ocifbsd, no world access). */
+#define OCIFBSD_STATE_DIR_MODE	0750
+#define OCIFBSD_STATE_FILE_MODE	0640
+
 /* Container ID length (SHA-256 hex = 64 chars + null) */
 #define OCIFBSD_MAX_CONTAINER_ID_LENGTH	65
 
@@ -232,6 +243,16 @@ void	ocifbsd_set_verbose(bool verbose);
 const char *ocifbsd_state_to_string(ocifbsd_state_t state);
 ocifbsd_state_t ocifbsd_reconcile_state(ocifbsd_state_t stored, bool jail_alive);
 const char *ocifbsd_strerror(int error);
+
+/* Access control: root or the admin group may view/modify runtime state. */
+enum ocifbsd_access_op {
+	OCIFBSD_OP_VIEW,
+	OCIFBSD_OP_MODIFY,
+};
+bool ocifbsd_access_allowed(uid_t euid, gid_t allowed_gid,
+	    const gid_t *groups, int ngroups);
+int ocifbsd_require_access(enum ocifbsd_access_op op);
+void ocifbsd_secure_path(const char *path, mode_t mode);
 
 /*
  * Container state type for orchestration compatibility

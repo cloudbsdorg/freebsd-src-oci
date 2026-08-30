@@ -9,6 +9,8 @@
 
 #include <sys/param.h>
 #include <sys/stat.h>
+
+#include <grp.h>
 #include <sys/wait.h>
 
 #include <archive.h>
@@ -322,6 +324,25 @@ emit_json_str_array(FILE *fp, struct json_object *arr, const char *fallback)
 }
 
 /*
+ * Restrict a config.json path to root and the ocifbsd admin group (mode 0640,
+ * group-owned by "ocifbsd" when that group exists). Best-effort: chmod/chown
+ * only take effect for a privileged writer, which is the only caller here.
+ * Kept local so the image module stays decoupled from the runtime headers.
+ */
+static void
+secure_config_path(const char *path)
+{
+	struct group *gr;
+
+	if (path == NULL)
+		return;
+	(void)chmod(path, 0640);
+	gr = getgrnam("ocifbsd");
+	if (gr != NULL)
+		(void)chown(path, (uid_t)-1, gr->gr_gid);
+}
+
+/*
  * Generate an OCI runtime config.json in storedir from the image config blob
  * (which carries Cmd/Entrypoint/Env/WorkingDir). Returns 0 on success.
  *
@@ -436,6 +457,15 @@ write_runtime_config(const char *storedir, const char *config_blob)
 			json_object_put(cfg);
 		return (-1);
 	}
+
+	/*
+	 * config.json carries the container's process and network configuration;
+	 * keep it out of reach of unprivileged users (root and the admin group
+	 * only), matching the runtime state files. Best-effort: chown to the
+	 * admin group only succeeds for a privileged writer, which is the only
+	 * caller that could have created the file in the first place.
+	 */
+	secure_config_path(path);
 
 	if (cfg != NULL)
 		json_object_put(cfg);

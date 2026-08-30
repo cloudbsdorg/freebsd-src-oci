@@ -199,6 +199,64 @@ ATF_TC_BODY(reconcile_nonrunning_unaffected, tc)
 	    OCIFBSD_STATE_STOPPED);
 }
 
+/* ----- ocifbsd_access_allowed ----- */
+
+ATF_TC(access_root_always_allowed);
+ATF_TC_HEAD(access_root_always_allowed, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "root (uid 0) is allowed regardless of group configuration");
+}
+ATF_TC_BODY(access_root_always_allowed, tc)
+{
+	gid_t groups[] = { 5, 7 };
+
+	ATF_CHECK(ocifbsd_access_allowed(0, 42, groups, 2));
+	/* Even with no admin group configured, root is allowed. */
+	ATF_CHECK(ocifbsd_access_allowed(0, (gid_t)-1, NULL, 0));
+}
+
+ATF_TC(access_group_member_allowed);
+ATF_TC_HEAD(access_group_member_allowed, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "a non-root member of the admin group is allowed");
+}
+ATF_TC_BODY(access_group_member_allowed, tc)
+{
+	gid_t groups[] = { 5, 42, 7 };
+
+	ATF_CHECK(ocifbsd_access_allowed(1000, 42, groups, 3));
+}
+
+ATF_TC(access_nonmember_denied);
+ATF_TC_HEAD(access_nonmember_denied, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "a non-root non-member is denied");
+}
+ATF_TC_BODY(access_nonmember_denied, tc)
+{
+	gid_t groups[] = { 5, 7 };
+
+	ATF_CHECK(!ocifbsd_access_allowed(1000, 42, groups, 2));
+}
+
+ATF_TC(access_no_group_configured_root_only);
+ATF_TC_HEAD(access_no_group_configured_root_only, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "with no admin group configured, only root is allowed");
+}
+ATF_TC_BODY(access_no_group_configured_root_only, tc)
+{
+	gid_t groups[] = { 5, 7 };
+
+	ATF_CHECK(!ocifbsd_access_allowed(1000, (gid_t)-1, groups, 2));
+	/* A NULL group list with a valid gid must not crash and is denied. */
+	ATF_CHECK(!ocifbsd_access_allowed(1000, 42, NULL, 0));
+}
+
 /* ----- ensure_directory / resolve_bundle_path ----- */
 
 ATF_TC(ensure_directory_create);
@@ -263,6 +321,10 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, reconcile_running_live_jail);
 	ATF_TP_ADD_TC(tp, reconcile_paused_dead_jail);
 	ATF_TP_ADD_TC(tp, reconcile_nonrunning_unaffected);
+	ATF_TP_ADD_TC(tp, access_root_always_allowed);
+	ATF_TP_ADD_TC(tp, access_group_member_allowed);
+	ATF_TP_ADD_TC(tp, access_nonmember_denied);
+	ATF_TP_ADD_TC(tp, access_no_group_configured_root_only);
 	ATF_TP_ADD_TC(tp, ensure_directory_create);
 	ATF_TP_ADD_TC(tp, resolve_bundle_absolute);
 	ATF_TP_ADD_TC(tp, resolve_bundle_null);

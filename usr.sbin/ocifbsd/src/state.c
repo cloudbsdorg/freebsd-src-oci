@@ -61,11 +61,17 @@ static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 int
 state_init(void)
 {
-	if (ensure_directory(state_dir, 0755) != 0) {
+	if (ensure_directory(state_dir, OCIFBSD_STATE_DIR_MODE) != 0) {
 		fprintf(stderr, "error: failed to create state directory: %s\n",
 		    strerror(errno));
 		return (-1);
 	}
+	/*
+	 * Enforce the restrictive mode/group even if the directory already
+	 * existed (e.g. created world-readable by an older build): container
+	 * state must not be readable or modifiable by unprivileged users.
+	 */
+	ocifbsd_secure_path(state_dir, OCIFBSD_STATE_DIR_MODE);
 
 	return (0);
 }
@@ -171,7 +177,8 @@ state_save(const struct ocifbsd_container *c)
 			return (-1);
 		}
 
-		fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC,
+		    OCIFBSD_STATE_FILE_MODE);
 		if (fd < 0) {
 			free(json_str);
 			return (-1);
@@ -192,6 +199,12 @@ state_save(const struct ocifbsd_container *c)
 			unlink(tmp);
 			return (-1);
 		}
+		/*
+		 * The umask can widen the create mode, and the file may carry
+		 * a stale mode after rename over an older world-readable file;
+		 * pin the restrictive mode/group on the final path.
+		 */
+		ocifbsd_secure_path(path, OCIFBSD_STATE_FILE_MODE);
 	}
 
 	return (0);

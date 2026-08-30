@@ -39,6 +39,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fts.h>
+#include <grp.h>
 #include <limits.h>
 #include <paths.h>
 #include <sha256.h>
@@ -367,6 +368,98 @@ ocifbsd_state_to_string(ocifbsd_state_t state)
 	default:
 		return "unknown";
 	}
+}
+
+/*
+ * Pure access-control decision: may a caller with effective uid `euid` and
+ * supplementary group set `groups` (of length `ngroups`) act on ocifbsd
+ * state, given the runtime's admin group id `allowed_gid`?
+ *
+ * The rule is deliberately narrow so that "only root or the admin group"
+ * is provably the whole set of principals:
+ *   - root (uid 0) is always allowed;
+ *   - otherwise the caller must be a member of the configured admin group;
+ *   - if no admin group is configured (allowed_gid == (gid_t)-1) or the
+ *     group list is empty, only root qualifies.
+ * No syscalls here so the policy is unit-testable in isolation; the
+ * process's real credentials are gathered by ocifbsd_require_access().
+ */
+bool
+ocifbsd_access_allowed(uid_t euid, gid_t allowed_gid, const gid_t *groups,
+    int ngroups)
+{
+	int i;
+
+	if (euid == 0)
+		return (true);
+	if (allowed_gid == (gid_t)-1 || groups == NULL)
+		return (false);
+	for (i = 0; i < ngroups; i++) {
+		if (groups[i] == allowed_gid)
+			return (true);
+	}
+	return (false);
+}
+
+/*
+ * Resolve the configured admin group to a gid, or (gid_t)-1 if the group
+ * does not exist on this host (in which case access is root-only).
+ */
+static gid_t
+ocifbsd_admin_gid(void)
+{
+	struct group *gr;
+
+	gr = getgrnam(OCIFBSD_ADMIN_GROUP);
+	return (gr != NULL ? gr->gr_gid : (gid_t)-1);
+}
+
+/*
+ * Enforce the access policy against the calling process's real credentials.
+ * Returns 0 if permitted, or -1 with errno set to EPERM if denied. Both the
+ * view and modify operations are currently gated on the same admin group;
+ * the operation argument lets that policy diverge later without touching
+ * callers.
+ */
+int
+ocifbsd_require_access(enum ocifbsd_access_op op)
+{
+	gid_t groups[NGROUPS_MAX];
+	uid_t euid;
+	gid_t admin;
+	int ng;
+
+	(void)op;
+	euid = geteuid();
+	admin = ocifbsd_admin_gid();
+	ng = getgroups(NGROUPS_MAX, groups);
+	if (ng < 0)
+		ng = 0;
+	if (ocifbsd_access_allowed(euid, admin, groups, ng))
+		return (0);
+	errno = EPERM;
+	return (-1);
+}
+
+/*
+ * Restrict a state/config path so that only root and the admin group may
+ * reach it: set the requested mode and, when the admin group exists, set the
+ * path's group owner to it (leaving the user owner unchanged). Both steps
+ * are best-effort — a non-privileged caller cannot chown, and that is fine
+ * because such a caller could not have created the file either; the point is
+ * that the privileged writer leaves world-inaccessible artifacts behind.
+ */
+void
+ocifbsd_secure_path(const char *path, mode_t mode)
+{
+	gid_t admin;
+
+	if (path == NULL)
+		return;
+	(void)chmod(path, mode);
+	admin = ocifbsd_admin_gid();
+	if (admin != (gid_t)-1)
+		(void)chown(path, (uid_t)-1, admin);
 }
 
 /*
