@@ -50,12 +50,13 @@ check "ocifbsd --version succeeds" '"$OCI" --version >/dev/null 2>&1'
 # enough to exec into; restore on exit no matter how we leave.
 CFG="$IMGDIR/config.json"
 cp "$CFG" "/tmp/e2e-cfg-backup.$$"
-python3 - "$CFG" <<'PY'
-import json,sys
-d=json.load(open(sys.argv[1]))
-d["process"]["args"]=["/bin/sh","-c","while true; do sleep 3600; done"]
-json.dump(d,open(sys.argv[1],"w"),indent=4)
-PY
+# Rewrite the image's process args to a long-lived init so containers stay up
+# long enough to exec into. Portable (sed, no python) so this runs on a base
+# FreeBSD install; it replaces whatever single "args" array `ocifbsd load`
+# produced with a sleep loop.
+sed -i '' -E \
+    's#("args": )\[[^]]*\]#\1[ "/bin/sh", "-c", "while true; do sleep 3600; done" ]#' \
+    "$CFG"
 
 cleanup() {
 	[ -n "${CID:-}" ] && "$OCI" delete --force "$CID" >/dev/null 2>&1
