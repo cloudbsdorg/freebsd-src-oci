@@ -4,7 +4,44 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-08-28 — runtime verified end-to-end with real images
+> **Last updated**: 2026-08-30 — Grok-assisted audit loop on the new code
+
+## 🔁 **2026-08-30 — Grok-4.6 audit loop (grok-analyze skill)**
+
+Ran the new `grok-analyze` skill (local `grok`/FreeGrok CLI driving grok-4.6
+as an independent auditor) over this session's new/changed code, verifying
+each finding against the source before fixing. It surfaced real defects the
+earlier reviews and the build had missed, especially in the new `image/load.c`
+and the `ocifbsd.c` CLI:
+
+- **load.c**: outer-archive extraction now sets libarchive secure flags and
+  is restricted to regular files + directories (no symlink/hardlink/device/
+  FIFO — closes a root arbitrary-overwrite and a follow-into-host-device);
+  the untrusted `ref.name` annotation and the index/config/manifest digests
+  are validated and content-verified before becoming root-written paths;
+  import is transactional (atomic exclusive `mkdir`, rollback on failure);
+  index/blobs must be regular files (lstat) before opening.
+- **ocifbsd.c**: `ref_component_is_safe` rejects empty/"."/".."` (so `rmi
+  alpine:.` no longer rm_rf's the whole repo); subcommand flags after the
+  positional now work (`delete <id> --force`, `kill <id> 9`, …); `stop
+  --timeout` bounded; `rm_rf`/`images`/`list` error handling tightened.
+
+**Known design-level limitations (not yet addressed — need a design choice):**
+
+1. **No per-container rootfs.** `create/run --image` uses the shared image
+   store directory directly as the container's OCI bundle, so multiple
+   containers from one image share and mutate the same rootfs, and `rmi`
+   while a container is running would remove that container's rootfs. The
+   correct fix is a per-container copy or a ZFS snapshot/clone of the image
+   rootfs (the zfs_store layer has clone helpers to wire up), plus refusing
+   `rmi` of an in-use image.
+2. **Deep symlink TOCTOU in rm_rf / load_mkdirp.** Both build paths and act
+   on them, so a component swapped to a symlink mid-operation could be
+   followed. Low risk while the store lives under a root-owned
+   /var/lib/ocifbsd, but the robust fix is an `openat`/`unlinkat`/`mkdirat`
+   walk with `O_NOFOLLOW` from a base dirfd.
+
+## 🚀 **2026-08-28 — Verified running real FreeBSD OCI images end-to-end**
 
 ## 🚀 **2026-08-28 — Verified running real FreeBSD OCI images end-to-end**
 
