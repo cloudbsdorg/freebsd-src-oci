@@ -296,7 +296,12 @@ list_empty_ok_body()
 	if [ ! -x "${bin}" ]; then
 		atf_skip "ocifbsd binary not built at ${bin}"
 	fi
-	atf_check -s exit:0 -o ignore -e ignore "${bin}" list
+	# Run against a private, test-owned state directory. The real
+	# /var/run/ocifbsd is intentionally root:ocifbsd 0750 and is not
+	# readable by an unprivileged test user; OCIFBSD_STATE_DIR redirects
+	# it so this smoke test exercises argument handling in isolation.
+	atf_check -s exit:0 -o ignore -e ignore \
+	    env OCIFBSD_STATE_DIR="${PWD}/state" "${bin}" list
 }
 
 atf_test_case images_respects_data_dir

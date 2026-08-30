@@ -19,8 +19,11 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <netinet/in.h>
+
 #include "ocifbsd.h"
 #include "src/oci2jail.c"
+#include "network/netcfg.c"
 
 static void
 write_config(const char *path, const char *json)
@@ -475,6 +478,188 @@ ATF_TC_BODY(default_hostname_null_fallback_safe, tc)
 	oci_free_spec(spec);
 }
 
+/* Scan generated jail params for a named parameter. */
+static int
+jailparams_have(struct jailparam *params, size_t n, const char *name)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++)
+		if (params[i].jp_name != NULL &&
+		    strcmp(params[i].jp_name, name) == 0)
+			return (1);
+	return (0);
+}
+
+ATF_TC(netcfg_overlay_ips_non_vnet);
+ATF_TC_HEAD(netcfg_overlay_ips_non_vnet, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "a non-VNET netcfg overlay puts ip4/ip6 into the jail parameters");
+}
+ATF_TC_BODY(netcfg_overlay_ips_non_vnet, tc)
+{
+	struct oci_runtime_spec *spec;
+	struct netcfg nc;
+	struct jailparam *params;
+	size_t nparams;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_REQUIRE(spec->freebsd == NULL);
+
+	netcfg_init(&nc);
+	ATF_REQUIRE_EQ(netcfg_set_vnet(&nc, false), 0);
+	ATF_REQUIRE_EQ(netcfg_add_ip4(&nc, "10.0.0.9/24"), 0);
+	ATF_REQUIRE_EQ(netcfg_add_ip6(&nc, "2001:db8::9/64"), 0);
+
+	netcfg_apply_to_spec(&nc, spec);
+	ATF_REQUIRE(spec->freebsd != NULL);
+	ATF_CHECK(!spec->freebsd->vnet);
+	ATF_REQUIRE_EQ(spec->freebsd->n_ip4, 1);
+	ATF_CHECK_STREQ(spec->freebsd->ip4[0], "10.0.0.9/24");
+
+	params = oci_spec_to_jail_params(spec, &nparams);
+	ATF_REQUIRE(params != NULL);
+	ATF_CHECK(jailparams_have(params, nparams, "ip4.addr"));
+	ATF_CHECK(jailparams_have(params, nparams, "ip6.addr"));
+	ATF_CHECK(!jailparams_have(params, nparams, "vnet"));
+
+	jailparam_free(params, nparams);
+	netcfg_free(&nc);
+	oci_free_spec(spec);
+}
+
+ATF_TC(netcfg_overlay_multiple_ips_single_param);
+ATF_TC_HEAD(netcfg_overlay_multiple_ips_single_param, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "multiple IPv4 addresses become a single ip4.addr array parameter, "
+	    "not repeated parameters (which the kernel would collapse to one)");
+}
+ATF_TC_BODY(netcfg_overlay_multiple_ips_single_param, tc)
+{
+	struct oci_runtime_spec *spec;
+	struct netcfg nc;
+	struct jailparam *params;
+	size_t nparams, i, count = 0, valuelen = 0;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+
+	netcfg_init(&nc);
+	ATF_REQUIRE_EQ(netcfg_set_vnet(&nc, false), 0);
+	ATF_REQUIRE_EQ(netcfg_add_ip4(&nc, "10.0.0.9/24"), 0);
+	ATF_REQUIRE_EQ(netcfg_add_ip4(&nc, "10.0.0.10/24"), 0);
+	netcfg_apply_to_spec(&nc, spec);
+
+	params = oci_spec_to_jail_params(spec, &nparams);
+	ATF_REQUIRE(params != NULL);
+	for (i = 0; i < nparams; i++) {
+		if (params[i].jp_name != NULL &&
+		    strcmp(params[i].jp_name, "ip4.addr") == 0) {
+			count++;
+			valuelen = params[i].jp_valuelen;
+		}
+	}
+	/* Exactly one ip4.addr parameter holding both packed addresses. */
+	ATF_CHECK_EQ(count, (size_t)1);
+	ATF_CHECK_EQ(valuelen, 2 * sizeof(struct in_addr));
+
+	jailparam_free(params, nparams);
+	netcfg_free(&nc);
+	oci_free_spec(spec);
+}
+
+ATF_TC(netcfg_overlay_vnet_omits_ip_params);
+ATF_TC_HEAD(netcfg_overlay_vnet_omits_ip_params, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "a VNET jail gets the vnet param and no ip4.addr/ip6.addr (which "
+	    "would be invalid for a VNET jail)");
+}
+ATF_TC_BODY(netcfg_overlay_vnet_omits_ip_params, tc)
+{
+	struct oci_runtime_spec *spec;
+	struct netcfg nc;
+	struct jailparam *params;
+	size_t nparams;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+
+	netcfg_init(&nc);
+	ATF_REQUIRE_EQ(netcfg_set_vnet(&nc, true), 0);
+	ATF_REQUIRE_EQ(netcfg_add_ip4(&nc, "10.0.0.9/24"), 0);
+	netcfg_apply_to_spec(&nc, spec);
+	ATF_REQUIRE(spec->freebsd != NULL);
+	ATF_CHECK(spec->freebsd->vnet);
+
+	params = oci_spec_to_jail_params(spec, &nparams);
+	ATF_REQUIRE(params != NULL);
+	ATF_CHECK(jailparams_have(params, nparams, "vnet"));
+	ATF_CHECK(!jailparams_have(params, nparams, "ip4.addr"));
+
+	jailparam_free(params, nparams);
+	netcfg_free(&nc);
+	oci_free_spec(spec);
+}
+
+ATF_TC(netcfg_overlay_preserves_explicit);
+ATF_TC_HEAD(netcfg_overlay_preserves_explicit, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "an unset netcfg field leaves the corresponding spec field alone");
+}
+ATF_TC_BODY(netcfg_overlay_preserves_explicit, tc)
+{
+	struct oci_runtime_spec *spec;
+	struct netcfg nc;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" },\n"
+	    "  \"freebsd\": { \"vnet\": true, \"ip4\": [ \"192.0.2.1/24\" ] }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_REQUIRE(spec->freebsd != NULL);
+
+	/* netcfg only sets DNS; vnet and ip4 must be preserved. */
+	netcfg_init(&nc);
+	ATF_REQUIRE_EQ(netcfg_add_dns(&nc, "9.9.9.9"), 0);
+	netcfg_apply_to_spec(&nc, spec);
+
+	ATF_CHECK(spec->freebsd->vnet);
+	ATF_REQUIRE_EQ(spec->freebsd->n_ip4, 1);
+	ATF_CHECK_STREQ(spec->freebsd->ip4[0], "192.0.2.1/24");
+	ATF_REQUIRE_EQ(spec->freebsd->n_dns, 1);
+	ATF_CHECK_STREQ(spec->freebsd->dns[0], "9.9.9.9");
+
+	netcfg_free(&nc);
+	oci_free_spec(spec);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, parse_minimal);
@@ -493,5 +678,9 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, default_hostname_sets_when_absent);
 	ATF_TP_ADD_TC(tp, default_hostname_keeps_explicit);
 	ATF_TP_ADD_TC(tp, default_hostname_null_fallback_safe);
+	ATF_TP_ADD_TC(tp, netcfg_overlay_ips_non_vnet);
+	ATF_TP_ADD_TC(tp, netcfg_overlay_multiple_ips_single_param);
+	ATF_TP_ADD_TC(tp, netcfg_overlay_vnet_omits_ip_params);
+	ATF_TP_ADD_TC(tp, netcfg_overlay_preserves_explicit);
 	return (atf_no_error());
 }

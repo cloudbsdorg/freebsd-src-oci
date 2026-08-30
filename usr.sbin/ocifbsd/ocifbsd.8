@@ -232,8 +232,21 @@ ocifbsd run --name web /path/to/bundle
 Runtime state directory (per-container JSON)
 .It Pa /var/lib/ocifbsd/
 Image and volume data directory (future image store)
+.It Pa /var/lib/ocifbsd/networks/
+Per-container network configuration
+.Pq Cm network set
 .It Pa /etc/ocifbsd/
 Configuration directory (reserved)
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width ".Ev OCIFBSD_STATE_DIR"
+.It Ev OCIFBSD_DATA_DIR
+Override the image and volume data directory
+.Pq default Pa /var/lib/ocifbsd .
+.It Ev OCIFBSD_STATE_DIR
+Override the runtime state directory
+.Pq default Pa /var/run/ocifbsd ,
+useful for tests or an unprivileged, self-contained instance.
 .El
 .Sh SEE ALSO
 .Xr jail 8 ,

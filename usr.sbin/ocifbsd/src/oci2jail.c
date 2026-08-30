@@ -50,7 +50,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <netinet/in.h>
+
 #include "ocifbsd.h"
+#include "network/netcfg.h"
 
 /*
  * JSON parsing helpers
@@ -695,6 +698,186 @@ oci_spec_default_hostname(struct oci_runtime_spec *spec, const char *fallback)
 }
 
 /*
+ * Duplicate a NUL-terminated-on-count string array into a fresh, NULL-
+ * terminated array of exactly n+1 entries. Returns NULL on allocation
+ * failure (partial allocations are rolled back).
+ */
+/*
+ * Copy the address portion of an "addr" or "addr/prefix" string into buf,
+ * dropping any CIDR prefix. buf is always NUL-terminated.
+ */
+static void
+addr_without_prefix(const char *cidr, char *buf, size_t buflen)
+{
+	const char *slash;
+	size_t n;
+
+	if (buflen == 0)
+		return;
+	slash = strchr(cidr, '/');
+	n = (slash != NULL) ? (size_t)(slash - cidr) : strlen(cidr);
+	if (n >= buflen)
+		n = buflen - 1;
+	memcpy(buf, cidr, n);
+	buf[n] = '\0';
+}
+
+/*
+ * Join the prefix-stripped addresses of a NULL-terminated CIDR array into a
+ * single comma-separated string, the form the ip4.addr/ip6.addr jail
+ * parameters expect for multiple addresses (they are array parameters, so
+ * passing the option name more than once keeps only the last value). Returns
+ * a malloc'd string the caller frees, or NULL if there are no addresses.
+ */
+static char *
+join_addrs_no_prefix(char **arr, int n)
+{
+	char *out;
+	size_t cap;
+	int i, count = 0;
+
+	for (i = 0; i < n && arr[i] != NULL; i++)
+		count++;
+	if (count == 0)
+		return (NULL);
+	/* Worst case: every entry is a full address plus a comma. */
+	cap = (size_t)count * (INET6_ADDRSTRLEN + 1) + 1;
+	out = malloc(cap);
+	if (out == NULL)
+		return (NULL);
+	out[0] = '\0';
+	for (i = 0; i < count; i++) {
+		char a[INET6_ADDRSTRLEN];
+
+		if (i > 0)
+			strlcat(out, ",", cap);
+		addr_without_prefix(arr[i], a, sizeof(a));
+		strlcat(out, a, cap);
+	}
+	return (out);
+}
+
+/*
+ * Append a jail parameter whose value is a heap string the caller hands off:
+ * the value is freed on every path (success or failure). On failure the whole
+ * parameter array is freed and *pp is set to NULL, mirroring ADD_PARAM's
+ * fail-closed contract; the caller returns NULL. Used for values built on the
+ * heap (comma-joined address lists) that ADD_PARAM's early return would leak.
+ */
+static int
+add_param_free_value(struct jailparam **pp, size_t *np, size_t *capp,
+    const char *name, char *value)
+{
+	struct jailparam *params = *pp;
+	size_t n = *np, capacity = *capp;
+
+	if (n >= capacity) {
+		struct jailparam *tmp =
+		    realloc(params, capacity * 2 * sizeof(*params));
+
+		if (tmp == NULL)
+			goto fail;
+		params = tmp;
+		capacity *= 2;
+	}
+	if (jailparam_init(&params[n], name) != 0)
+		goto fail;
+	if (jailparam_import(&params[n], value) != 0) {
+		jailparam_free(&params[n], 1);
+		goto fail;
+	}
+	n++;
+	free(value);
+	*pp = params;
+	*np = n;
+	*capp = capacity;
+	return (0);
+fail:
+	free(value);
+	jailparam_free(params, n);
+	free(params);
+	*pp = NULL;
+	return (-1);
+}
+
+static char **
+dup_str_array(char **src, size_t n)
+{
+	char **dst;
+	size_t i;
+
+	dst = calloc(n + 1, sizeof(*dst));
+	if (dst == NULL)
+		return (NULL);
+	for (i = 0; i < n; i++) {
+		dst[i] = strdup(src[i]);
+		if (dst[i] == NULL) {
+			while (i > 0)
+				free(dst[--i]);
+			free(dst);
+			return (NULL);
+		}
+	}
+	return (dst);
+}
+
+static void
+free_str_array_z(char **arr)
+{
+	size_t i;
+
+	if (arr == NULL)
+		return;
+	for (i = 0; arr[i] != NULL; i++)
+		free(arr[i]);
+	free(arr);
+}
+
+/*
+ * Overlay a persisted per-container network configuration onto an OCI spec
+ * before its jail parameters are built, so that `ocifbsd network set` takes
+ * effect the next time the container's jail is created. Only fields the
+ * configuration actually sets are applied; each replaces (rather than
+ * appends to) the corresponding spec field so the stored configuration is
+ * authoritative. Gateways and DNS are recorded in the configuration for the
+ * network-setup path but are not jail parameters, so they are not copied
+ * here. On any allocation failure the spec is left unchanged for that field.
+ */
+void
+netcfg_apply_to_spec(const struct netcfg *nc, struct oci_runtime_spec *spec)
+{
+	struct oci_freebsd *fb;
+	char **tmp;
+
+	if (nc == NULL || spec == NULL)
+		return;
+	if (spec->freebsd == NULL) {
+		spec->freebsd = calloc(1, sizeof(*spec->freebsd));
+		if (spec->freebsd == NULL)
+			return;
+	}
+	fb = spec->freebsd;
+
+	if (nc->vnet != -1)
+		fb->vnet = (nc->vnet == 1);
+	if (nc->n_ip4 > 0 && (tmp = dup_str_array(nc->ip4, nc->n_ip4)) != NULL) {
+		free_str_array_z(fb->ip4);
+		fb->ip4 = tmp;
+		fb->n_ip4 = (int)nc->n_ip4;
+	}
+	if (nc->n_ip6 > 0 && (tmp = dup_str_array(nc->ip6, nc->n_ip6)) != NULL) {
+		free_str_array_z(fb->ip6);
+		fb->ip6 = tmp;
+		fb->n_ip6 = (int)nc->n_ip6;
+	}
+	if (nc->n_dns > 0 && (tmp = dup_str_array(nc->dns, nc->n_dns)) != NULL) {
+		free_str_array_z(fb->dns);
+		fb->dns = tmp;
+		fb->n_dns = (int)nc->n_dns;
+	}
+}
+
+/*
  * Translate OCI Runtime Spec to FreeBSD jail parameters
  */
 struct jailparam *
@@ -713,23 +896,60 @@ oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
 		return (NULL);
 	n = 0;
 
+/*
+ * jailparam_import (not _raw) converts the string value according to the
+ * parameter's kernel type. This matters for typed parameters such as vnet,
+ * which is a "jailsys" enum whose keyword ("new"/"inherit"/"disable") must be
+ * mapped to an integer — passing the literal bytes via jailparam_import_raw
+ * makes jail_set(2) reject it with EINVAL. String parameters (path, hostname,
+ * name, ...) import as a plain copy, so this is correct for every parameter.
+ */
+/*
+ * Fail closed: any allocation, init, or import failure frees everything built
+ * so far and returns NULL, so oci_spec_to_jail_params never yields a partial
+ * parameter list (which could, e.g., drop "path" while keeping "persist" and
+ * create a persistent jail rooted at /). Values reaching here are already
+ * validated (netcfg CIDRs, the vnet keyword, etc.), so a failure is a genuine
+ * resource error, not a bad value to skip over.
+ */
 #define ADD_PARAM(name, value) do {						\
 	if (n >= capacity) {							\
-		capacity *= 2;							\
-		params = realloc(params, capacity * sizeof(*params));		\
-		if (params == NULL)						\
+		struct jailparam *_np;						\
+		_np = realloc(params, capacity * 2 * sizeof(*params));		\
+		if (_np == NULL) {						\
+			jailparam_free(params, n);				\
+			free(params);						\
 			return (NULL);						\
+		}								\
+		params = _np;							\
+		capacity *= 2;							\
 	}									\
-	jailparam_init(&params[n], name);					\
-	jailparam_import_raw(&params[n], (void *)(uintptr_t)value,		\
-	    strlen(value) + 1);						\
+	if (jailparam_init(&params[n], name) != 0) {				\
+		jailparam_free(params, n);					\
+		free(params);							\
+		return (NULL);							\
+	}									\
+	if (jailparam_import(&params[n], value) != 0) {				\
+		jailparam_free(params, n + 1);				\
+		free(params);							\
+		return (NULL);							\
+	}									\
 	n++;									\
 } while (0)
 
-	/* Root filesystem - required */
-	if (spec->root.path) {
-		ADD_PARAM("path", spec->root.path);
+	/*
+	 * Root filesystem — required. Refuse to build a parameter set with no
+	 * path: the kernel would default a pathless jail to "/", so emitting
+	 * persist/name without a path would leave a persistent jail rooted at
+	 * the host filesystem. Fail closed instead.
+	 */
+	if (spec->root.path == NULL || spec->root.path[0] == '\0') {
+		jailparam_free(params, n);
+		free(params);
+		errno = EINVAL;
+		return (NULL);
 	}
+	ADD_PARAM("path", spec->root.path);
 
 	/* Hostname */
 	if (spec->hostname) {
@@ -750,15 +970,32 @@ oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
 		ADD_PARAM("vnet", "new");
 	}
 
-	/* IP addresses */
-	if (spec->freebsd) {
-		int i;
-		for (i = 0; i < spec->freebsd->n_ip4 && spec->freebsd->ip4[i]; i++) {
-			ADD_PARAM("ip4.addr", spec->freebsd->ip4[i]);
-		}
-		for (i = 0; i < spec->freebsd->n_ip6 && spec->freebsd->ip6[i]; i++) {
-			ADD_PARAM("ip6.addr", spec->freebsd->ip6[i]);
-		}
+	/*
+	 * IP addresses as jail parameters apply only to non-VNET jails, which
+	 * share the host network stack and are restricted to these addresses.
+	 * A VNET jail has its own stack and configures addresses on its own
+	 * interfaces (epair), so ip4.addr/ip6.addr are invalid there and would
+	 * make jail creation fail with EINVAL.
+	 */
+	if (spec->freebsd && !spec->freebsd->vnet) {
+		char *joined;
+
+		/*
+		 * ip4.addr/ip6.addr are array parameters: all addresses go in a
+		 * single comma-separated value (a repeated option name would
+		 * keep only the last). Each address is emitted without its CIDR
+		 * prefix, which is jail(8) syntax that libjail's parser rejects.
+		 */
+		joined = join_addrs_no_prefix(spec->freebsd->ip4,
+		    spec->freebsd->n_ip4);
+		if (joined != NULL && add_param_free_value(&params, &n,
+		    &capacity, "ip4.addr", joined) != 0)
+			return (NULL);
+		joined = join_addrs_no_prefix(spec->freebsd->ip6,
+		    spec->freebsd->n_ip6);
+		if (joined != NULL && add_param_free_value(&params, &n,
+		    &capacity, "ip6.addr", joined) != 0)
+			return (NULL);
 	}
 
 	/* MAC label */

@@ -40,6 +40,17 @@ and the `ocifbsd.c` CLI:
    followed. Low risk while the store lives under a root-owned
    /var/lib/ocifbsd, but the robust fix is an `openat`/`unlinkat`/`mkdirat`
    walk with `O_NOFOLLOW` from a base dirfd.
+3. **No cross-invocation locking of container state.** Lifecycle operations
+   serialize only with an in-process pthread mutex, so two concurrent CLI
+   invocations on the same container (e.g. `start` racing `network set`, whose
+   jail rebuild removes and recreates the jail) are not mutually excluded.
+   `container_start` and `container_reconfigure_network` mitigate the worst
+   outcome — attaching or removing a jail whose jid was reused — by resolving
+   the jail by its `ocifbsd-<id>` name via `jail_getid` and refusing on a
+   mismatch, but a narrow get-then-act window remains (the same window
+   `jail(8) -r` has, since there is no atomic remove-by-name syscall). The
+   robust fix is an exclusive `flock`/`lockf` on the per-container state file
+   held across the read-check-act sequence in every lifecycle op.
 
 ## 🚀 **2026-08-28 — Verified running real FreeBSD OCI images end-to-end**
 

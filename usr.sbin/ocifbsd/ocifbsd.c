@@ -1917,6 +1917,23 @@ cmd_network_set(int argc, char **argv)
 
 	printf("updated network configuration for %s\n",
 	    c->name ? c->name : id);
+
+	/*
+	 * Apply immediately when it is safe to do so. A created-but-not-started
+	 * container has an empty jail we can rebuild in place; a running or
+	 * paused container is left untouched (its processes must not be
+	 * disrupted) and the change takes effect on its next start.
+	 */
+	if (container_reconfigure_network(c) == 0) {
+		printf("applied to jail (container is not running)\n");
+	} else if (errno == EBUSY) {
+		printf("stored; restart the container to apply "
+		    "(it is currently running)\n");
+	} else {
+		fprintf(stderr, "warning: could not apply to jail now: %s\n",
+		    strerror(errno));
+	}
+
 	network_show(c);
 	ret = 0;
 out:

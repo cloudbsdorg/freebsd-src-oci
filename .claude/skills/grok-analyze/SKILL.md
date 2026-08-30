@@ -58,12 +58,35 @@ are fast and private but fallible: treat every finding as a *lead*, not a fact.
    target set yields no *verified* new issues for **two consecutive rounds**
    (one clean round can be luck; two is convergence). Log what you dropped and
    why so a silent miss is visible.
-6. **Report** the net result: what was confirmed and fixed, what grok raised
-   that you rejected (and why), and the final build/test state.
+6. **End-to-end verify.** Before reporting or committing a change that touches
+   runtime behavior, run the full end-to-end suite on a live host and require it
+   fully green — unit/integration tests plus the e2e script (see below).
+7. **Report** the net result: what was confirmed and fixed, what grok raised
+   that you rejected (and why), and the final build/test/e2e state.
 
 Guard against runaway loops: cap at a sensible number of rounds per target and
 stop when converged. If a model is too weak to find real issues, escalate the
 model once rather than looping forever on empty results.
+
+## Verification (must be fully green before commit)
+
+Everything must be verified — do not rely on unit tests alone. Run, in order:
+
+1. **Build**: `cd usr.sbin/ocifbsd && make` (and the tests build).
+2. **Unit/integration**: `cd tests/usr.sbin/ocifbsd && make && kyua test -k
+   Kyuafile`. Root-only lifecycle cases may skip when not run as root; nothing
+   may fail.
+3. **Full e2e**: `sudo sh usr.sbin/ocifbsd/e2e-verify.sh`. This exercises the
+   live runtime — container lifecycle, the hostname default, state-liveness
+   reconciliation, network configuration (VNET isolation and non-VNET address
+   application), the running-container safety guard, the root/admin-group
+   permission model (using an unprivileged, no-login `ocitester` account), and
+   on-disk file modes. It must report `0 failed`.
+
+If a tool the verification needs is missing, install it rather than skipping the
+check — the same principle as reaching for the system Firefox in headless mode
+when Playwright has no FreeBSD browser build. Never mark work verified on the
+strength of unit tests when an end-to-end path is claimed but was not run.
 
 ## Code-quality bar for fixes and commits
 

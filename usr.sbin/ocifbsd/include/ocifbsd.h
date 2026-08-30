@@ -193,6 +193,7 @@ int	container_exec(struct ocifbsd_container *c, char **args,
 int	container_stop(struct ocifbsd_container *c, int timeout_sec);
 int	container_pause(struct ocifbsd_container *c);
 int	container_resume(struct ocifbsd_container *c);
+int	container_reconfigure_network(struct ocifbsd_container *c);
 int	container_wait(struct ocifbsd_container *c);
 int	container_inspect(struct ocifbsd_container *c, char **json_out);
 int	container_apply_mounts(struct ocifbsd_container *c);
@@ -209,6 +210,9 @@ struct jailparam *oci_spec_to_jail_params(const struct oci_runtime_spec *spec,
 		    size_t *nparams);
 void	oci_spec_default_hostname(struct oci_runtime_spec *spec,
 		    const char *fallback);
+struct netcfg;
+void	netcfg_apply_to_spec(const struct netcfg *nc,
+		    struct oci_runtime_spec *spec);
 int	oci_validate_spec(const struct oci_runtime_spec *spec);
 
 /* State management */

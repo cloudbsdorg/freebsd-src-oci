@@ -52,7 +52,19 @@
 /* Process/jail liveness probe (src/procutil.c). */
 extern bool pid_in_jail(pid_t pid, int jid);
 
-static const char *state_dir = OCIFBSD_STATE_DIR;
+/*
+ * Runtime state directory. Defaults to OCIFBSD_STATE_DIR but may be
+ * redirected with the OCIFBSD_STATE_DIR environment variable (mirroring
+ * OCIFBSD_DATA_DIR for the image store), which is useful for tests and for
+ * running an unprivileged, self-contained instance.
+ */
+static const char *
+state_base_dir(void)
+{
+	const char *e = getenv("OCIFBSD_STATE_DIR");
+
+	return (e != NULL && e[0] != '\0') ? e : OCIFBSD_STATE_DIR;
+}
 static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*
@@ -61,7 +73,7 @@ static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 int
 state_init(void)
 {
-	if (ensure_directory(state_dir, OCIFBSD_STATE_DIR_MODE) != 0) {
+	if (ensure_directory(state_base_dir(), OCIFBSD_STATE_DIR_MODE) != 0) {
 		fprintf(stderr, "error: failed to create state directory: %s\n",
 		    strerror(errno));
 		return (-1);
@@ -71,7 +83,7 @@ state_init(void)
 	 * existed (e.g. created world-readable by an older build): container
 	 * state must not be readable or modifiable by unprivileged users.
 	 */
-	ocifbsd_secure_path(state_dir, OCIFBSD_STATE_DIR_MODE);
+	ocifbsd_secure_path(state_base_dir(), OCIFBSD_STATE_DIR_MODE);
 
 	return (0);
 }
@@ -107,7 +119,7 @@ state_unlock(void)
 static void
 get_state_path(const char *id, char *path, size_t path_len)
 {
-	snprintf(path, path_len, "%s/%s.json", state_dir, id);
+	snprintf(path, path_len, "%s/%s.json", state_base_dir(), id);
 }
 
 /*
@@ -381,9 +393,17 @@ state_list(int *n)
 
 	*n = 0;
 
-	dir = opendir(state_dir);
-	if (dir == NULL)
+	dir = opendir(state_base_dir());
+	if (dir == NULL) {
+		/*
+		 * A missing state directory means no containers exist yet, not
+		 * a failure. Clear errno so callers treat it as an empty list
+		 * (a genuine error such as EACCES is left in errno to surface).
+		 */
+		if (errno == ENOENT)
+			errno = 0;
 		return (NULL);
+	}
 
 	while ((entry = readdir(dir)) != NULL) {
 		char *ext;

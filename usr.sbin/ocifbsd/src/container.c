@@ -54,6 +54,7 @@
 #include <unistd.h>
 
 #include "ocifbsd.h"
+#include "network/netcfg.h"
 
 /* setproctitle(3) is in <libutil.h> on FreeBSD but the declaration is
  * not visible with the strict feature-test macros used here. Declare
@@ -549,6 +550,172 @@ setup_process_env(struct ocifbsd_container *c)
 }
 
 /*
+ * Overlay a container's persisted network configuration (set via
+ * `ocifbsd network set`) onto its spec. The file lives under
+ * <DATA_DIR>/networks/<id>.json and is created 0640, root:ocifbsd; an
+ * absent or unreadable file leaves the spec's own network settings in place.
+ */
+static void
+container_overlay_netcfg(struct ocifbsd_container *c,
+    struct oci_runtime_spec *spec)
+{
+	const char *ddir;
+	char ncpath[PATH_MAX];
+	char *ncjson;
+	size_t nclen;
+
+	ddir = getenv("OCIFBSD_DATA_DIR");
+	if (ddir == NULL || ddir[0] == '\0')
+		ddir = OCIFBSD_DATA_DIR;
+	if ((size_t)snprintf(ncpath, sizeof(ncpath), "%s/networks/%s.json",
+	    ddir, c->id) >= sizeof(ncpath))
+		return;
+	ncjson = read_file(ncpath, &nclen);
+	if (ncjson == NULL)
+		return;
+	{
+		struct netcfg nc;
+
+		if (netcfg_parse(ncjson, &nc) == 0)
+			netcfg_apply_to_spec(&nc, spec);
+		netcfg_free(&nc);
+	}
+	free(ncjson);
+}
+
+/*
+ * Build jail parameters from the (hostname-defaulted, netcfg-overlaid) spec
+ * and create the persistent jail, setting c->jid. Shared by container_create
+ * and container_reconfigure_network so both derive the jail the same way.
+ * Returns 0 on success or -1 with errno set.
+ */
+static int
+create_jail_from_spec(struct ocifbsd_container *c,
+    struct oci_runtime_spec *spec)
+{
+	struct jailparam *params;
+	size_t nparams, pi;
+	char jname[64];
+
+	oci_spec_default_hostname(spec, c->name);
+	container_overlay_netcfg(c, spec);
+
+	params = oci_spec_to_jail_params(spec, &nparams);
+	if (params == NULL)
+		return (-1);
+
+	/*
+	 * Give the jail a unique name (container id prefix). Replace the
+	 * placeholder value in place: free the existing heap value first and
+	 * re-import so we neither leak it nor store a pointer to the on-stack
+	 * jname buffer. If the re-import fails we must not submit a jail with
+	 * an empty/duplicate name, so fail closed.
+	 */
+	snprintf(jname, sizeof(jname), "ocifbsd-%.12s", c->id);
+	for (pi = 0; pi < nparams; pi++) {
+		if (params[pi].jp_name != NULL &&
+		    strcmp(params[pi].jp_name, "name") == 0) {
+			free(params[pi].jp_value);
+			params[pi].jp_value = NULL;
+			if (jailparam_import(&params[pi], jname) != 0) {
+				jailparam_free(params, nparams);
+				free(params);
+				return (-1);
+			}
+			break;
+		}
+	}
+
+	c->jid = jailparam_set(params, nparams, JAIL_CREATE);
+	jailparam_free(params, nparams);
+	free(params);		/* jailparam_free frees slots, not the array */
+	if (c->jid < 0)
+		return (-1);
+	return (0);
+}
+
+/*
+ * Reapply a container's network configuration by rebuilding its jail from
+ * the current spec + persisted netcfg. Only permitted while the container is
+ * in the created (not yet started) state: its jail holds no processes, so
+ * destroying and recreating it is safe. A running or paused container is
+ * refused with EBUSY — the caller should report that a restart is required.
+ * Returns 0 on success, -1 with errno set otherwise.
+ */
+int
+container_reconfigure_network(struct ocifbsd_container *c)
+{
+	if (c == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+	if (c->state != OCIFBSD_STATE_CREATED) {
+		errno = EBUSY;
+		return (-1);
+	}
+	if (c->spec == NULL) {
+		if (c->config_path == NULL) {
+			errno = EINVAL;
+			return (-1);
+		}
+		c->spec = oci_parse_config(c->config_path);
+		if (c->spec == NULL)
+			return (-1);	/* keep oci_parse_config's errno */
+	}
+	/*
+	 * Destroy the existing (process-less) jail before recreating it, but
+	 * resolve it by name rather than trusting the stored jid: a jid can be
+	 * reused by an unrelated jail after the original is gone, and removing
+	 * it by number would destroy the wrong jail. jail_getid on the
+	 * ocifbsd-<id> name returns our current jail if it still exists (and
+	 * sidesteps jail_remove(2)'s EINVAL-for-missing-jail semantics). If the
+	 * name does not resolve, the jail is already gone and there is nothing
+	 * to remove; if it resolves but cannot be removed, abort with the old
+	 * state intact.
+	 */
+	{
+		char jname[64];
+		int real;
+
+		snprintf(jname, sizeof(jname), "ocifbsd-%.12s", c->id);
+		real = jail_getid(jname);
+		if (real >= 0 && jail_remove(real) != 0)
+			return (-1);
+	}
+	c->jid = -1;
+	if (create_jail_from_spec(c, c->spec) != 0) {
+		/*
+		 * The old jail is gone and the new one could not be built.
+		 * Persist that the container no longer has a jail (jid -1,
+		 * stopped) so a later start cannot attach a stale — possibly
+		 * reused — jid. The caller reports the failure.
+		 */
+		int saved = errno;
+
+		c->state = OCIFBSD_STATE_STOPPED;
+		state_save(c);
+		errno = saved;
+		return (-1);
+	}
+	/*
+	 * If we cannot persist the new jid, on-disk state would still name the
+	 * removed jail; tear the fresh jail back down so in-memory and on-disk
+	 * identity stay consistent, and fail.
+	 */
+	if (state_save(c) != 0) {
+		int saved = errno;
+
+		(void)jail_remove(c->jid);
+		c->jid = -1;
+		c->state = OCIFBSD_STATE_STOPPED;
+		(void)state_save(c);
+		errno = saved;
+		return (-1);
+	}
+	return (0);
+}
+
+/*
  * Create a container from OCI bundle
  */
 int
@@ -557,8 +724,6 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 {
 	struct ocifbsd_container *c;
 	struct oci_runtime_spec *spec;
-	struct jailparam *params;
-	size_t nparams;
 	char config_path[PATH_MAX];
 	char *canonical;
 
@@ -573,7 +738,16 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 	}
 
 	/* Find config.json in bundle */
-	snprintf(config_path, sizeof(config_path), "%s/config.json", bundle_path);
+	if ((size_t)snprintf(config_path, sizeof(config_path), "%s/config.json",
+	    bundle_path) >= sizeof(config_path)) {
+		/*
+		 * A truncated path could name a different, existing config.json
+		 * and jail the wrong root/process as root; refuse rather than
+		 * proceed on a silently shortened path.
+		 */
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
 
 	/* Parse OCI config */
 	spec = oci_parse_config(config_path);
@@ -671,50 +845,17 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 	}
 
 	/*
-	 * If the image/bundle config specified no hostname, default it to the
-	 * container name so the jail comes up with a meaningful kern.hostname
-	 * instead of an empty one. c->name is always set by this point (it
-	 * falls back to the container id above).
+	 * Build the jail from the spec: default the hostname to the container
+	 * name, overlay any persisted network configuration, and create the
+	 * persistent jail. c->name is always set by this point (it falls back
+	 * to the container id above).
 	 */
-	oci_spec_default_hostname(spec, c->name);
-
-	/* Generate jail parameters from OCI spec */
-	params = oci_spec_to_jail_params(spec, &nparams);
-	if (params == NULL) {
-		container_free(c);
-		return (-1);
-	}
-
-	/*
-	 * Give the jail a unique name (container id prefix). The helper
-	 * seeds a placeholder "name" param; replace it in place.
-	 */
-	{
-		size_t pi;
-		char jname[64];
-
-		snprintf(jname, sizeof(jname), "ocifbsd-%.12s", c->id);
-		for (pi = 0; pi < nparams; pi++) {
-			if (params[pi].jp_name != NULL &&
-			    strcmp(params[pi].jp_name, "name") == 0) {
-				jailparam_import_raw(&params[pi], jname,
-				    strlen(jname) + 1);
-				break;
-			}
-		}
-	}
-
-	/* Create jail (persist is set by oci_spec_to_jail_params) */
-	c->jid = jailparam_set(params, nparams, JAIL_CREATE);
-	if (c->jid < 0) {
+	if (create_jail_from_spec(c, spec) != 0) {
 		fprintf(stderr, "error: failed to create jail: %s\n",
 		    strerror(errno));
 		container_free(c);
-		jailparam_free(params, nparams);
 		return (-1);
 	}
-
-	jailparam_free(params, nparams);
 
 	/* Container created but not started */
 	c->state = OCIFBSD_STATE_CREATED;
@@ -753,6 +894,27 @@ container_start(struct ocifbsd_container *c)
 		fprintf(stderr, "error: container %s not in created state\n",
 		    c->id);
 		return (-1);
+	}
+
+	/*
+	 * Guard against a stale or reused jid. The jail created for this
+	 * container is named ocifbsd-<id>; if that name no longer resolves to
+	 * our recorded jid (host reboot, external teardown, or a jid recycled
+	 * by an unrelated jail), attaching c->jid could enter the wrong jail as
+	 * root. Verify the identity before attaching and refuse otherwise.
+	 */
+	{
+		char jname[64];
+		int real;
+
+		snprintf(jname, sizeof(jname), "ocifbsd-%.12s", c->id);
+		real = jail_getid(jname);
+		if (real < 0 || real != c->jid) {
+			errno = ESRCH;
+			fprintf(stderr, "error: container %s jail is missing or "
+			    "was replaced; recreate it\n", c->id);
+			return (-1);
+		}
 	}
 
 	/* Ensure OCI spec is available (reloaded by state_load when possible) */
