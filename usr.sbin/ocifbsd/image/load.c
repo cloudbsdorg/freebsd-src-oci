@@ -135,6 +135,33 @@ load_extract_archive(const char *archive_path, const char *destdir)
 		if (name == NULL || name[0] == '/' || strstr(name, "..") != NULL)
 			continue;	/* skip unsafe entry */
 
+		/*
+		 * An OCI image layout legitimately contains only regular files
+		 * (oci-layout, index.json, blobs/sha256/<hex>) and directories.
+		 * Refuse every other entry type: a symlink, hardlink, device,
+		 * FIFO, or socket in the archive would let a crafted image (a)
+		 * hardlink to and overwrite an absolute host path as root, or
+		 * (b) make a later blob open follow into a host device/FIFO
+		 * (hang, read host storage, or feed a host file into the digest
+		 * check). Restricting to reg/dir is simpler and safer than
+		 * trying to rewrite every link target.
+		 */
+		if (archive_entry_hardlink(entry) != NULL) {
+			fprintf(stderr,
+			    "error: rejecting hardlink entry in image layout: %s\n",
+			    name);
+			continue;
+		}
+		{
+			mode_t ft = archive_entry_filetype(entry);
+			if (ft != AE_IFREG && ft != AE_IFDIR) {
+				fprintf(stderr,
+				    "error: rejecting non-regular entry in image "
+				    "layout: %s\n", name);
+				continue;
+			}
+		}
+
 		if ((size_t)snprintf(full, sizeof(full), "%s/%s", destdir, name) >=
 		    sizeof(full))
 			continue;
@@ -281,6 +308,11 @@ emit_json_str_array(FILE *fp, struct json_object *arr, const char *fallback)
 /*
  * Generate an OCI runtime config.json in storedir from the image config blob
  * (which carries Cmd/Entrypoint/Env/WorkingDir). Returns 0 on success.
+ *
+ * If config_blob is non-NULL the manifest declared a config, so the blob MUST
+ * parse: a missing/corrupt blob is a failure, not a reason to silently fall
+ * back to a default root /bin/sh (which would run the wrong command as root).
+ * config_blob == NULL means the manifest had no config; defaults are then fine.
  */
 static int
 write_runtime_config(const char *storedir, const char *config_blob)
@@ -292,8 +324,15 @@ write_runtime_config(const char *storedir, const char *config_blob)
 	FILE *fp;
 	const char *cwd = "/";
 
-	if (config_blob != NULL)
+	if (config_blob != NULL) {
 		cfg = json_object_from_file(config_blob);
+		if (cfg == NULL) {
+			fprintf(stderr,
+			    "error: image config blob is missing or not JSON: %s\n",
+			    config_blob);
+			return (-1);
+		}
+	}
 	if (cfg != NULL && json_object_object_get_ex(cfg, "config", &inner) &&
 	    inner != NULL) {
 		json_object_object_get_ex(inner, "Cmd", &cmd);
@@ -307,7 +346,13 @@ write_runtime_config(const char *storedir, const char *config_blob)
 		}
 	}
 
-	snprintf(path, sizeof(path), "%s/config.json", storedir);
+	if ((size_t)snprintf(path, sizeof(path), "%s/config.json", storedir) >=
+	    sizeof(path)) {
+		fprintf(stderr, "error: config.json path too long\n");
+		if (cfg != NULL)
+			json_object_put(cfg);
+		return (-1);
+	}
 	fp = fopen(path, "w");
 	if (fp == NULL) {
 		if (cfg != NULL)
@@ -490,19 +535,43 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 	}
 
 	/*
-	 * Refuse to import into an existing store entry: unpacking on top of a
-	 * populated rootfs merges trees (whiteouts only remove names present in
-	 * the new layers), yielding a hybrid image reported as success. Require
-	 * an explicit `rmi` first. Only a store we create ourselves is rolled
-	 * back on failure below.
+	 * Create the store leaf atomically to avoid a stat()-then-create TOCTOU:
+	 * unpacking on top of a populated rootfs merges trees (whiteouts only
+	 * remove names present in the new layers), and two concurrent loads of
+	 * the same ref would otherwise both proceed. mkdir() with O_EXCL
+	 * semantics gives exactly one winner; EEXIST means the image is already
+	 * present (require rmi first). created_store is set immediately after
+	 * the exclusive create so any later failure rolls back only the tree we
+	 * own — never a peer's completed import.
 	 */
-	if (stat(store, &st) == 0) {
-		fprintf(stderr, "error: image already present at %s (rmi first)\n",
-		    store);
+	{
+		char parent[PATH_MAX];
+		char *slash;
+
+		strlcpy(parent, store, sizeof(parent));
+		slash = strrchr(parent, '/');
+		if (slash != NULL) {
+			*slash = '\0';
+			if (load_mkdirp(parent, 0755) != 0 && errno != EEXIST) {
+				fprintf(stderr, "error: cannot create %s: %s\n",
+				    parent, strerror(errno));
+				goto out;
+			}
+		}
+	}
+	if (mkdir(store, 0755) != 0) {
+		if (errno == EEXIST)
+			fprintf(stderr,
+			    "error: image already present at %s (rmi first)\n",
+			    store);
+		else
+			fprintf(stderr, "error: cannot create %s: %s\n", store,
+			    strerror(errno));
 		goto out;
 	}
+	created_store = true;
 
-	/* Prepare a fresh store rootfs (guard path truncation). */
+	/* Prepare the fresh rootfs (guard path truncation). */
 	if ((size_t)snprintf(rootfs, sizeof(rootfs), "%s/rootfs", store) >=
 	    sizeof(rootfs)) {
 		fprintf(stderr, "error: store path too long: %s/rootfs\n", store);
@@ -513,7 +582,6 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 		    strerror(errno));
 		goto out;
 	}
-	created_store = true;
 
 	/* Verify and unpack each layer in order. */
 	nlayers = json_object_array_length(layers);
@@ -571,6 +639,12 @@ load_oci_archive(const char *archive_path, const char *ref_override,
 		}
 		if (blob_path(layoutdir, cds, cpath, sizeof(cpath)) != 0) {
 			fprintf(stderr, "error: config blob path too long\n");
+			goto out;
+		}
+		/* The config blob is content-addressed by its digest; verify it
+		 * so a tampered config cannot dictate the container's process. */
+		if (verify_layer(cpath, cds) != 0) {
+			fprintf(stderr, "error: config digest mismatch: %s\n", cds);
 			goto out;
 		}
 	}
