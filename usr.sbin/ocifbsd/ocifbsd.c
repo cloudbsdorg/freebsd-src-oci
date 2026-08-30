@@ -111,28 +111,38 @@ version(void)
 }
 
 /*
- * Reject an image reference component that could traverse outside the
- * image store. A ".." component in a repository or tag would, after path
- * concatenation, let commands like `rmi` recursively delete a chosen host
- * directory as root. Empty and absolute components are refused too.
+ * Reject an image reference component that could traverse outside — or
+ * collapse onto — the image store. Any empty, ".", or ".." slash-separated
+ * component, an absolute component, or a NULL/empty string is refused.
+ *
+ * The empty/"." cases matter as much as "..": `rmi alpine:.` or `rmi alpine:`
+ * would otherwise resolve to the repository directory itself, and cmd_rmi
+ * would rm_rf every tag under it as root. This mirrors image/load.c's
+ * ref_part_safe() so both entry points enforce the same rule.
  */
 static int
 ref_component_is_safe(const char *s)
 {
-	const char *p;
+	const char *start, *p;
 
-	if (s == NULL || s[0] == '\0')
-		return (1);	/* NULL/empty handled by the path builder */
-	if (s[0] == '/')
+	if (s == NULL)
+		return (1);	/* absent slot; zfs_image_path() rejects a NULL */
+	if (s[0] == '\0' || s[0] == '/')
 		return (0);
-	for (p = s;;) {
-		if (p[0] == '.' && p[1] == '.' &&
-		    (p[2] == '/' || p[2] == '\0'))
-			return (0);
-		p = strchr(p, '/');
-		if (p == NULL)
-			break;
-		p++;
+	for (start = s, p = s;; p++) {
+		if (*p == '/' || *p == '\0') {
+			size_t len = (size_t)(p - start);
+
+			if (len == 0)
+				return (0);			/* empty component */
+			if (len == 1 && start[0] == '.')
+				return (0);			/* "." */
+			if (len == 2 && start[0] == '.' && start[1] == '.')
+				return (0);			/* ".." */
+			if (*p == '\0')
+				break;
+			start = p + 1;
+		}
 	}
 	return (1);
 }
@@ -237,6 +247,7 @@ rm_rf(const char *path)
 		free(path_copy);
 		return (-1);
 	}
+	errno = 0;	/* so a post-loop errno check reflects fts_read only */
 	while ((ent = fts_read(fts)) != NULL) {
 		switch (ent->fts_info) {
 		case FTS_D:
@@ -276,6 +287,8 @@ rm_rf(const char *path)
 			break;
 		case FTS_ERR:
 		case FTS_NS:
+		case FTS_DNR:	/* directory not readable */
+		case FTS_DC:	/* directory causes a cycle */
 			fprintf(stderr, "error: %s: %s\n", ent->fts_path,
 			    strerror(ent->fts_errno));
 			ret = -1;
@@ -283,6 +296,22 @@ rm_rf(const char *path)
 		default:
 			break;
 		}
+		/*
+		 * Clear errno so the post-loop check reflects only fts_read():
+		 * remove()/lchflags() above leave errno set even on success, and
+		 * fts_read() does not reset it at a normal end-of-walk.
+		 */
+		errno = 0;
+	}
+	/*
+	 * fts_read() returns NULL both at the natural end of the walk and on a
+	 * traversal error; a nonzero errno here means the walk aborted, so a
+	 * partial delete is not reported as success.
+	 */
+	if (errno != 0) {
+		fprintf(stderr, "error: directory walk failed: %s\n",
+		    strerror(errno));
+		ret = -1;
 	}
 	fts_close(fts);
 	free(path_copy);
@@ -692,13 +721,20 @@ cmd_list(int argc, char **argv)
 		}
 	}
 
-	/* Get all containers */
+	/*
+	 * Get all containers. state_list() returns NULL both for an empty
+	 * store and on error; distinguish via errno so a listing failure is
+	 * reported as a nonzero exit rather than looking like "no containers".
+	 */
+	errno = 0;
 	list = state_list(&n);
 	if (list == NULL) {
-		if (errno != 0)
+		if (errno != 0) {
 			fprintf(stderr, "error: failed to list containers: %s\n",
 			    strerror(errno));
-		return (0);
+			return (1);
+		}
+		return (0);	/* empty store */
 	}
 
 	/* Print header */
@@ -1026,7 +1062,16 @@ cmd_images(int argc, char **argv)
 	base = getenv("OCIFBSD_DATA_DIR");
 	if (base == NULL || base[0] == '\0')
 		base = OCIFBSD_DATA_DIR;
-	strlcpy(basebuf, base, sizeof(basebuf));
+	/*
+	 * Copy into basebuf and walk THAT. If the copy truncated, bail: we
+	 * later strip the prefix from fts_path by length, and using the
+	 * original (longer) length against the truncated walk path would read
+	 * past the end of fts_path.
+	 */
+	if (strlcpy(basebuf, base, sizeof(basebuf)) >= sizeof(basebuf)) {
+		fprintf(stderr, "error: OCIFBSD_DATA_DIR too long\n");
+		return (1);
+	}
 
 	paths[0] = basebuf;
 	paths[1] = NULL;
@@ -1055,9 +1100,10 @@ cmd_images(int argc, char **argv)
 		if (stat(rfs, &st) != 0 || !S_ISDIR(st.st_mode))
 			continue;
 
-		/* repo/tag are relative to base. Split off the final component
-		 * as the tag, the rest (registry/repo) as the repository. */
-		rel = ent->fts_path + strlen(base);
+		/* repo/tag are relative to base. Strip the prefix using the
+		 * length of the string we actually walked (basebuf), then split
+		 * off the final component as the tag. */
+		rel = ent->fts_path + strlen(basebuf);
 		while (*rel == '/')
 			rel++;
 		lastslash = strrchr(rel, '/');
