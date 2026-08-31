@@ -188,7 +188,10 @@ Enable verbose output.
 .It Fl J , -pretty
 Pretty-print JSON output with indentation for the commands that emit JSON
 .Pq Cm inspect , state .
-Without it, JSON is printed as a single compact line.
+This is the default; the flag is accepted for explicitness.
+.It Fl c , -compact
+Print JSON as a single compact line instead of the pretty-printed default,
+for scripts and pipelines.
 .It Fl h , -help
 Show help message and exit.
 .It Fl V , -version

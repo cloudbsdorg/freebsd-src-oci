@@ -59,8 +59,12 @@
 /* Global verbosity flag */
 static bool verbose = false;
 
-/* Global: pretty-print JSON output (ocifbsd --pretty / -J). */
-static bool pretty = false;
+/*
+ * Global: pretty-print JSON output. On by default so human-facing output
+ * (inspect, state) reads nicely; --compact / -c restores single-line JSON
+ * for scripts and pipelines.
+ */
+static bool pretty = true;
 
 /*
  * Emit a JSON document to stdout. With --pretty it is reformatted with
@@ -102,7 +106,8 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "FreeBSD Native OCI Runtime\n\n");
 		fprintf(stderr, "Options:\n");
 		fprintf(stderr, "  -v, --verbose    Enable verbose output\n");
-		fprintf(stderr, "  -J, --pretty     Pretty-print JSON output (inspect, state)\n");
+		fprintf(stderr, "  -J, --pretty     Pretty-print JSON output (default)\n");
+		fprintf(stderr, "  -c, --compact    Compact single-line JSON output (for scripts)\n");
 		fprintf(stderr, "  -h, --help       Show this help message\n");
 		fprintf(stderr, "  -V, --version    Show version information\n");
 		fprintf(stderr, "\nCommands:\n");
@@ -2030,6 +2035,7 @@ main(int argc, char **argv)
 	static struct option longopts[] = {
 		{ "verbose",	no_argument,		NULL, 'v' },
 		{ "pretty",	no_argument,		NULL, 'J' },
+		{ "compact",	no_argument,		NULL, 'c' },
 		{ "help",	no_argument,		NULL, 'h' },
 		{ "version",	no_argument,		NULL, 'V' },
 		{ NULL,		0,			NULL, 0 }
@@ -2042,7 +2048,7 @@ main(int argc, char **argv)
 	 */
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+vhVJ", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "+vhVJc", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'v':
 			verbose = true;
@@ -2050,6 +2056,9 @@ main(int argc, char **argv)
 			break;
 		case 'J':
 			pretty = true;
+			break;
+		case 'c':
+			pretty = false;
 			break;
 		case 'h':
 			opt.help = 1;
