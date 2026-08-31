@@ -22,7 +22,7 @@
 
 ATF_TESTS_C=	parser_test k8s_test utils_test oci2jail_test hooks_test \
 		image_ref_test whiteout_test image_parse_test unpack_layer_test \
-		netcfg_test
+		netcfg_test jsonfmt_test
 ATF_TESTS_SH=	cli_test lifecycle_test
 
 # convert/ sources compile at WARNS=3; match for #include tests
@@ -59,6 +59,11 @@ LIBADD.image_parse_test+=	md archive
 CFLAGS.netcfg_test+=	-I/usr/local/include/json-c
 LDFLAGS.netcfg_test+=	-L/usr/local/lib
 LDADD.netcfg_test+=	-ljson-c
+
+# jsonfmt_test #includes src/jsonfmt.c (json-c pretty-printer)
+CFLAGS.jsonfmt_test+=	-I/usr/local/include/json-c
+LDFLAGS.jsonfmt_test+=	-L/usr/local/lib
+LDADD.jsonfmt_test+=	-ljson-c
 
 # unpack_layer_test #includes unpack.c + whiteout.c
 CFLAGS.unpack_layer_test+=	-I/usr/local/include

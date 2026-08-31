@@ -28,6 +28,7 @@ SRCS=	\
 	src/hooks.c \
 	src/procutil.c \
 	src/utils.c \
+	src/jsonfmt.c \
 	network/netcfg.c
 
 # procutil.c needs <sys/user.h> (struct kinfo_proc), which is incompatible

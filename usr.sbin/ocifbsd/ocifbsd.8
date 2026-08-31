@@ -185,6 +185,10 @@ Global options (before the command):
 .Bl -tag -width ".Fl v"
 .It Fl v , -verbose
 Enable verbose output.
+.It Fl J , -pretty
+Pretty-print JSON output with indentation for the commands that emit JSON
+.Pq Cm inspect , state .
+Without it, JSON is printed as a single compact line.
 .It Fl h , -help
 Show help message and exit.
 .It Fl V , -version

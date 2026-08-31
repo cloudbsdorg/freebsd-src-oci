@@ -8,6 +8,7 @@ atf_test_program{name="cli_test", }
 atf_test_program{name="hooks_test", }
 atf_test_program{name="image_parse_test", }
 atf_test_program{name="image_ref_test", }
+atf_test_program{name="jsonfmt_test", }
 atf_test_program{name="k8s_test", }
 atf_test_program{name="lifecycle_test", }
 atf_test_program{name="netcfg_test", }

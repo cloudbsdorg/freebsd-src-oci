@@ -54,9 +54,33 @@
 #include "image/load.h"
 #include "image/zfs_store.h"
 #include "network/netcfg.h"
+#include "src/jsonfmt.h"
 
 /* Global verbosity flag */
 static bool verbose = false;
+
+/* Global: pretty-print JSON output (ocifbsd --pretty / -J). */
+static bool pretty = false;
+
+/*
+ * Emit a JSON document to stdout. With --pretty it is reformatted with
+ * indentation for human reading; otherwise it is printed verbatim. A value
+ * that does not parse as JSON is printed as-is so nothing is ever swallowed.
+ */
+static void
+emit_json(const char *json)
+{
+	char *p = NULL;
+
+	if (pretty)
+		p = ocifbsd_json_pretty(json);
+	if (p != NULL) {
+		printf("%s\n", p);
+		free(p);
+	} else {
+		printf("%s\n", json);
+	}
+}
 
 /* Command options */
 static struct cmd_options {
@@ -78,6 +102,7 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "FreeBSD Native OCI Runtime\n\n");
 		fprintf(stderr, "Options:\n");
 		fprintf(stderr, "  -v, --verbose    Enable verbose output\n");
+		fprintf(stderr, "  -J, --pretty     Pretty-print JSON output (inspect, state)\n");
 		fprintf(stderr, "  -h, --help       Show this help message\n");
 		fprintf(stderr, "  -V, --version    Show version information\n");
 		fprintf(stderr, "\nCommands:\n");
@@ -710,9 +735,14 @@ cmd_state(int argc, char **argv)
 		return (1);
 	}
 
-	/* Print state as JSON */
-	printf("{\"id\":\"%s\",\"status\":\"%s\"}\n",
-	    c->id, ocifbsd_state_to_string(c->state));
+	/* Print state as JSON (pretty when --pretty). */
+	{
+		char buf[256];
+
+		snprintf(buf, sizeof(buf), "{\"id\":\"%s\",\"status\":\"%s\"}",
+		    c->id, ocifbsd_state_to_string(c->state));
+		emit_json(buf);
+	}
 
 	container_free(c);
 	return (0);
@@ -832,7 +862,7 @@ cmd_inspect(int argc, char **argv)
 		return (1);
 	}
 
-	printf("%s\n", json);
+	emit_json(json);
 	free(json);
 
 	container_free(c);
@@ -1999,6 +2029,7 @@ main(int argc, char **argv)
 	/* Parse global options */
 	static struct option longopts[] = {
 		{ "verbose",	no_argument,		NULL, 'v' },
+		{ "pretty",	no_argument,		NULL, 'J' },
 		{ "help",	no_argument,		NULL, 'h' },
 		{ "version",	no_argument,		NULL, 'V' },
 		{ NULL,		0,			NULL, 0 }
@@ -2011,11 +2042,14 @@ main(int argc, char **argv)
 	 */
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "+vhV", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "+vhVJ", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'v':
 			verbose = true;
 			ocifbsd_set_verbose(true);
+			break;
+		case 'J':
+			pretty = true;
 			break;
 		case 'h':
 			opt.help = 1;
