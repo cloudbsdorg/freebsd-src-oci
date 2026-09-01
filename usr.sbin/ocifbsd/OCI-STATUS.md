@@ -1195,18 +1195,19 @@ After the refactor, the build must pass:
       file when a bottle omits it; it now requires only clang/clang++/lld and
       treats lldb as optional. `--check` and setup complete and generate
       /tmp/ocifbsd-cross-build-env (clang 23.1.0, lld, bmake).
-- [~] `make cross-build` (from repo root) cross-builds to FreeBSD amd64 from
-      macOS — the ocifbsd-owned setup works end to end (toolchain install,
-      env, and — after working around a flaky bmake bootstrap self-test on
-      macOS 27 — make.py proceeds into cross-compiling the FreeBSD base
-      libraries). It then blocks in FreeBSD's own cross-build machinery: the
-      prereq libraries (libssp_nonshared, libgcc_eh, compiler-rt) are compiled
-      with the host Apple clang and Darwin headers rather than the cross
+- [best-effort, not a gate] `make cross-build` from macOS — **de-scoped as a
+      release requirement** (see 020.0 §5). The ocifbsd-owned setup works end to
+      end (toolchain install, env, and — after working around a flaky bmake
+      bootstrap self-test on macOS 27 — make.py proceeds into cross-compiling
+      the FreeBSD base libraries), then blocks in FreeBSD's own cross-build
+      machinery: the prereq libraries (libssp_nonshared, libgcc_eh, compiler-rt)
+      are compiled with host Apple clang + Darwin headers rather than the cross
       toolchain, so FreeBSD source fails (`void __hidden` — Apple's
       <sys/cdefs.h> has no `__hidden`). That is a FreeBSD-cross-build-from-macOS
-      toolchain-integration limitation (worse on pre-release macOS 27, which
-      Homebrew itself flags as unsupported), not an ocifbsd defect. The tier-1
-      FreeBSD-native build (and its self-contained tests) remain fully green.
+      limitation, not an ocifbsd defect. The supported route for a non-FreeBSD
+      workstation is a FreeBSD VM or CI; `tools/cross-build/macos.sh` stays as a
+      best-effort helper. The tier-1 FreeBSD-native build and its self-contained
+      tests remain the authoritative gate (209/209).
 - [~] CI workflow builds + tests on FreeBSD (GitHub Actions): authored as
       `.github/workflows/ocifbsd-freebsd-build.yml` — spins up a FreeBSD VM
       (`vmactions/freebsd-vm`), builds the self-contained product, asserts no
