@@ -23,12 +23,22 @@ MAN=	ocifbsd.8 ocifbsd.conf.5
 # base rc.d script installed from libexec/rc/rc.d/. Installed via
 # CONFGROUPS so it lands in the base 'ocifbsd' pkgbase package without
 # being clobbered on upgrade if locally modified.
-CONFGROUPS=	OCICONF
+CONFGROUPS=	OCICONF OCIREG
 OCICONF=	etc/ocifbsd.conf
 OCICONFPACKAGE=	${PACKAGE}
 OCICONFNAME=	ocifbsd.conf
 OCICONFDIR=	/etc/ocifbsd
 OCICONFMODE=	0644
+# Registry alias table (see registries.conf(5)/registries.c search order:
+# $OCIFBSD_REGISTRIES_CONF, /usr/local/etc/ocifbsd, then /etc/ocifbsd). The
+# shipped file is an all-comments template — ocifbsd has built-in Docker Hub
+# defaults, so pulls work without it; installing it gives admins a documented
+# file to edit. CONFGROUPS keeps local edits from being clobbered on upgrade.
+OCIREG=		etc/registries.conf
+OCIREGPACKAGE=	${PACKAGE}
+OCIREGNAME=	registries.conf
+OCIREGDIR=	/etc/ocifbsd
+OCIREGMODE=	0644
 # pkgbase package name → FreeBSD-ocifbsd
 PACKAGE=	ocifbsd
 
