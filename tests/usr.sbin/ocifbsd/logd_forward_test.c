@@ -154,11 +154,30 @@ ATF_TC_BODY(post_rejects_bad_args, tc)
 	    "application/json", NULL) != 0);
 }
 
+ATF_TC(post_rejects_non_http);
+ATF_TC_HEAD(post_rejects_non_http, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "logd_http_post rejects non-http(s) URLs (no file:///dict:// SSRF)");
+}
+ATF_TC_BODY(post_rejects_non_http, tc)
+{
+	/* A root daemon must not let a file:// (or other-scheme) endpoint turn
+	 * a POST into an arbitrary local-file read. */
+	ATF_CHECK(logd_http_post("file:///etc/passwd", "{}",
+	    "application/json", NULL) != 0);
+	ATF_CHECK(logd_http_post("dict://127.0.0.1/x", "{}",
+	    "application/json", NULL) != 0);
+	ATF_CHECK(logd_http_post("ftp://127.0.0.1/x", "{}",
+	    "application/json", NULL) != 0);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, post_delivers_body);
 	ATF_TP_ADD_TC(tp, post_unreachable_fails);
 	ATF_TP_ADD_TC(tp, post_rejects_bad_args);
+	ATF_TP_ADD_TC(tp, post_rejects_non_http);
 
 	return (atf_no_error());
 }

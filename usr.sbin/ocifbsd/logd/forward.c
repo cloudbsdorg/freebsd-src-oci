@@ -61,6 +61,31 @@
  * when non-NULL. The transfer is bounded by a connect and total timeout so a
  * stuck endpoint cannot wedge the forwarder thread.
  */
+/* Discard a response body — never let it reach stdout, and cap it so a hostile
+ * or huge reply cannot stall the forwarder thread. */
+static size_t
+logd_discard_body(char *ptr, size_t size, size_t nmemb, void *userp)
+{
+	size_t n = size * nmemb;
+	size_t *seen = userp;
+
+	(void)ptr;
+	*seen += n;
+	return (*seen > (1u << 20) ? 0 : n);    /* abort past 1 MiB */
+}
+
+/* Append to a curl header list without leaking the list on OOM. */
+static int
+hdr_add(struct curl_slist **list, const char *s)
+{
+	struct curl_slist *n = curl_slist_append(*list, s);
+
+	if (n == NULL)
+		return (-1);
+	*list = n;
+	return (0);
+}
+
 int
 logd_http_post(const char *url, const char *body, const char *content_type,
     const char *extra_header)
@@ -70,9 +95,19 @@ logd_http_post(const char *url, const char *body, const char *content_type,
 	struct curl_slist *hdrs = NULL;
 	char ctype[128];
 	long code = 0;
+	size_t discarded = 0;
 	int ret = -1;
 
 	if (url == NULL || url[0] == '\0' || body == NULL)
+		return (-1);
+	/*
+	 * Only http/https. logd runs as root, so an attacker-influenced
+	 * endpoint like file:///etc/master.passwd or dict:// would otherwise
+	 * turn this POST into arbitrary local-file read / SSRF via libcurl's
+	 * other protocol handlers.
+	 */
+	if (strncasecmp(url, "http://", 7) != 0 &&
+	    strncasecmp(url, "https://", 8) != 0)
 		return (-1);
 
 	curl = curl_easy_init();
@@ -81,18 +116,35 @@ logd_http_post(const char *url, const char *body, const char *content_type,
 
 	snprintf(ctype, sizeof(ctype), "Content-Type: %s",
 	    content_type != NULL ? content_type : "application/json");
-	hdrs = curl_slist_append(hdrs, ctype);
-	if (extra_header != NULL && extra_header[0] != '\0')
-		hdrs = curl_slist_append(hdrs, extra_header);
-	/* Suppress the default "Expect: 100-continue" which adds a round trip
-	 * and trips up some minimal HTTP endpoints. */
-	hdrs = curl_slist_append(hdrs, "Expect:");
+	if (hdr_add(&hdrs, ctype) != 0 ||
+	    (extra_header != NULL && extra_header[0] != '\0' &&
+	     hdr_add(&hdrs, extra_header) != 0) ||
+	    /* Suppress the default "Expect: 100-continue" round trip. */
+	    hdr_add(&hdrs, "Expect:") != 0) {
+		curl_slist_free_all(hdrs);
+		curl_easy_cleanup(curl);
+		return (-1);
+	}
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_POST, 1L);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+	/* Defense in depth: constrain the transfer (and any redirects) to
+	 * http/https regardless of the URL check above. */
+#if LIBCURL_VERSION_NUM >= 0x075500   /* 7.85.0: the *_STR options */
+	curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+	curl_easy_setopt(curl, CURLOPT_PROTOCOLS,
+	    (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS,
+	    (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
+	/* Never emit the response body to stdout; discard it. */
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, logd_discard_body);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &discarded);
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
