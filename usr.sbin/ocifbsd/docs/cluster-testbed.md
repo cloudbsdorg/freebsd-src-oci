@@ -73,7 +73,24 @@ testbed:
 | mTLS control channel | mutual auth over the cluster CA | **cross-host handshake between two nodes** |
 | Node agent | assignment protocol + reconcile + apply | **assignment over mTLS → correct actions; agent LAUNCH/STOP creates and removes real containers** |
 
-- **Remaining:** unify the stages into one automatic daemon flow (leader
-  computes placements → sends assignments to each node's agent over mTLS →
-  agents launch), and measure image-pull fan-out to decide whether P2P layer
-  distribution is warranted.
+### End-to-end distributed deploy — validated
+
+The stages are unified into one automatic daemon flow. Running
+`ocifbsd-cluster --controller --agent <ocifbsd>` on each node, a single
+`CREATE web 3` proposed on the leader flows end to end with no manual steps:
+
+1. Raft replicates the desired state to every node.
+2. The leader's controller plans placements and proposes them; Raft replicates
+   the placements too (so every node already holds its own slice — the deploy
+   loop needs no separate push).
+3. Each node's agent reconciles its slice and launches its replica via the
+   local runtime.
+
+**Result on the 3-node cluster:** `web-0`, `web-1`, `web-2` each land on a
+different node — three real containers, one per node, spread across the
+cluster, entirely automatically. The mTLS channel remains available for
+out-of-band control (remote exec/logs), not needed for the core deploy loop.
+
+- **Remaining:** front the running replicas with the pf load balancer in the
+  same flow, and measure image-pull fan-out to decide whether our own
+  BitTorrent-style P2P layer distribution is warranted.
