@@ -39,6 +39,26 @@ landed to get there:
   with `MAKESYSPATH=<tree>/share/mk` so it links base `libprivateatf-c` and
   writes into the objdir.
 
+- **Tests integrated into the FreeBSD test hierarchy.** The suite was orphaned
+  at `tests/usr.sbin/ocifbsd/` with no parent Makefile, so `buildworld
+  WITH_TESTS`/installworld never built or installed it. Added the intermediate
+  `tests/usr.sbin/Makefile`, listed `usr.sbin` in `tests/Makefile`, and set
+  `TESTSDIR=${TESTSBASE}/usr.sbin/ocifbsd` in the leaf — the suite now installs
+  under `/usr/tests/usr.sbin/ocifbsd`. (`ocifbsd/Makefile` still forces
+  `MK_TESTS=no` so the runtime builds on a minimal FreeBSD without
+  `src.opts.mk`; that guard is intentional and untouched.)
+
+- **Packaging completeness.** `registries.conf` shipped in the tree but was
+  never installed; it now installs to `/etc/ocifbsd/registries.conf` via a
+  second CONFGROUP alongside `ocifbsd.conf` (both upgrade-safe). The runtime
+  rc.d(8) script (`libexec/rc/rc.d/ocifbsd`) is wired in and `sh -n`-clean, and
+  a staged `make install` produces seven tool binaries + twelve man pages.
+
+- **Repo hygiene.** Stopped tracking 42 accidentally-committed build artifacts
+  (compiled test programs, `.full`/`.debug`, gzipped man pages, the
+  `ocifbsd_convert` binary) and added `.gitignore`s so rebuilds no longer show
+  as spurious modifications. Zero build products are tracked now.
+
 ## 📦 **2026-09-01 — Fully self-contained build: libcurl vendored, ZERO ports**
 
 The tree now builds with **no ports at all**. libcurl was the last remaining
