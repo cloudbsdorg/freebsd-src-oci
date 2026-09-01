@@ -1,4 +1,27 @@
+# Build artifacts — never commit compiled test programs or their debug/link
+# outputs. The suite is rebuilt from the *_test.c / *_test.sh sources.
+*.o
+*.pieo
+*.So
+*.a
+*.full
+*.debug
+.depend*
+# ATF test programs (compiled C) and generated shell-test copies. Their
+# sources keep the .c / .sh extension, so this pattern matches only the
+# built/generated files.
+*_test
+
 # Config files written by registries_test at run time.
 /registries.conf
 /insecure.conf
 /default.conf
+
+# Scratch directories created by cluster_pki_test / cluster_mtls_test runs
+# (mkdtemp templates: pki.XXXX, pkiA.XXXX, mtls.XXXX, ...).
+pki*/
+pkiA*/
+pkiB*/
+mtls*/
+mtlsA*/
+mtlsB*/

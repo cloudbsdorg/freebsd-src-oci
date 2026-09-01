@@ -1,0 +1,22 @@
+# Build artifacts — the ocifbsd tree is rebuilt from source. Never commit
+# compiled objects/binaries, static/shared libraries, debug/link outputs, or
+# generated (compressed) man pages. Keep the *.c/*.h/*.3/*.5/*.8 sources and
+# the Makefiles only.
+*.o
+*.pieo
+*.So
+*.a
+*.full
+*.debug
+*.gz
+.depend*
+
+# Program (PROG) names built in this tree. Their sources keep an extension
+# (e.g. ocifbsd.c), so these match only the built binaries.
+/ocifbsd
+ocifbsd-cert
+ocifbsd-cluster
+ocifbsd-export
+ocifbsd-gc
+ocifbsd-logd
+ocifbsd_convert
