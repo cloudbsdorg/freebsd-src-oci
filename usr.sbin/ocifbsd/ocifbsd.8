@@ -133,6 +133,16 @@ annotation.
 List top-level entries under the local image store
 .Pq Pa /var/lib/ocifbsd .
 An empty or missing store is not an error.
+.It Cm rmi Oo Fl f Oc Ar reference
+Remove the local image store for
+.Ar reference .
+By default this is refused if a container was created from that image
+.Pq its bundle still points at the store ,
+so that removing the image cannot delete a running container's root
+filesystem; the error names the container.
+.Fl f
+.Pq Fl Fl force
+removes the image anyway.
 .It Cm network Cm list Op Ar container
 Show the network configuration (VNET, IPv4/IPv6 addresses, gateways, and
 DNS servers) of one container, or of every container when no argument is

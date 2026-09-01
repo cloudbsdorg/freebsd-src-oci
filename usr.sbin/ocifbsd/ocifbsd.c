@@ -1316,19 +1316,24 @@ cmd_rmi(int argc, char **argv)
 	const char *ref = NULL;
 	char *store_path = NULL;
 	struct stat st;
+	bool force = false;
 	int ch;
 
 	static struct option longopts[] = {
+		{ "force",	no_argument,	NULL, 'f' },
 		{ "help",	no_argument,	NULL, 'h' },
 		{ NULL,		0,		NULL, 0 }
 	};
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "fh", longopts, NULL)) != -1) {
 		switch (ch) {
+		case 'f':
+			force = true;
+			break;
 		case 'h':
-			usage(argv[0], "rmi <reference>");
+			usage(argv[0], "rmi [--force] <reference>");
 			return (0);
 		default:
 			usage(argv[0], "rmi");
@@ -1352,6 +1357,33 @@ cmd_rmi(int argc, char **argv)
 		fprintf(stderr, "error: image not found: %s\n", ref);
 		free(store_path);
 		return (1);
+	}
+
+	/*
+	 * Refuse to remove an image that a container still references, unless
+	 * forced: a container created with --image records the image store as
+	 * its bundle_path, and pulling the store out from under it would delete
+	 * that container's rootfs while it may still be running.
+	 */
+	if (!force) {
+		int n = 0, i;
+		struct ocifbsd_container **list = state_list(&n);
+		char *inuse = NULL;
+
+		for (i = 0; list != NULL && i < n; i++) {
+			if (inuse == NULL && list[i]->bundle_path != NULL &&
+			    strcmp(list[i]->bundle_path, store_path) == 0)
+				inuse = strdup(list[i]->id);
+			container_free(list[i]);
+		}
+		free(list);
+		if (inuse != NULL) {
+			fprintf(stderr, "error: image %s is in use by container "
+			    "%s (use --force to remove anyway)\n", ref, inuse);
+			free(inuse);
+			free(store_path);
+			return (1);
+		}
 	}
 	if (!S_ISDIR(st.st_mode)) {
 		fprintf(stderr, "error: not an image store: %s\n", store_path);

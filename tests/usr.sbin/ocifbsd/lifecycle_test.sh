@@ -228,9 +228,54 @@ create_start_with_nullfs_cleanup()
 	fi
 }
 
+atf_test_case rmi_refuses_in_use
+rmi_refuses_in_use_head()
+{
+	atf_set "descr" "rmi refuses to remove an image a container references"
+	atf_set "require.user" "root"
+}
+rmi_refuses_in_use_body()
+{
+	local bin data store ref cid
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	if [ ! -x /rescue/sh ]; then
+		atf_skip "/rescue/sh not available"
+	fi
+	data=$(pwd)/data
+	ref="local.test/inuse:latest"
+	store="${data}/local.test/inuse/latest"
+	mkdir -p "${store}/rootfs/bin"
+	cp /rescue/sh "${store}/rootfs/bin/sh"
+	cat > "${store}/config.json" <<-'JSON'
+	{ "ociVersion": "1.0.0",
+	  "root": { "path": "rootfs", "readonly": true },
+	  "process": { "args": ["/bin/sh"] } }
+	JSON
+
+	export OCIFBSD_STATE_DIR="$(pwd)/state"
+	export OCIFBSD_DATA_DIR="${data}"
+	mkdir -p "${OCIFBSD_STATE_DIR}"
+
+	cid=$("${bin}" create --image "${ref}") ||
+	    atf_fail "create --image failed"
+
+	# In use -> refused, and the image store must survive the refusal.
+	atf_check -s not-exit:0 -e match:"in use" \
+	    "${bin}" rmi "${ref}"
+	atf_check -s exit:0 test -d "${store}"
+
+	# --force removes it even while referenced.
+	atf_check -s exit:0 -o ignore "${bin}" rmi --force "${ref}"
+	atf_check -s exit:0 test '!' -d "${store}"
+
+	"${bin}" delete "${cid}" >/dev/null 2>&1 || true
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case create_start_kill_delete
 	atf_add_test_case create_rejects_missing_bundle
 	atf_add_test_case create_start_with_nullfs
+	atf_add_test_case rmi_refuses_in_use
 }

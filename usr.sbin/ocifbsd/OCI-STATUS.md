@@ -28,13 +28,19 @@ and the `ocifbsd.c` CLI:
 
 **Known design-level limitations (not yet addressed — need a design choice):**
 
-1. **No per-container rootfs.** `create/run --image` uses the shared image
-   store directory directly as the container's OCI bundle, so multiple
-   containers from one image share and mutate the same rootfs, and `rmi`
-   while a container is running would remove that container's rootfs. The
-   correct fix is a per-container copy or a ZFS snapshot/clone of the image
-   rootfs (the zfs_store layer has clone helpers to wire up), plus refusing
-   `rmi` of an in-use image.
+1. **No per-container rootfs (partially addressed 2026-08-31).** `create/run
+   --image` uses the shared image store directory directly as the container's
+   OCI bundle. The dangerous half of this — `rmi` deleting the rootfs out from
+   under a live container — is now **fixed**: `rmi` enumerates container state
+   and refuses when any container's `bundle_path` references the image store,
+   naming the offending container, with `rmi --force` to override
+   (`cli`/`lifecycle_test:rmi_refuses_in_use`). The remaining half is that
+   multiple *writable* containers from one image would share and mutate the
+   same rootfs; the default read-only rootfs (enforced by the runtime) makes
+   sharing safe for the common case. A private per-container rootfs for
+   writable containers (a copy, or a ZFS snapshot/clone via the zfs_store
+   helpers) is a product/design decision on the copy-vs-clone trade-off and is
+   left for that decision rather than imposed as a heavyweight default.
 2. **~~Deep symlink TOCTOU in rm_rf / load_rm_rf.~~ FIXED 2026-08-31.** Both
    recursive removers previously built full paths and acted on them, so a
    component swapped to a symlink mid-operation could be followed. Both were
