@@ -1325,30 +1325,111 @@ forwarder_flush(void)
 }
 
 /*
- * Forwarder send implementations (stubs)
+ * Split a "host:port" (or bare "host") endpoint into its host and service
+ * components, defaulting the service to the syslog UDP port (514) when the
+ * endpoint carries no ":port" suffix. An IPv6 literal may be wrapped in
+ * brackets ("[::1]:514"); the split then keys off the ':' that follows the
+ * closing bracket rather than a colon inside the address. Returns 0 on
+ * success, -1 if the endpoint is empty or a component does not fit its buffer.
+ */
+static int
+forwarder_split_hostport(const char *endpoint, char *host, size_t hostlen,
+    char *service, size_t servicelen)
+{
+    const char *colon;
+    size_t hlen;
+
+    if (endpoint == NULL || endpoint[0] == '\0')
+        return (-1);
+
+    if (endpoint[0] == '[') {
+        const char *rb = strchr(endpoint, ']');
+
+        if (rb == NULL)
+            return (-1);
+        hlen = (size_t)(rb - (endpoint + 1));
+        if (hlen >= hostlen)
+            return (-1);
+        memcpy(host, endpoint + 1, hlen);
+        host[hlen] = '\0';
+        colon = (rb[1] == ':') ? rb + 1 : NULL;
+    } else {
+        /* Bare host or host:port; split on the last ':' so IPv4 and
+         * hostnames work, and reject a colon that is part of an
+         * unbracketed IPv6 literal by treating multiple colons as none. */
+        colon = strrchr(endpoint, ':');
+        if (colon != NULL && strchr(endpoint, ':') != colon)
+            colon = NULL;	/* unbracketed IPv6 literal: no port */
+        hlen = (colon != NULL) ? (size_t)(colon - endpoint)
+                               : strlen(endpoint);
+        if (hlen >= hostlen)
+            return (-1);
+        memcpy(host, endpoint, hlen);
+        host[hlen] = '\0';
+    }
+
+    if (colon != NULL && colon[1] != '\0') {
+        if (strlcpy(service, colon + 1, servicelen) >= servicelen)
+            return (-1);
+    } else {
+        if (strlcpy(service, "514", servicelen) >= servicelen)
+            return (-1);
+    }
+    return (0);
+}
+
+/*
+ * Forwarder send implementations.
+ *
+ * UDP syslog: resolve the forwarder's "host:port" endpoint (default port 514)
+ * and send the record as a single datagram. Unlike the HTTP-based forwarders
+ * below, this speaks plain RFC 3164/5424-style syslog over UDP.
  */
 static int
 forwarder_send_udp(struct log_forwarder *fw, const char *line)
 {
-    int sock;
-    struct sockaddr_in addr;
-    (void)fw;
+    struct addrinfo hints, *res, *ai;
+    char host[256], service[32];
+    int sock, err;
 
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
+    if (fw == NULL || line == NULL)
         return (-1);
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(514);
+    if (forwarder_split_hostport(fw->endpoint, host, sizeof(host),
+        service, sizeof(service)) != 0) {
+        syslog(LOG_WARNING, "forwarder %s: bad endpoint '%s'",
+            fw->name, fw->endpoint);
+        return (-1);
+    }
 
-    /* Parse endpoint */
-    /* Implementation would parse host:port */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    err = getaddrinfo(host, service, &hints, &res);
+    if (err != 0) {
+        syslog(LOG_WARNING, "forwarder %s: resolve %s:%s failed: %s",
+            fw->name, host, service, gai_strerror(err));
+        return (-1);
+    }
 
-    sendto(sock, line, strlen(line), 0, (struct sockaddr *)&addr, sizeof(addr));
-    close(sock);
+    for (ai = res; ai != NULL; ai = ai->ai_next) {
+        sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (sock < 0)
+            continue;
+        if (sendto(sock, line, strlen(line), 0, ai->ai_addr,
+            ai->ai_addrlen) >= 0) {
+            close(sock);
+            freeaddrinfo(res);
+            return (0);
+        }
+        close(sock);
+    }
 
-    return (0);
+    freeaddrinfo(res);
+    syslog(LOG_WARNING, "forwarder %s: send to %s:%s failed",
+        fw->name, host, service);
+    return (-1);
 }
 
 static int

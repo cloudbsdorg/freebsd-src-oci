@@ -19,6 +19,12 @@
 #
 # ocifbsd_test.c.disabled is preserved for history; it referenced
 # APIs that never landed.
+#
+# Self-contained: like the ocifbsd product build, the tests link json-c and
+# libcurl from the vendored in-tree copies under usr.sbin/ocifbsd/contrib/
+# (via jsonc.inc.mk / curl.inc.mk) and otherwise only against FreeBSD base
+# libraries. No ports (/usr/local) are referenced, so the suite builds and
+# runs on a stock base system.
 
 ATF_TESTS_C=	parser_test ensemble_test utils_test oci2jail_test hooks_test \
 		image_ref_test whiteout_test image_parse_test unpack_layer_test \
@@ -32,59 +38,40 @@ ATF_TESTS_SH=	cli_test lifecycle_test
 # convert/ sources compile at WARNS=3; match for #include tests
 WARNS=		3
 
+# ocifbsd source root (parent tree the tests reach into).
+SRCDIR=		${.CURDIR}/../../../usr.sbin/ocifbsd
+
 # Paths into usr.sbin/ocifbsd from tests/usr.sbin/ocifbsd
-CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd
-CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/include
-CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/convert
-CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/src
-CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/image
-CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/orchestration
+CFLAGS+=	-I${SRCDIR}
+CFLAGS+=	-I${SRCDIR}/include
+CFLAGS+=	-I${SRCDIR}/convert
+CFLAGS+=	-I${SRCDIR}/src
+CFLAGS+=	-I${SRCDIR}/image
+CFLAGS+=	-I${SRCDIR}/orchestration
+CFLAGS+=	-I${SRCDIR}/clustering
+CFLAGS+=	-I${SRCDIR}/logd
 
-# utils_test includes src/utils.c (needs libmd for SHA256_Data)
-LIBADD.utils_test+=	md
+# Vendored json-c and libcurl (contrib/), identical to the product build.
+# These add the include paths and link the in-tree static archives, so the
+# tests that #include json-c- or curl-using sources (oci2jail.c, hooks.c,
+# netcfg.c, jsonfmt.c, pull.c, logd/forward.c) need no port.
+JSONC_DIR=	${SRCDIR}/contrib/json-c
+.include "${SRCDIR}/jsonc.inc.mk"
+CURL_DIR=	${SRCDIR}/contrib/curl
+.include "${SRCDIR}/curl.inc.mk"
 
-# oci2jail_test includes src/oci2jail.c (json-c port + libjail)
-CFLAGS.oci2jail_test+=	-I/usr/local/include/json-c
-LDFLAGS.oci2jail_test+=	-L/usr/local/lib
-LDADD.oci2jail_test+=	-ljson-c
-LIBADD.oci2jail_test+=	jail
-
-# hooks_test includes src/hooks.c (json-c for completeness)
-CFLAGS.hooks_test+=	-I/usr/local/include/json-c
-LDFLAGS.hooks_test+=	-L/usr/local/lib
-LDADD.hooks_test+=	-ljson-c
-
-# image_parse_test #includes pull.c + unpack + json-c/curl/md/archive
-CFLAGS.image_parse_test+=	-I/usr/local/include -I/usr/local/include/json-c
-LDFLAGS.image_parse_test+=	-L/usr/local/lib
-LDADD.image_parse_test+=	-lcurl -ljson-c
+# Per-test base-system libraries (all in FreeBSD base):
+#   utils_test        — libmd for SHA256_Data
+#   oci2jail_test     — libjail
+#   image_parse_test  — libmd (digests) + libarchive (layer unpack)
+#   unpack_layer_test — libarchive
+#   logd_forward_test — pthread (in-process HTTP sink)
+#   cluster_pki/mtls  — OpenSSL (base)
+LIBADD.utils_test+=		md
+LIBADD.oci2jail_test+=		jail
 LIBADD.image_parse_test+=	md archive
-
-# netcfg_test #includes network/netcfg.c (json-c for (de)serialization)
-CFLAGS.netcfg_test+=	-I/usr/local/include/json-c
-LDFLAGS.netcfg_test+=	-L/usr/local/lib
-LDADD.netcfg_test+=	-ljson-c
-
-# jsonfmt_test #includes src/jsonfmt.c (json-c pretty-printer)
-CFLAGS.jsonfmt_test+=	-I/usr/local/include/json-c
-LDFLAGS.jsonfmt_test+=	-L/usr/local/lib
-LDADD.jsonfmt_test+=	-ljson-c
-
-# unpack_layer_test #includes unpack.c + whiteout.c
-CFLAGS.unpack_layer_test+=	-I/usr/local/include
-LDFLAGS.unpack_layer_test+=	-L/usr/local/lib
 LIBADD.unpack_layer_test+=	archive
-
-# logd_forward_test #includes logd/forward.c (libcurl HTTP POST) and needs the
-# logd/ include dir plus curl; the in-process HTTP sink uses pthreads.
-CFLAGS.logd_forward_test+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/logd \
-				-I/usr/local/include
-LDFLAGS.logd_forward_test+=	-L/usr/local/lib
-LDADD.logd_forward_test+=	-lcurl
 LIBADD.logd_forward_test+=	pthread
-
-# cluster_pki_test #includes clustering/cluster_pki.c (OpenSSL X509)
-CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/clustering
 LIBADD.cluster_pki_test+=	crypto ssl
 LIBADD.cluster_mtls_test+=	crypto ssl pthread
 

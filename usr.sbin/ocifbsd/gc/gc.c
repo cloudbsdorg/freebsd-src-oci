@@ -329,7 +329,8 @@ gc_process_item(struct gc_item *item)
 }
 
 /*
- * Delete container (stub)
+ * Delete a container by delegating to the ocifbsd runtime CLI
+ * ("ocifbsd delete <name>"); honors dry-run.
  */
 static int
 gc_delete_container(const char *name)
@@ -348,7 +349,8 @@ gc_delete_container(const char *name)
 }
 
 /*
- * Delete image (stub)
+ * Delete an image by delegating to the ocifbsd runtime CLI
+ * ("ocifbsd rmi <name>"); honors dry-run.
  */
 static int
 gc_delete_image(const char *name)
@@ -367,7 +369,8 @@ gc_delete_image(const char *name)
 }
 
 /*
- * Delete volume (stub)
+ * Delete a volume by delegating to the ocifbsd runtime CLI
+ * ("ocifbsd volume rm <name>"); honors dry-run.
  */
 static int
 gc_delete_volume(const char *name)
@@ -386,7 +389,8 @@ gc_delete_volume(const char *name)
 }
 
 /*
- * Delete network (stub)
+ * Delete a network by delegating to the ocifbsd runtime CLI
+ * ("ocifbsd network rm <name>"); honors dry-run.
  */
 static int
 gc_delete_network(const char *name)
