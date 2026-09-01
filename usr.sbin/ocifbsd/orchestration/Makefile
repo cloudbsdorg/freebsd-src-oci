@@ -17,8 +17,11 @@ MAN=	ocifbsd_orchestration.3
 #   sudo pkg install json-c
 CFLAGS+=	-I/usr/local/include
 LDFLAGS+=	-L/usr/local/lib
-LDADD+=		-ljson-c
 
 WARNS?=	3
+
+# json-c is vendored in-tree (contrib/json-c); no port needed.
+JSONC_DIR=	${.CURDIR:H}/contrib/json-c
+.include "${.CURDIR:H}/jsonc.inc.mk"
 
 .include <bsd.lib.mk>

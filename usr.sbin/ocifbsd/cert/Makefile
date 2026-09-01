@@ -21,12 +21,16 @@ LIBADD=	 crypto ssl z pthread util
 # LIBADD, which is validated against src.libnames.mk and rejects port libs).
 # libcurl is the ACME (acme.c) HTTP transport.
 # Install on VM with:  sudo pkg install json-c curl
-CFLAGS+=	-I/usr/local/include/json-c -I/usr/local/include
+CFLAGS+= -I/usr/local/include
 LDFLAGS+=	-L/usr/local/lib
-LDADD+=		-ljson-c -lcurl
+LDADD+=	-lcurl
 
 CFLAGS+=	-I${SRCDIR}/include
 
 WARNS?=	3
+
+# json-c is vendored in-tree (contrib/json-c); no port needed.
+JSONC_DIR=	${SRCDIR}/contrib/json-c
+.include "${SRCDIR}/jsonc.inc.mk"
 
 .include <bsd.prog.mk>

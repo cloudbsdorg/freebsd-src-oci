@@ -80,6 +80,7 @@ MK_TESTS?=	no
 .endif
 
 # Module subdirectories
+SUBDIR+=	contrib/json-c
 SUBDIR+=	api
 SUBDIR+=	cert
 SUBDIR+=	clustering
@@ -126,12 +127,13 @@ LIBADD=	\
 	md \
 	archive
 
-# json-c and curl are ports (not in FreeBSD base) — use LDADD, not LIBADD.
-# Install: pkg install json-c curl
-CFLAGS+=	-I/usr/local/include/json-c
+# json-c is vendored in-tree (contrib/json-c); curl is still a port (LDADD).
+# Install for the networked features: pkg install curl
+JSONC_DIR=	${.CURDIR}/contrib/json-c
+.include "${.CURDIR}/jsonc.inc.mk"
 CFLAGS+=	-I/usr/local/include
 LDFLAGS+=	-L/usr/local/lib
-LDADD+=		-ljson-c -lcurl
+LDADD+=		-lcurl
 #
 # Image module (registry pull, unpack, ZFS paths). Build the archive
 # first, then link it. Works with and without MAKEOBJDIRPREFIX.

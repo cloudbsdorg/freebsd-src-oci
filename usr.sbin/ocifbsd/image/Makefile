@@ -16,7 +16,7 @@ MAN=		ocifbsd_image.3
 #   sudo pkg install curl json-c
 CFLAGS+=	-I/usr/local/include
 LDFLAGS+=	-L/usr/local/lib
-LDADD+=		-lcurl -ljson-c
+LDADD+=	-lcurl
 # archive is a base-system library tracked in src.libnames.mk
 LIBADD+=	archive
 
@@ -24,5 +24,9 @@ WARNS?=		3
 
 # Static archive is linked into the PIE ocifbsd binary (LTO).
 CFLAGS+=	-fPIC
+
+# json-c is vendored in-tree (contrib/json-c); no port needed.
+JSONC_DIR=	${.CURDIR:H}/contrib/json-c
+.include "${.CURDIR:H}/jsonc.inc.mk"
 
 .include <bsd.lib.mk>

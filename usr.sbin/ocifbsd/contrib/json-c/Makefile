@@ -12,6 +12,14 @@ SRCS=	arraylist.c debug.c json_c_version.c json_object.c \
 # Use our hand-written config.h / json_config.h instead of the cmake ones.
 CFLAGS+=	-I${.CURDIR} -DHAVE_CONFIG_H
 
+# ocifbsd binaries are PIE, so the archive's objects must be position
+# independent to link into them.
+CFLAGS+=	-fPIC
+
+# json-c ships release builds with NDEBUG (its internal assert()s are debug
+# aids, not error handling). Match that so the library behaves as the port did.
+CFLAGS+=	-DNDEBUG
+
 # Upstream code is not warning-clean at the tree's default level; keep it
 # quiet so a third-party import does not gate the build.
 WARNS=	0
