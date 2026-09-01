@@ -63,6 +63,11 @@
 #define GOSSIP_MSG_RESPONSE      5
 #define GOSSIP_MSG_USER_DATA     6
 #define GOSSIP_MSG_HEARTBEAT    7
+/* Raft consensus RPCs (RFC-style RequestVote / AppendEntries). */
+#define GOSSIP_MSG_VOTE_REQ      8
+#define GOSSIP_MSG_VOTE_RESP     9
+#define GOSSIP_MSG_APPEND_REQ   10
+#define GOSSIP_MSG_APPEND_RESP  11
 
 /* Cluster configuration */
 struct cluster_config {
@@ -207,6 +212,10 @@ int swim_mark_alive(const char *node_id);
 
 /* Raft consensus */
 int raft_init(void);
+int raft_start(void);   /* start the election/heartbeat ticker thread */
+int raft_stop(void);    /* stop the ticker thread */
+int raft_role(void);    /* 0=follower, 1=candidate, 2=leader */
+uint64_t raft_term(void);
 int raft_become_leader(void);
 int raft_become_follower(const char *leader_id);
 int raft_become_candidate(void);

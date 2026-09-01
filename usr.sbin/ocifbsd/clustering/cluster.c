@@ -43,6 +43,7 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <pwd.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,6 +77,45 @@ static struct swim_state swim;
 /* Raft state */
 static struct raft_state raft;
 
+/*
+ * Raft RPC wire payloads (host byte order; homogeneous amd64 cluster) and
+ * inbound-RPC handlers. Declared here so the gossip dispatch below can decode
+ * them; the implementations live with the election machinery further down.
+ */
+struct raft_vote_req {
+    uint64_t term;
+    uint64_t last_log_index;
+    uint64_t last_log_term;
+};
+struct raft_vote_resp {
+    uint64_t term;
+    uint8_t  granted;
+};
+struct raft_append_req {
+    uint64_t term;
+    uint64_t prev_log_index;
+    uint64_t prev_log_term;
+    uint64_t leader_commit;
+    uint32_t n_entries;
+};
+struct raft_append_resp {
+    uint64_t term;
+    uint8_t  success;
+    uint64_t match_index;
+};
+/* Gossip transport internals, used before their definitions below. */
+static void *gossip_loop(void *arg);
+static void gossip_handle_message(uint8_t *buf, size_t len,
+    struct sockaddr_in *sender);
+static void gossip_process_state(const char *source_id, uint8_t *payload,
+    size_t len);
+
+static void raft_on_vote_req(const char *from, const struct raft_vote_req *r);
+static void raft_on_vote_resp(const char *from, const struct raft_vote_resp *r);
+static void raft_on_append_req(const char *from, const struct raft_append_req *r);
+static void raft_on_append_resp(const char *from,
+    const struct raft_append_resp *r);
+
 /* Event callback */
 static cluster_event_cb event_callback;
 
@@ -92,6 +132,14 @@ node_compare(struct cluster_node *a, struct cluster_node *b)
 {
     return (strcmp(a->node_id, b->node_id));
 }
+
+/*
+ * Generate the red-black tree routines the node registry uses. cluster.h only
+ * RB_PROTOTYPEs them; without the matching RB_GENERATE the node_tree_RB_*
+ * symbols are undefined, so the clustering code could never link into a
+ * program (only compile as an object). Emit them here, after node_compare.
+ */
+RB_GENERATE(node_tree, cluster_node, entry, node_compare);
 
 /*
  * Initialize cluster subsystem
@@ -707,7 +755,31 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
             /* Anti-entropy state exchange */
             gossip_process_state(msg->source_id, msg->payload, msg->length);
             break;
-            
+
+        case GOSSIP_MSG_VOTE_REQ:
+            if (msg->length >= sizeof(struct raft_vote_req))
+                raft_on_vote_req(msg->source_id,
+                    (const struct raft_vote_req *)msg->payload);
+            break;
+
+        case GOSSIP_MSG_VOTE_RESP:
+            if (msg->length >= sizeof(struct raft_vote_resp))
+                raft_on_vote_resp(msg->source_id,
+                    (const struct raft_vote_resp *)msg->payload);
+            break;
+
+        case GOSSIP_MSG_APPEND_REQ:
+            if (msg->length >= sizeof(struct raft_append_req))
+                raft_on_append_req(msg->source_id,
+                    (const struct raft_append_req *)msg->payload);
+            break;
+
+        case GOSSIP_MSG_APPEND_RESP:
+            if (msg->length >= sizeof(struct raft_append_resp))
+                raft_on_append_resp(msg->source_id,
+                    (const struct raft_append_resp *)msg->payload);
+            break;
+
         default:
             break;
     }
@@ -965,8 +1037,280 @@ raft_init(void)
     raft.current_term = 0;
     raft.commit_index = 0;
     raft.last_applied = 0;
-    
+
     return (0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Raft election (RFC 8555-style RequestVote / AppendEntries)         */
+/*                                                                    */
+/* RequestVote and AppendEntries (heartbeat) ride the gossip UDP      */
+/* transport; msg->source_id identifies the peer. Wire payloads use   */
+/* host byte order — the cluster is homogeneous amd64. Log            */
+/* replication, commit advancement, and on-disk persistence of        */
+/* (currentTerm, votedFor, log) are layered on in later stages; this  */
+/* stage delivers safe leader election with randomized timeouts.      */
+/* ------------------------------------------------------------------ */
+
+#define RAFT_ELECTION_MIN_MS   1500
+#define RAFT_ELECTION_MAX_MS   3000
+#define RAFT_HEARTBEAT_MS       400
+#define RAFT_TICK_MS             50
+
+static int      raft_running;
+static pthread_t raft_thread;
+static int      raft_votes_granted;
+static int64_t  raft_election_deadline_ms;
+static int64_t  raft_last_hb_ms;
+
+static int64_t
+raft_now_ms(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+/* Must be called with cluster_lock held. */
+static void
+raft_reset_election_timer(void)
+{
+    raft_election_deadline_ms = raft_now_ms() + RAFT_ELECTION_MIN_MS +
+        (int64_t)(random() % (RAFT_ELECTION_MAX_MS - RAFT_ELECTION_MIN_MS + 1));
+}
+
+/* Total cluster size = registered peers + self. Never call while holding
+ * cluster_lock (cluster_nodes_list takes node_registry_lock). */
+static int
+raft_cluster_size(void)
+{
+    int count = 0;
+    struct cluster_node **nodes = cluster_nodes_list(&count);
+
+    free(nodes);
+    return (count + 1);
+}
+
+/* Log tips — call with cluster_lock held. */
+static uint64_t
+raft_last_log_index(void)
+{
+    return ((uint64_t)raft.log_size);
+}
+static uint64_t
+raft_last_log_term(void)
+{
+    return (raft.log_size > 0 ? raft.log[raft.log_size - 1].term : 0);
+}
+
+static void *
+raft_loop(void *arg)
+{
+    (void)arg;
+    while (__sync_fetch_and_add(&raft_running, 0) != 0) {
+        int64_t now = raft_now_ms();
+        int do_vote = 0, do_hb = 0;
+        struct raft_vote_req vreq;
+        struct raft_append_req areq;
+
+        memset(&vreq, 0, sizeof(vreq));
+        memset(&areq, 0, sizeof(areq));
+
+        pthread_mutex_lock(&cluster_lock);
+        if (raft.state == RAFT_LEADER) {
+            if (now - raft_last_hb_ms >= RAFT_HEARTBEAT_MS) {
+                raft_last_hb_ms = now;
+                areq.term = raft.current_term;
+                areq.prev_log_index = raft_last_log_index();
+                areq.prev_log_term = raft_last_log_term();
+                areq.leader_commit = raft.commit_index;
+                areq.n_entries = 0;
+                do_hb = 1;
+            }
+        } else if (now >= raft_election_deadline_ms) {
+            /* Election timeout — start a new election. */
+            raft.state = RAFT_CANDIDATE;
+            raft.current_term++;
+            strlcpy(raft.voted_for, local_node->node_id,
+                sizeof(raft.voted_for));
+            raft_votes_granted = 1;             /* vote for self */
+            raft_reset_election_timer();
+            vreq.term = raft.current_term;
+            vreq.last_log_index = raft_last_log_index();
+            vreq.last_log_term = raft_last_log_term();
+            do_vote = 1;
+        }
+        pthread_mutex_unlock(&cluster_lock);
+
+        if (do_hb)
+            gossip_broadcast(GOSSIP_MSG_APPEND_REQ, &areq, sizeof(areq));
+        if (do_vote)
+            gossip_broadcast(GOSSIP_MSG_VOTE_REQ, &vreq, sizeof(vreq));
+
+        usleep(RAFT_TICK_MS * 1000);
+    }
+    return (NULL);
+}
+
+/* Handle an inbound RequestVote. */
+static void
+raft_on_vote_req(const char *from, const struct raft_vote_req *r)
+{
+    struct raft_vote_resp resp;
+    uint8_t grant = 0;
+
+    memset(&resp, 0, sizeof(resp));
+    pthread_mutex_lock(&cluster_lock);
+    if (r->term > raft.current_term) {      /* newer term: step down */
+        raft.current_term = r->term;
+        raft.state = RAFT_FOLLOWER;
+        raft.voted_for[0] = '\0';
+    }
+    if (r->term == raft.current_term &&
+        (raft.voted_for[0] == '\0' || strcmp(raft.voted_for, from) == 0) &&
+        (r->last_log_term > raft_last_log_term() ||
+         (r->last_log_term == raft_last_log_term() &&
+          r->last_log_index >= raft_last_log_index()))) {
+        grant = 1;
+        strlcpy(raft.voted_for, from, sizeof(raft.voted_for));
+        raft_reset_election_timer();
+    }
+    resp.term = raft.current_term;
+    resp.granted = grant;
+    pthread_mutex_unlock(&cluster_lock);
+
+    gossip_send_message(from, GOSSIP_MSG_VOTE_RESP, &resp, sizeof(resp));
+}
+
+/* Handle a RequestVote reply. */
+static void
+raft_on_vote_resp(const char *from, const struct raft_vote_resp *r)
+{
+    int majority = raft_cluster_size() / 2 + 1;
+    uint8_t became = 0;
+
+    (void)from;
+    pthread_mutex_lock(&cluster_lock);
+    if (r->term > raft.current_term) {
+        raft.current_term = r->term;
+        raft.state = RAFT_FOLLOWER;
+        raft.voted_for[0] = '\0';
+        raft_reset_election_timer();
+    } else if (raft.state == RAFT_CANDIDATE && r->term == raft.current_term &&
+        r->granted) {
+        raft_votes_granted++;
+        if (raft_votes_granted >= majority) {
+            raft.state = RAFT_LEADER;
+            strlcpy(raft.leader_id, local_node->node_id,
+                sizeof(raft.leader_id));
+            raft_last_hb_ms = 0;        /* send a heartbeat immediately */
+            became = 1;
+        }
+    }
+    pthread_mutex_unlock(&cluster_lock);
+
+    if (became)
+        cluster_emit_event(6, local_node->node_id, "became leader");
+}
+
+/* Handle an inbound AppendEntries (heartbeat in this stage). */
+static void
+raft_on_append_req(const char *from, const struct raft_append_req *r)
+{
+    struct raft_append_resp resp;
+
+    memset(&resp, 0, sizeof(resp));
+    pthread_mutex_lock(&cluster_lock);
+    if (r->term < raft.current_term) {          /* stale leader: reject */
+        resp.term = raft.current_term;
+        resp.success = 0;
+        resp.match_index = raft_last_log_index();
+        pthread_mutex_unlock(&cluster_lock);
+        gossip_send_message(from, GOSSIP_MSG_APPEND_RESP, &resp,
+            sizeof(resp));
+        return;
+    }
+    /* Valid leader for this term: (re)establish follower state. */
+    raft.current_term = r->term;
+    raft.state = RAFT_FOLLOWER;
+    strlcpy(raft.leader_id, from, sizeof(raft.leader_id));
+    raft_reset_election_timer();
+    /* Log consistency check + entry append arrive in the next stage;
+     * a heartbeat (n_entries == 0) is acknowledged as success here. */
+    resp.term = raft.current_term;
+    resp.success = 1;
+    resp.match_index = raft_last_log_index();
+    pthread_mutex_unlock(&cluster_lock);
+
+    gossip_send_message(from, GOSSIP_MSG_APPEND_RESP, &resp, sizeof(resp));
+}
+
+/* Handle an AppendEntries reply. */
+static void
+raft_on_append_resp(const char *from, const struct raft_append_resp *r)
+{
+    (void)from;
+    pthread_mutex_lock(&cluster_lock);
+    if (r->term > raft.current_term) {          /* newer term: step down */
+        raft.current_term = r->term;
+        raft.state = RAFT_FOLLOWER;
+        raft.voted_for[0] = '\0';
+        raft_reset_election_timer();
+    }
+    /* match/next-index bookkeeping is added with log replication. */
+    pthread_mutex_unlock(&cluster_lock);
+}
+
+int
+raft_start(void)
+{
+    if (__sync_fetch_and_add(&raft_running, 0) != 0)
+        return (0);
+    /* Seed the PRNG per-process so nodes pick different election timeouts. */
+    srandom((unsigned)(time(NULL) ^ (getpid() << 8)));
+    pthread_mutex_lock(&cluster_lock);
+    raft_reset_election_timer();
+    raft_last_hb_ms = 0;
+    pthread_mutex_unlock(&cluster_lock);
+    __sync_fetch_and_or(&raft_running, 1);
+    if (pthread_create(&raft_thread, NULL, raft_loop, NULL) != 0) {
+        __sync_fetch_and_and(&raft_running, 0);
+        return (-1);
+    }
+    return (0);
+}
+
+int
+raft_stop(void)
+{
+    if (__sync_fetch_and_add(&raft_running, 0) == 0)
+        return (0);
+    __sync_fetch_and_and(&raft_running, 0);
+    pthread_join(raft_thread, NULL);
+    return (0);
+}
+
+int
+raft_role(void)
+{
+    int s;
+
+    pthread_mutex_lock(&cluster_lock);
+    s = raft.state;
+    pthread_mutex_unlock(&cluster_lock);
+    return (s);
+}
+
+uint64_t
+raft_term(void)
+{
+    uint64_t t;
+
+    pthread_mutex_lock(&cluster_lock);
+    t = raft.current_term;
+    pthread_mutex_unlock(&cluster_lock);
+    return (t);
 }
 
 /*

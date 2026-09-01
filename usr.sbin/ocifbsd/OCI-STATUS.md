@@ -71,6 +71,28 @@ and the `ocifbsd.c` CLI:
    completes once released) and pinned by two ATF regression cases
    (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
+## 🗳️ **2026-09-01 — Raft leader election (stage 1) implemented + validated on a 3-node cluster**
+
+The `clustering/` scaffold had the Raft *structs* and trivial state-setters
+but no consensus. Implemented real **Raft leader election** in `cluster.c`:
+RequestVote and AppendEntries (heartbeat) RPCs riding the existing gossip UDP
+transport, a ticker thread with randomized election timeouts (1.5–3.0 s),
+per-term self-vote + majority vote counting, leader heartbeats (400 ms), and
+the standard term/step-down safety rules. New API: `raft_start`/`raft_stop`/
+`raft_role`/`raft_term`; a `raft-test` harness drives it multi-node.
+
+Validated on a **real 3-node FreeBSD 16.0-CURRENT cluster** (the `.240/.241/
+.242` vm-bhyve VMs): the nodes elect a single leader at term 1 with both
+followers agreeing; killing the leader triggers a correct re-election —
+`freebsd-16-2` became leader at **term 2** and the survivor agreed — i.e.
+majority election + failover work over the wire.
+
+Two latent bugs in the clustering code were fixed in passing: `cluster.c` used
+`offsetof` without `<stddef.h>`, and the node-registry red-black tree was
+`RB_PROTOTYPE`d but never `RB_GENERATE`d (so the code could only compile, never
+link into a program). Log replication, commit-index advancement, and on-disk
+persistence of (currentTerm, votedFor, log) are the next Raft stages.
+
 ## ✅ **2026-09-01 — Validated on FreeBSD 16.0-CURRENT (tier-1 target)**
 
 This session's whole runtime was rebuilt and exercised on a FreeBSD
