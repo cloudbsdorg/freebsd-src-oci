@@ -62,6 +62,7 @@ main(int argc, char **argv)
 		fprintf(stderr, "raft_start failed\n");
 		return (1);
 	}
+	cluster_announce();     /* tell any running cluster we exist */
 
 	gethostname(hn, sizeof(hn));
 	int tick = 0, proposed = 0;
@@ -80,13 +81,19 @@ main(int argc, char **argv)
 			raft_append_entry(cmd, strlen(cmd));
 		}
 
+		int nc = 0;
+		struct cluster_node **nl = cluster_nodes_list(&nc);
+		free(nl);
+
 		raft_get_leader(leader, sizeof(leader));
 		printf("[%s] role=%-9s term=%llu leader=%-12s "
-		    "log=%d commit=%llu\n", hn, rs,
+		    "nodes=%d log=%d commit=%llu\n", hn, rs,
 		    (unsigned long long)raft_term(),
-		    leader[0] ? leader : "(none)",
+		    leader[0] ? leader : "(none)", nc + 1,
 		    raft_log_len(), (unsigned long long)raft_commit_index());
 		fflush(stdout);
+		if ((tick % 5) == 0)
+			cluster_announce();   /* re-announce so late joiners learn us */
 		tick++;
 		sleep(1);
 	}

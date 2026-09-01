@@ -215,7 +215,22 @@ cluster_init(struct cluster_config *config)
         }
         freeifaddrs(ifaddrs);
     }
-    
+
+    /*
+     * Optional overrides: OCIFBSD_NODE_ID pins a stable node identity (useful
+     * when several instances share a host), OCIFBSD_NODE_IP pins the address
+     * this node advertises when it announces itself to a running cluster.
+     */
+    {
+        const char *env_id = getenv("OCIFBSD_NODE_ID");
+        const char *env_ip = getenv("OCIFBSD_NODE_IP");
+
+        if (env_id != NULL && env_id[0] != '\0')
+            strlcpy(local_node->node_id, env_id, sizeof(local_node->node_id));
+        if (env_ip != NULL && env_ip[0] != '\0')
+            strlcpy(local_node->ip, env_ip, sizeof(local_node->ip));
+    }
+
     local_node->port = cluster_conf.cluster_port;
     local_node->api_port = cluster_conf.api_port;
     local_node->role = NODE_ROLE_WORKER;
@@ -803,6 +818,20 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
         default:
             break;
     }
+}
+
+/*
+ * Announce this node to the currently-known peers as a JOIN, so a running
+ * cluster adds it to the membership. The JOIN handler reads node_id/ip/port
+ * from the payload; the remaining struct fields are ignored on the wire.
+ */
+int
+cluster_announce(void)
+{
+    if (local_node == NULL)
+        return (-1);
+    return (gossip_broadcast(GOSSIP_MSG_JOIN, local_node,
+        sizeof(struct cluster_node)));
 }
 
 /*
@@ -1500,6 +1529,11 @@ raft_replicate_to_peers(void)
             break;
         }
         strlcpy(target, peers[i]->node_id, sizeof(target));
+        /* A peer that appeared after this node became leader (a membership
+         * change) has an uninitialized (0) cursor — start it optimistically
+         * at our last index + 1; the normal back-off backfills it. */
+        if (peers[i]->raft_next_index == 0)
+            peers[i]->raft_next_index = raft_last_log_index() + 1;
         ni = peers[i]->raft_next_index;
         if (ni < 1)
             ni = 1;

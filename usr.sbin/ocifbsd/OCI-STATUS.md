@@ -71,6 +71,25 @@ and the `ocifbsd.c` CLI:
    completes once released) and pinned by two ATF regression cases
    (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
+## ➕ **2026-09-01 — Raft membership changes (stage 4a) implemented + validated on a 4-node cluster**
+
+Enabled dynamic cluster membership: a starting node announces itself
+(`cluster_announce` → a JOIN broadcast) so a running cluster adds it, and the
+leader now initializes the replication cursor for any peer that appears after
+it took office (a 0/uninitialized `nextIndex` is treated as
+last-index+1, then backed off to backfill). `OCIFBSD_NODE_ID`/`OCIFBSD_NODE_IP`
+can pin identity/address. Majority is computed from the live membership, so
+adding one node at a time keeps overlapping quorums.
+
+Validated on a **4-node FreeBSD 16 cluster** (added a 4th VM, `.243`): started
+a 3-node cluster (nodes=3, one leader), then brought up the 4th live — it
+self-announced, all nodes converged to **nodes=4**, and it caught up to the
+committed log as a follower. Quorum safety: killing 2 of 4 (below majority 3)
+produced **no new leader and no log progress** (term climbed on failed
+elections, commit frozen); restoring a 3rd node re-established a leader and
+resumed commits. The last Raft piece is log compaction / snapshots
+(stage 4b), so the log doesn't grow without bound.
+
 ## 💾 **2026-09-01 — Raft persistence (stage 3) implemented + validated on a 3-node cluster**
 
 Made Raft state durable (§5): `currentTerm`, `votedFor`, and the log are

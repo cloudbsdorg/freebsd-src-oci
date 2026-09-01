@@ -208,6 +208,9 @@ int gossip_start(void);
 int gossip_stop(void);
 int gossip_send_message(const char *target_id, uint8_t type, const void *payload, size_t len);
 int gossip_broadcast(uint8_t type, const void *payload, size_t len);
+/* Announce this node (as a JOIN) to the currently-known peers, so a running
+ * cluster learns of a newly-started member. */
+int cluster_announce(void);
 
 /* Failure detection */
 int swim_init(void);
