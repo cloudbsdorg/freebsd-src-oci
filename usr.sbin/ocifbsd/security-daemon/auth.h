@@ -111,7 +111,7 @@ RB_PROTOTYPE(token_tree, auth_token, entry, token_compare);
 struct secret {
     char name[256];
     char namespace[256];
-    char type[64];            /* opaque, docker-registry, tls */
+    char type[64];            /* opaque, registry, tls */
     char *data;               /* encrypted secret data */
     size_t data_len;
     time_t created;

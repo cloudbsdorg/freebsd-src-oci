@@ -55,7 +55,7 @@
  * Run a health-check command and return its exit status (0 = healthy).
  *
  * EXEC probes are run via fork/exec of a tokenized argument vector — no
- * shell — matching Kubernetes exec-probe semantics (a command + args, not
+ * shell — matching exec-probe semantics (a command + args, not
  * a shell string) and removing the shell-injection surface that system()
  * exposed. SHELL probes still use /bin/sh -c because a shell is their
  * explicit purpose.

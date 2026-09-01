@@ -1143,7 +1143,7 @@ container_start(struct ocifbsd_container *c)
 		 * the process never actually started; report those as an error
 		 * (with a meaningful errno). Any other exit — including 0 — means
 		 * the container started and exited on its own, which is a normal
-		 * outcome (like `docker run` of a short-lived command), so return
+		 * outcome (like a short-lived foreground run), so return
 		 * success and let the recorded exit_code/STOPPED state stand.
 		 */
 		if (WIFEXITED(status) &&

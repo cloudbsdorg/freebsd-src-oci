@@ -83,7 +83,7 @@ struct log_entry {
     char            message[4096];       /* Log message */
     char            fields[2048];        /* Structured fields (JSON) */
     char            hostname[256];       /* Origin hostname */
-    char            namespace[128];      /* Kubernetes namespace */
+    char            namespace[128];      /* orchestration namespace */
     char            pod_name[256];       /* Pod name */
     char            container_name[128]; /* Container name */
     uint32_t        pid;                /* Process ID */

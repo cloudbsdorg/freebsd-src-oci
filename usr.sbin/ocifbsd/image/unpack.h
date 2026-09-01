@@ -50,7 +50,7 @@ struct unpack_options {
 /*
  * Whiteout handling
  *
- * In OCI/Docker, whiteout files are used to mark files that should be
+ * In the OCI image format, whiteout files are used to mark files that should be
  * deleted when building the layer. These are files with a ".wh." prefix
  * in their name. When unpacking, we can either:
  *   1. Expand whiteouts: create .wh.<filename> to mark deletion

@@ -1,13 +1,13 @@
 # ocifbsd - FreeBSD Native OCI Runtime
 
-`ocifbsd` is a native Open Container Initiative (OCI) runtime for FreeBSD, designed to provide Docker/Kubernetes-compatible container functionality using FreeBSD's native jail(8) technology.
+`ocifbsd` is a native Open Container Initiative (OCI) runtime for FreeBSD, designed to provide OCI-compatible container functionality using FreeBSD's native jail(8) technology.
 
 ## Features
 
 - **OCI Runtime Compliance**: Runs OCI-compliant containers on FreeBSD
 - **FreeBSD Native**: Uses jail(8), VNET, RCTL, ZFS, and other FreeBSD technologies
-- **Kubernetes Ready**: Supports pods, stacks, services, and rolling updates
-- **Image Management**: Pull/push images from OCI and Docker registries
+- **Orchestration Ready**: Pods, stacks, services, and rolling updates
+- **Image Management**: Pull/push images from any OCI-compliant registry
 - **Networking**: Bridge, VNET, CNI plugin support
 - **Resource Limits**: Memory, CPU, process limits via RCTL
 - **Security**: MAC labels, RBAC, secrets
@@ -17,7 +17,7 @@
   daemon
 - **Certificates**: Native ACME (RFC 8555) client with ES256/JWS, HTTP-01
   challenges, rotation and backup — built on base OpenSSL 3
-- **Config Conversion**: Convert Kubernetes YAML and Docker Compose to native format
+- **Config Conversion**: Convert Ensemble manifests (declarative resources and multi-service stacks) to the native format
 
 ## Quick Start
 
@@ -32,16 +32,10 @@ make
 ```
 
 That's it. The default `make` target builds the main `ocifbsd`
-binary plus all 6 active SUBDIRs. No environment variables
-required, no cross-toolchain, no sysroot. This is the build
-path that produces the binary that actually runs on FreeBSD.
-
-**Note**: 9 of the 15 SUBDIRs (cert, export, gc, image, logd,
-network, orchestration, pam, security) are currently commented
-out in the Makefile as deferred AI-slop refactor work. They
-build clean, link, and run only after their respective
-refactor PRs land. See `OCI-STATUS.md` §5 for per-SUBDIR
-status.
+binary plus all SUBDIRs and the two vendored libraries. No
+environment variables required, no cross-toolchain, no sysroot,
+and no ports. This is the build path that produces the binary
+that actually runs on FreeBSD.
 
 **Note**: On FreeBSD, `/usr/bin/make` IS bmake (BSD make has been the
 base `make` on FreeBSD since FreeBSD 9). You do not need to install
@@ -88,14 +82,14 @@ ocifbsd pod logs my-pod
 ocifbsd pod scale my-pod --replicas 5
 ```
 
-### Convert Kubernetes Config
+### Convert Ensemble Config
 
 ```bash
-# Convert a Kubernetes Deployment
+# Convert a declarative Deployment manifest
 ocifbsd-convert deployment.yaml -f simple > output.yaml
 
-# Convert Docker Compose
-ocifbsd-convert docker-compose.yml --format native > output.yaml
+# Convert a multi-service stack
+ocifbsd-convert app.stack.yml --format native > output.yaml
 ```
 
 ## Architecture
@@ -108,7 +102,7 @@ ocifbsd
 ├── api/               # REST API server
 ├── cert/              # Certificate management (ACME/RFC 8555, rotation, backup)
 ├── clustering/        # Clustering (gossip + full Raft consensus)
-├── convert/           # Config conversion (K8s, Compose)
+├── convert/           # Config conversion (Ensemble manifests)
 ├── export/            # Cloud export scaffolding (AWS, GCP, Azure)
 ├── gc/                # Garbage collection
 ├── image/             # Image management (pull, push, unpack, ZFS storage)
@@ -213,7 +207,7 @@ cluster:
 
 | Command | Description |
 |---------|-------------|
-| `ocifbsd-convert` | Convert K8s/Compose to native format |
+| `ocifbsd-convert` | Convert Ensemble manifests to native format |
 
 ## Documentation
 

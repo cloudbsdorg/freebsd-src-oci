@@ -131,7 +131,7 @@ scheduler_init(void)
 	nodes[0]->last_heartbeat = time(NULL);
 	nodes[0]->memory_capacity = get_physmem() * 4096;  /* bytes */
 	nodes[0]->cpu_capacity = sysconf(_SC_NPROCESSORS_ONLN) * 1000;  /* millicores */
-	nodes[0]->pods_capacity = 110;  /* default k8s limit */
+	nodes[0]->pods_capacity = 110;  /* default pods-per-node limit */
 	
 	node_count = 1;
 	scheduler_initialized = true;
