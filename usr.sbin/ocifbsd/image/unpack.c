@@ -118,6 +118,86 @@ mkdirp_local(const char *path, mode_t mode)
 }
 
 #define	mkdirp(path, mode)	mkdirp_local((path), (mode))
+
+/*
+ * Open (creating any missing components) the directory named by the relative
+ * path `relpath` beneath the already-open directory `rootfd`, returning a new
+ * fd to it, or -1.
+ *
+ * Every component is resolved with O_RESOLVE_BENEATH, so a symlink that would
+ * escape `rootfd` — an absolute target, or one climbing out with ".." — fails
+ * with ENOTCAPABLE rather than letting extraction write outside the layer root.
+ * This closes the class of attack where an earlier layer entry plants a symlink
+ * (e.g. "etc" -> "/") and a later entry ("etc/passwd") writes through it onto
+ * the host. Symlinks that stay within the root are still honored, which real
+ * multi-layer images rely on. Missing components are created with mkdirat,
+ * whose single-component name cannot itself traverse a symlink.
+ */
+static int
+open_dir_beneath(int rootfd, const char *relpath, mode_t mode)
+{
+	char buf[PATH_MAX];
+	char *comp, *save;
+	int cur, next;
+
+	cur = openat(rootfd, ".", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+	if (cur < 0)
+		return (-1);
+	if (relpath == NULL || relpath[0] == '\0')
+		return (cur);
+	if (strlcpy(buf, relpath, sizeof(buf)) >= sizeof(buf)) {
+		close(cur);
+		return (-1);
+	}
+	for (comp = strtok_r(buf, "/", &save); comp != NULL;
+	    comp = strtok_r(NULL, "/", &save)) {
+		if (comp[0] == '\0' || strcmp(comp, ".") == 0)
+			continue;
+		if (strcmp(comp, "..") == 0) {	/* never climb out */
+			close(cur);
+			return (-1);
+		}
+		next = openat(cur, comp,
+		    O_DIRECTORY | O_RDONLY | O_CLOEXEC | O_RESOLVE_BENEATH);
+		if (next < 0 && errno == ENOENT) {
+			if (mkdirat(cur, comp, mode) != 0 && errno != EEXIST) {
+				close(cur);
+				return (-1);
+			}
+			next = openat(cur, comp, O_DIRECTORY | O_RDONLY |
+			    O_CLOEXEC | O_RESOLVE_BENEATH);
+		}
+		close(cur);
+		if (next < 0)
+			return (-1);	/* ENOTCAPABLE => escape attempt */
+		cur = next;
+	}
+	return (cur);
+}
+
+/*
+ * Split `relpath` into its parent directory (written to pbuf) and the final
+ * component (returned, pointing within relpath). A path with no '/' has an
+ * empty parent — the layer root itself. Returns NULL if the parent does not
+ * fit pbuf.
+ */
+static const char *
+split_parent(const char *relpath, char *pbuf, size_t pbufsz)
+{
+	const char *slash = strrchr(relpath, '/');
+	size_t plen;
+
+	if (slash == NULL) {
+		pbuf[0] = '\0';
+		return (relpath);
+	}
+	plen = (size_t)(slash - relpath);
+	if (plen >= pbufsz)
+		return (NULL);
+	memcpy(pbuf, relpath, plen);
+	pbuf[plen] = '\0';
+	return (slash + 1);
+}
 #include <zlib.h>
 
 #include "unpack.h"
@@ -357,7 +437,12 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 {
 	const char *pathname;
 	char path[PATH_MAX];
+	char parentrel[PATH_MAX];
+	char relnorm[PATH_MAX];
+	const char *leaf;
+	size_t nl;
 	int fd;
+	int destfd;
 	int ret = 0;
 
 	pathname = archive_entry_pathname(entry);
@@ -378,41 +463,64 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 		return (-1);
 	}
 
-	/* Build destination path */
+	/* Build destination path (used only for diagnostics). */
 	snprintf(path, sizeof(path), "%s/%s", dest, pathname);
 
 	archive_entry_stat(entry);
 
+	/*
+	 * Perform every create beneath an open handle to the layer root, with
+	 * each path component resolved O_RESOLVE_BENEATH (see open_dir_beneath),
+	 * so a symlink planted by an earlier entry cannot redirect a write
+	 * outside the rootfs.
+	 */
+	destfd = open(dest, O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+	if (destfd < 0) {
+		fprintf(stderr, "error: cannot open layer root %s: %s\n",
+		    dest, strerror(errno));
+		return (-1);
+	}
+	/*
+	 * Normalize the entry name: tar directory entries carry a trailing
+	 * slash. Strip it so split_parent yields a real leaf. A name that
+	 * normalizes to empty or "." is the layer root itself — nothing to do.
+	 */
+	if (strlcpy(relnorm, pathname, sizeof(relnorm)) >= sizeof(relnorm)) {
+		close(destfd);
+		return (-1);
+	}
+	nl = strlen(relnorm);
+	while (nl > 1 && relnorm[nl - 1] == '/')
+		relnorm[--nl] = '\0';
+	if (nl == 0 || strcmp(relnorm, ".") == 0 || strcmp(relnorm, "/") == 0) {
+		close(destfd);
+		return (0);
+	}
+	leaf = split_parent(relnorm, parentrel, sizeof(parentrel));
+	if (leaf == NULL || leaf[0] == '\0') {
+		close(destfd);
+		return (-1);
+	}
+
 	switch (archive_entry_filetype(entry)) {
 	case AE_IFREG: {
-		/*
-		 * dirname(3) may modify its argument in place — copy first
-		 * so we do not clobber the full destination path.
-		 */
-		char path_copy[PATH_MAX];
-		char *parent;
+		int pfd = open_dir_beneath(destfd, parentrel, 0755);
 
-		strlcpy(path_copy, path, sizeof(path_copy));
-		parent = dirname(path_copy);
-		if (mkdirp(parent, 0755) != 0 && errno != EEXIST) {
-			fprintf(stderr, "error: cannot create directory: %s\n",
-			    parent);
+		if (pfd < 0) {
+			fprintf(stderr, "error: rejecting unsafe layer path "
+			    "(symlink escape): %s\n", pathname);
+			close(destfd);
 			return (-1);
 		}
-
-		/*
-		 * O_NOFOLLOW on the final component prevents writing through
-		 * a symlink planted by an earlier entry in the same layer.
-		 */
-		fd = open(path, O_CREAT | O_WRONLY | O_TRUNC | O_NOFOLLOW,
-		    archive_entry_mode(entry));
+		fd = openat(pfd, leaf, O_CREAT | O_WRONLY | O_TRUNC |
+		    O_NOFOLLOW, archive_entry_mode(entry));
 		if (fd < 0) {
 			fprintf(stderr, "error: cannot create file: %s: %s\n",
 			    path, strerror(errno));
+			close(pfd);
+			close(destfd);
 			return (-1);
 		}
-
-		/* Copy data */
 		{
 		char buf[8192];
 		ssize_t n;
@@ -424,70 +532,67 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 			}
 		}
 		}
-
+		if (opts->keep_permissions) {
+			(void)fchmod(fd, archive_entry_mode(entry));
+			(void)fchown(fd, archive_entry_uid(entry),
+			    archive_entry_gid(entry));
+		}
 		close(fd);
-
-		/* Preserve permissions if requested */
-		if (opts->keep_permissions) {
-			chmod(path, archive_entry_mode(entry));
-			chown(path, archive_entry_uid(entry),
-			    archive_entry_gid(entry));
-		}
-		}
+		close(pfd);
 		break;
+		}
 
-	case AE_IFDIR:
-		if (mkdirp(path, archive_entry_mode(entry)) != 0 && errno != EEXIST) {
-			fprintf(stderr, "error: cannot create directory: %s\n",
-			    path);
+	case AE_IFDIR: {
+		int dfd = open_dir_beneath(destfd, relnorm,
+		    archive_entry_mode(entry));
+
+		if (dfd < 0) {
+			fprintf(stderr, "error: cannot create directory "
+			    "(symlink escape?): %s\n", path);
 			ret = -1;
+			break;
 		}
 		if (opts->keep_permissions) {
-			chmod(path, archive_entry_mode(entry));
-			chown(path, archive_entry_uid(entry),
+			(void)fchmod(dfd, archive_entry_mode(entry));
+			(void)fchown(dfd, archive_entry_uid(entry),
 			    archive_entry_gid(entry));
 		}
+		close(dfd);
 		break;
+		}
 
-	case AE_IFLNK:
-		{
+	case AE_IFLNK: {
 		const char *link = archive_entry_symlink(entry);
-		char path_copy[PATH_MAX];
-		char *parent;
-
-		if (link == NULL)
-			break;
+		int pfd;
 
 		/*
-		 * Symlink targets are NOT restricted: absolute and "../"
-		 * targets (e.g. etc/termcap -> /usr/share/misc/termcap, or
-		 * /bin -> /usr/bin) are legitimate and ubiquitous in real
-		 * images, and a symlink resolves relative to the container's
-		 * own root at runtime. The traversal defense is on the entry
-		 * *name* (rejected above) plus O_NOFOLLOW on file creation,
-		 * which prevents a later entry from writing *through* a planted
-		 * symlink as its final component.
+		 * Symlink *targets* are not restricted (absolute and "../"
+		 * targets are legitimate in real images and resolve within the
+		 * container root at runtime). Safety comes from creating the
+		 * link beneath the layer root via open_dir_beneath, so the
+		 * link's *location* cannot be redirected out of the rootfs.
 		 */
-
-		/* dirname(3) mutates its argument — copy first */
-		strlcpy(path_copy, path, sizeof(path_copy));
-		parent = dirname(path_copy);
-		if (mkdirp(parent, 0755) != 0 && errno != EEXIST) {
-			fprintf(stderr, "error: cannot create directory: %s\n",
-			    parent);
+		if (link == NULL)
+			break;
+		pfd = open_dir_beneath(destfd, parentrel, 0755);
+		if (pfd < 0) {
+			fprintf(stderr, "error: rejecting unsafe symlink path "
+			    "(escape): %s\n", pathname);
+			ret = -1;
 			break;
 		}
-
-		unlink(path);  /* Remove if exists */
-		if (symlink(link, path) != 0) {
+		(void)unlinkat(pfd, leaf, 0);	/* remove if it exists */
+		if (symlinkat(link, pfd, leaf) != 0) {
 			fprintf(stderr, "error: cannot create symlink: %s\n",
 			    path);
 			ret = -1;
 		}
-		}
+		close(pfd);
 		break;
+		}
 	}
 
+	close(destfd);
 	return (ret);
 }
 

@@ -142,6 +142,41 @@ ATF_TC_BODY(unpack_rejects_dotdot_traversal, tc)
 	unlink(tgz);
 }
 
+ATF_TC(unpack_rejects_symlink_escape);
+ATF_TC_HEAD(unpack_rejects_symlink_escape, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "unpack_layer refuses to write through a symlink planted by an "
+	    "earlier layer entry (CVE-class: arbitrary host write as root)");
+}
+ATF_TC_BODY(unpack_rejects_symlink_escape, tc)
+{
+	const char *tgz = "evil2.tgz";
+	struct stat st;
+
+	/*
+	 * A hostile layer plants a symlink "escape" -> an absolute path outside
+	 * dest, then a regular file "escape/pwned". Extracting must NOT follow
+	 * the symlink and write into the target; the through-symlink write must
+	 * be rejected and the outside file must not appear.
+	 */
+	ATF_REQUIRE_EQ(system(
+	    "rm -rf /tmp/ocifbsd-escape-tgt; mkdir -p /tmp/ocifbsd-escape-tgt"), 0);
+	ATF_REQUIRE_EQ(mkdir("out", 0755), 0);
+	ATF_REQUIRE_EQ(system(
+	    "set -e; d=$(mktemp -d /tmp/ocifbsd-evil.XXXXXX); cd \"$d\"; "
+	    "ln -s /tmp/ocifbsd-escape-tgt escape; printf pwned > payload; "
+	    "tar czf evil2.tgz -s '|^payload$|escape/pwned|' escape payload "
+	    "2>/dev/null || tar czf evil2.tgz "
+	    "--transform 's,^payload,escape/pwned,' escape payload; "
+	    "mv evil2.tgz \"$OLDPWD/evil2.tgz\"; cd /; rm -rf \"$d\""), 0);
+	(void)unpack_layer(tgz, "out", NULL);
+	/* The write through the symlink must have been blocked. */
+	ATF_CHECK(stat("/tmp/ocifbsd-escape-tgt/pwned", &st) != 0);
+	(void)system("rm -rf /tmp/ocifbsd-escape-tgt");
+	unlink(tgz);
+}
+
 ATF_TC(entry_path_safety_unit);
 ATF_TC_HEAD(entry_path_safety_unit, tc)
 {
@@ -195,6 +230,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, unpack_missing_tarball);
 	ATF_TP_ADD_TC(tp, unpack_dirname_safe);
 	ATF_TP_ADD_TC(tp, unpack_rejects_dotdot_traversal);
+	ATF_TP_ADD_TC(tp, unpack_rejects_symlink_escape);
 	ATF_TP_ADD_TC(tp, entry_path_safety_unit);
 	ATF_TP_ADD_TC(tp, whiteout_helpers_path_forms);
 	return (atf_no_error());
