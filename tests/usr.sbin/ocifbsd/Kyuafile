@@ -17,6 +17,7 @@ atf_test_program{name="netcfg_test", }
 atf_test_program{name="oci2jail_test", }
 atf_test_program{name="parser_test", }
 atf_test_program{name="registries_test", }
+atf_test_program{name="sched_test", }
 atf_test_program{name="unpack_layer_test", }
 atf_test_program{name="utils_test", }
 atf_test_program{name="whiteout_test", }

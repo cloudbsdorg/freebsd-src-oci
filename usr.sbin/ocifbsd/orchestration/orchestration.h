@@ -465,6 +465,7 @@ struct scheduling_decision *scheduler_select_node(struct pod_spec *spec);
 int		scheduler_score_node(const char *node, struct pod_spec *spec);
 char		**scheduler_list_nodes(int *count);
 int		scheduler_add_node(const char *node);
+int		scheduler_set_node_schedulable(const char *node, bool schedulable);
 int		scheduler_remove_node(const char *node);
 int		scheduler_node_ready(const char *node);
 int		scheduler_node_not_ready(const char *node);

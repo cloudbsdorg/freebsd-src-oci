@@ -227,10 +227,13 @@ scheduler_select_node(struct pod_spec *spec)
 	for (int i = 0; i < node_count; i++) {
 		struct node_info *node = nodes[i];
 		double score;
-		
+
 		if (node == NULL)
 			continue;
-		
+		/* Only ready, uncordoned nodes are eligible. */
+		if (!node->ready || !node->schedulable)
+			continue;
+
 		score = score_node(node, spec);
 		
 		if (score > best_score) {
@@ -362,10 +365,16 @@ scheduler_add_node(const char *node_name)
 		return (-1);
 	
 	strlcpy(node->name, node_name, sizeof(node->name));
-	node->ready = false;
-	node->schedulable = false;
+	node->ready = true;
+	node->schedulable = true;
 	node->last_heartbeat = time(NULL);
 	node->pods_capacity = 110;
+	/*
+	 * A registered worker is schedulable immediately with nominal capacity;
+	 * a real heartbeat later replaces these with the node's true figures.
+	 */
+	node->memory_capacity = (uint64_t)8 * 1024 * 1024 * 1024;	/* 8 GiB */
+	node->cpu_capacity = 8000;					/* 8 cores */
 	
 	pthread_mutex_lock(&scheduler_lock);
 	nodes[node_count++] = node;
@@ -373,8 +382,37 @@ scheduler_add_node(const char *node_name)
 	
 	orch_event_publish("Normal", "NodeRegistered", "cluster",
 	    "Node %s registered", node_name);
-	
+
 	return (0);
+}
+
+/*
+ * Cordon or uncordon a node. A cordoned (schedulable=false) node keeps its
+ * running pods but receives no new placements. Returns 0 on success, -1 if
+ * the node is unknown.
+ */
+int
+scheduler_set_node_schedulable(const char *node_name, bool schedulable)
+{
+	int rc = -1;
+
+	pthread_mutex_lock(&scheduler_lock);
+	for (int i = 0; i < node_count; i++) {
+		if (nodes[i] != NULL &&
+		    strcmp(nodes[i]->name, node_name) == 0) {
+			nodes[i]->schedulable = schedulable;
+			rc = 0;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&scheduler_lock);
+
+	if (rc == 0)
+		orch_event_publish("Normal",
+		    schedulable ? "NodeUncordoned" : "NodeCordoned", "cluster",
+		    "Node %s is now %sschedulable", node_name,
+		    schedulable ? "" : "un");
+	return (rc);
 }
 
 /*
