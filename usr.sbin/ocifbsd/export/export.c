@@ -611,23 +611,56 @@ decompress_image(uint8_t *input, size_t input_size, uint8_t **output)
 }
 
 /*
+ * Run argv[0] with the given argument vector and wait for it; return 0 only on
+ * a clean exit(0). Using fork+execvp (no shell) means a crafted container name
+ * or output path is passed as a single argument and can never be interpreted
+ * as shell syntax — no command injection.
+ */
+static int
+export_run(char *const argv[])
+{
+    pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid < 0)
+        return (-1);
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    if (waitpid(pid, &status, 0) < 0)
+        return (-1);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1);
+}
+
+/*
  * Export to raw format
  */
 int
 export_to_raw(const char *name, const char *output_path)
 {
-    char cmd[PATH_MAX * 2];
+    char ifarg[PATH_MAX];
+    char ofarg[PATH_MAX];
+    char *argv[5];
 
     if (name == NULL || output_path == NULL)
         return (-1);
+    if ((size_t)snprintf(ifarg, sizeof(ifarg), "if=%s/containers/%s/root",
+        OCIFBSD_DATA_DIR, name) >= sizeof(ifarg))
+        return (-1);
+    if ((size_t)snprintf(ofarg, sizeof(ofarg), "of=%s", output_path) >=
+        sizeof(ofarg))
+        return (-1);
 
-    snprintf(cmd, sizeof(cmd),
-        "dd if=%s/containers/%s/root of=%s bs=1M",
-        OCIFBSD_DATA_DIR, name, output_path);
+    argv[0] = __DECONST(char *, "dd");
+    argv[1] = ifarg;
+    argv[2] = ofarg;
+    argv[3] = __DECONST(char *, "bs=1M");
+    argv[4] = NULL;
 
-    syslog(LOG_INFO, "Exporting to raw: %s", cmd);
-
-    return (system(cmd) == 0 ? 0 : -1);
+    syslog(LOG_INFO, "Exporting %s to raw: %s", name, output_path);
+    return (export_run(argv));
 }
 
 /*
@@ -636,26 +669,33 @@ export_to_raw(const char *name, const char *output_path)
 int
 export_to_qcow2(const char *name, const char *output_path)
 {
-    char cmd[PATH_MAX * 2];
+    char raw_path[PATH_MAX];
+    char *argv[9];
+    int ret;
 
     if (name == NULL || output_path == NULL)
         return (-1);
 
-    /* First export to raw, then convert */
-    char raw_path[PATH_MAX];
-    snprintf(raw_path, sizeof(raw_path), "%s.tmp", output_path);
-
+    /* First export to raw, then convert. */
+    if ((size_t)snprintf(raw_path, sizeof(raw_path), "%s.tmp", output_path) >=
+        sizeof(raw_path))
+        return (-1);
     if (export_to_raw(name, raw_path) != 0)
         return (-1);
 
-    /* Convert to QCOW2 */
-    snprintf(cmd, sizeof(cmd),
-        "qemu-img convert -f raw -O qcow2 %s %s && rm %s",
-        raw_path, output_path, raw_path);
+    argv[0] = __DECONST(char *, "qemu-img");
+    argv[1] = __DECONST(char *, "convert");
+    argv[2] = __DECONST(char *, "-f");
+    argv[3] = __DECONST(char *, "raw");
+    argv[4] = __DECONST(char *, "-O");
+    argv[5] = __DECONST(char *, "qcow2");
+    argv[6] = raw_path;
+    argv[7] = __DECONST(char *, output_path);
+    argv[8] = NULL;
 
-    int ret = system(cmd);
-
-    return (ret == 0 ? 0 : -1);
+    ret = export_run(argv);
+    (void)unlink(raw_path);	/* best-effort cleanup of the temp raw image */
+    return (ret);
 }
 
 /*

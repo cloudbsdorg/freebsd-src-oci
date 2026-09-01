@@ -1049,14 +1049,41 @@ audit_export_json(FILE *fp, time_t start, time_t end)
 }
 
 /*
+ * Validate a certificate identifier (CA name / node name / node id) before it
+ * is interpolated into an openssl command line run via system(3). These are
+ * root-daemon helpers, so an id containing shell metacharacters — e.g. a
+ * peer-supplied node id like "n`reboot`" or "n; rm -rf /" — would be command
+ * injection. Accept only the characters real cert identifiers use
+ * (alphanumerics and - _ .), which excludes every shell metacharacter.
+ */
+static bool
+auth_id_is_safe(const char *id)
+{
+    size_t i, len;
+
+    if (id == NULL)
+        return (false);
+    len = strlen(id);
+    if (len == 0 || len > 128)
+        return (false);
+    for (i = 0; i < len; i++) {
+        char c = id[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'))
+            return (false);
+    }
+    return (true);
+}
+
+/*
  * Generate CA certificate
  */
 int
 cert_generate_ca(const char *name)
 {
     char cmd[1024];
-    
-    if (name == NULL)
+
+    if (!auth_id_is_safe(name))
         return (-1);
     
     /* Generate CA using openssl */
@@ -1078,8 +1105,8 @@ int
 cert_generate_node(const char *name, const char *node_id)
 {
     char cmd[1024];
-    
-    if (name == NULL || node_id == NULL)
+
+    if (!auth_id_is_safe(name) || !auth_id_is_safe(node_id))
         return (-1);
     
     /* Generate node key and CSR */

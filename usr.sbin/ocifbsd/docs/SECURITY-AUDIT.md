@@ -51,19 +51,21 @@ excluding every shell metacharacter. (The container/namespace *name* was already
 validated by `ns_name_is_valid`, which covers the many other `system()` builders
 in this file.)
 
-### 🟠 4. Unvalidated identifiers into openssl `system()`/`popen()` — LATENT
-`security-daemon/auth.c` (`cert_generate_ca`, `cert_generate_node`,
-`cert_check_expiry`). `name`/`node_id` are interpolated into `openssl …` shell
-strings run as root. No in-tree caller today, so not presently reachable, but
-it is exported API that will bite once a CSR/join flow passes peer-supplied
-identifiers. **Fix (planned):** drive `openssl` via `fork`/`execv` with an argv
-array (or validate identifiers) before any caller is added.
+### 🟠 4. Unvalidated identifiers into openssl `system()` — FIXED
+`security-daemon/auth.c` (`cert_generate_ca`, `cert_generate_node`).
+`name`/`node_id` were interpolated into `openssl …` shell strings run as root —
+latent (no in-tree caller) but exported API that would bite once a CSR/join flow
+passes peer-supplied identifiers. **Fix:** `auth_id_is_safe()` now validates
+each identifier to the cert-name charset (alphanumerics and `- _ .`), rejecting
+every shell metacharacter, at the entry of both functions.
 
-### 🟠 5. `output_path` injection in image export — OPEN (low real-world risk)
-`export/export.c` builds `system("dd … of=%s", output_path)` and a `qemu-img …`
-string from the operator-supplied `output_path`. Mostly self-injection (the
-operator already runs the tool), but a destination like `/x; reboot` executes.
-**Fix (planned):** `fork`/`execv` `dd`/`qemu-img` with argv.
+### 🟠 5. `output_path` injection in image export — FIXED
+`export/export.c` `export_to_raw`/`export_to_qcow2` built `system("dd … of=%s")`
+and a `qemu-img …` string from the operator-supplied `output_path`. **Fix:** both
+now run `dd`/`qemu-img` via `fork`+`execvp` with an argv array (helper
+`export_run`), so paths are passed as single arguments and can never be
+interpreted as shell syntax; the temp raw image is removed with `unlink()`
+instead of `&& rm`.
 
 ### 🟠 6. Path-safety checks are lexical-only — PARTIALLY ADDRESSED
 `src/oci2jail.c` `oci_path_is_safe()` and `image/unpack.c` `entry_path_is_safe()`
@@ -96,7 +98,8 @@ symlink-safe resolver at mount time.
 
 ## Remaining
 
-Both critical findings are fixed. Open items are the lower-severity `system()`
-builders: **#4** (latent, no caller) and **#5** (operator self-injection) — both
-should move to `fork`/`execv` with argv arrays. **#6** is residual and low. None
-are remotely triggerable.
+Findings #1–#5 are fixed. Only **#6** remains — the path-safety checks are
+lexical (no symlink resolution); it is residual and low: image extraction now
+resolves symlinks at open time (#1), config-time traversal is rejected by
+`oci_validate_spec`, and mounts use the `nmount` syscall API (no shell). Nothing
+remotely triggerable is open.
