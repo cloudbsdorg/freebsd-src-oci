@@ -42,6 +42,16 @@ int		 cp_apply(struct cp_state *st, const char *cmd);
 /* Number of services currently defined. */
 int		 cp_service_count(const struct cp_state *st);
 
+/* Name of the i-th service (0..count-1), or NULL if out of range. */
+const char	*cp_service_name(const struct cp_state *st, int i);
+
+/*
+ * Fill ids[] with the replica ids currently placed for a service (in ascending
+ * insertion order, up to max). Returns the number written, or -1 on error.
+ */
+int		 cp_service_placements(const struct cp_state *st,
+		    const char *svc, int *ids, int max);
+
 /* Desired replica count for a service, or -1 if the service does not exist. */
 int		 cp_service_replicas(const struct cp_state *st, const char *svc);
 

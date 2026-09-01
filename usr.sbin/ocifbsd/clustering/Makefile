@@ -8,7 +8,7 @@
 # supply the defaults we need.
 
 PROG=	ocifbsd-cluster
-SRCS=	cluster.c cluster_main.c cluster_pki.c control_plane.c cluster_mtls.c node_agent.c
+SRCS=	cluster.c cluster_main.c cluster_pki.c control_plane.c cluster_mtls.c node_agent.c controller.c
 MAN=	ocifbsd-cluster.8
 
 # libmd provides SHA256 used by the gossip layer; pthread for the worker

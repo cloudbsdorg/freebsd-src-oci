@@ -248,6 +248,28 @@ cp_service_count(const struct cp_state *st)
 	return (st != NULL ? st->nsvcs : 0);
 }
 
+const char *
+cp_service_name(const struct cp_state *st, int i)
+{
+	if (st == NULL || i < 0 || i >= st->nsvcs)
+		return (NULL);
+	return (st->svcs[i].name);
+}
+
+int
+cp_service_placements(const struct cp_state *st, const char *svc, int *ids,
+    int max)
+{
+	int n = 0;
+
+	if (st == NULL || svc == NULL || ids == NULL || max < 0)
+		return (-1);
+	for (int i = 0; i < st->npls && n < max; i++)
+		if (strcmp(st->pls[i].service, svc) == 0)
+			ids[n++] = st->pls[i].replica_id;
+	return (n);
+}
+
 int
 cp_service_replicas(const struct cp_state *st, const char *svc)
 {
