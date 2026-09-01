@@ -35,11 +35,18 @@ and the `ocifbsd.c` CLI:
    correct fix is a per-container copy or a ZFS snapshot/clone of the image
    rootfs (the zfs_store layer has clone helpers to wire up), plus refusing
    `rmi` of an in-use image.
-2. **Deep symlink TOCTOU in rm_rf / load_mkdirp.** Both build paths and act
-   on them, so a component swapped to a symlink mid-operation could be
-   followed. Low risk while the store lives under a root-owned
-   /var/lib/ocifbsd, but the robust fix is an `openat`/`unlinkat`/`mkdirat`
-   walk with `O_NOFOLLOW` from a base dirfd.
+2. **~~Deep symlink TOCTOU in rm_rf / load_rm_rf.~~ FIXED 2026-08-31.** Both
+   recursive removers previously built full paths and acted on them, so a
+   component swapped to a symlink mid-operation could be followed. Both were
+   rewritten as `openat`/`unlinkat` walks relative to an open directory fd,
+   with `O_NOFOLLOW`/`O_DIRECTORY` on every descent, `fstatat(...NOFOLLOW)`
+   for classification, and `fchflags` on an `O_NOFOLLOW` fd for the
+   immutable-flag clearing needed to remove FreeBSD image rootfses. `rm_rf`
+   also stays on one filesystem (former `FTS_XDEV`). Validated: an adversarial
+   store containing symlinks to an external victim is removed without
+   following them out (the victim survives), a `schg` file inside is still
+   removed, and the behavior is pinned by `cli_test:rmi_symlink_escape_safe`
+   plus the root lifecycle/e2e suites (155/155, e2e 19/19).
 3. **~~No cross-invocation locking of container state.~~ FIXED 2026-08-31.**
    Lifecycle operations previously serialized only with an in-process pthread
    mutex, so two concurrent CLI invocations on the same container (e.g.

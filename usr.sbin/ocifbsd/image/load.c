@@ -57,34 +57,91 @@ load_mkdirp(const char *path, mode_t mode)
 	return (0);
 }
 
-/* Recursive remove of a directory tree (best-effort). */
+/*
+ * Recursive remove of a directory tree (best-effort), symlink-safe: every
+ * step is an *at() syscall relative to an open directory fd with O_NOFOLLOW,
+ * so a path component swapped to a symlink mid-walk cannot redirect a removal
+ * outside the tree. Used for transactional rollback of a partially-imported
+ * store, whose contents derive from an untrusted archive.
+ */
+static void
+load_rm_rf_at(int parentfd, const char *name)
+{
+	struct stat st;
+
+	if (fstatat(parentfd, name, &st, AT_SYMLINK_NOFOLLOW) != 0)
+		return;
+	if (S_ISDIR(st.st_mode)) {
+		int fd = openat(parentfd, name,
+		    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+		DIR *d;
+		struct dirent *e;
+
+		if (fd >= 0) {
+			(void)fchflags(fd, 0);
+			d = fdopendir(fd);
+			if (d != NULL) {
+				while ((e = readdir(d)) != NULL) {
+					if (strcmp(e->d_name, ".") == 0 ||
+					    strcmp(e->d_name, "..") == 0)
+						continue;
+					load_rm_rf_at(fd, e->d_name);
+				}
+				closedir(d);	/* also closes fd */
+			} else {
+				close(fd);
+			}
+		}
+		(void)unlinkat(parentfd, name, AT_REMOVEDIR);
+	} else {
+		if (unlinkat(parentfd, name, 0) != 0 && errno == EPERM) {
+			int lf = openat(parentfd, name,
+			    O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+
+			if (lf >= 0) {
+				(void)fchflags(lf, 0);
+				close(lf);
+				(void)unlinkat(parentfd, name, 0);
+			}
+		}
+	}
+}
+
+/* Recursive remove of a directory tree (best-effort). See load_rm_rf_at. */
 static void
 load_rm_rf(const char *path)
 {
-	char cmd_path[PATH_MAX];
-	struct stat st;
-	DIR *d;
-	struct dirent *e;
+	char *dup, *slash;
+	const char *parent, *leaf;
+	size_t n;
+	int parentfd;
 
-	if (path == NULL || lstat(path, &st) != 0)
+	if (path == NULL || path[0] == '\0' || strcmp(path, "/") == 0)
 		return;
-	if (S_ISDIR(st.st_mode)) {
-		d = opendir(path);
-		if (d != NULL) {
-			while ((e = readdir(d)) != NULL) {
-				if (strcmp(e->d_name, ".") == 0 ||
-				    strcmp(e->d_name, "..") == 0)
-					continue;
-				snprintf(cmd_path, sizeof(cmd_path), "%s/%s",
-				    path, e->d_name);
-				load_rm_rf(cmd_path);
-			}
-			closedir(d);
-		}
-		rmdir(path);
+	dup = strdup(path);
+	if (dup == NULL)
+		return;
+	n = strlen(dup);
+	while (n > 1 && dup[n - 1] == '/')
+		dup[--n] = '\0';
+	slash = strrchr(dup, '/');
+	if (slash == dup) {
+		parent = "/";
+		leaf = dup + 1;
+	} else if (slash != NULL) {
+		*slash = '\0';
+		parent = dup;
+		leaf = slash + 1;
 	} else {
-		unlink(path);
+		parent = ".";
+		leaf = dup;
 	}
+	parentfd = open(parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (parentfd >= 0) {
+		load_rm_rf_at(parentfd, leaf);
+		close(parentfd);
+	}
+	free(dup);
 }
 
 /*

@@ -411,6 +411,41 @@ lock_excludes_concurrent_body()
 	    env OCIFBSD_STATE_DIR="${PWD}/state" "${bin}" stop contend-id
 }
 
+atf_test_case rmi_symlink_escape_safe
+rmi_symlink_escape_safe_head()
+{
+	atf_set "descr" "rmi does not follow a symlink out of the image store"
+}
+rmi_symlink_escape_safe_body()
+{
+	local bin store victim
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	store="${PWD}/data"
+	# A valid store for ref evil.io/x:latest (config.json + rootfs/).
+	mkdir -p "${store}/evil.io/x/latest/rootfs/sub"
+	echo '{}' > "${store}/evil.io/x/latest/config.json"
+	echo hi > "${store}/evil.io/x/latest/rootfs/file.txt"
+	# An external victim and symlinks inside the store pointing at it.
+	mkdir -p "${PWD}/victim"
+	echo precious > "${PWD}/victim/keep.txt"
+	ln -s "${PWD}/victim" "${store}/evil.io/x/latest/rootfs/escape_dir"
+	ln -s "${PWD}/victim/keep.txt" \
+	    "${store}/evil.io/x/latest/rootfs/escape_file"
+	atf_check -s exit:0 -o ignore -e ignore \
+	    env OCIFBSD_DATA_DIR="${store}" "${bin}" rmi evil.io/x:latest
+	# The store tree is gone...
+	if [ -e "${store}/evil.io/x/latest" ]; then
+		atf_fail "image store was not removed"
+	fi
+	# ...but the symlink targets outside the store are untouched.
+	atf_check -s exit:0 test -f "${PWD}/victim/keep.txt"
+	atf_check -s exit:0 -o match:"precious" cat "${PWD}/victim/keep.txt"
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case help_lists_commands
@@ -432,4 +467,5 @@ atf_init_test_cases()
 	atf_add_test_case list_empty_ok
 	atf_add_test_case lock_file_created
 	atf_add_test_case lock_excludes_concurrent
+	atf_add_test_case rmi_symlink_escape_safe
 }
