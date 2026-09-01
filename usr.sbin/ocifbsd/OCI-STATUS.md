@@ -40,17 +40,23 @@ and the `ocifbsd.c` CLI:
    followed. Low risk while the store lives under a root-owned
    /var/lib/ocifbsd, but the robust fix is an `openat`/`unlinkat`/`mkdirat`
    walk with `O_NOFOLLOW` from a base dirfd.
-3. **No cross-invocation locking of container state.** Lifecycle operations
-   serialize only with an in-process pthread mutex, so two concurrent CLI
-   invocations on the same container (e.g. `start` racing `network set`, whose
-   jail rebuild removes and recreates the jail) are not mutually excluded.
-   `container_start` and `container_reconfigure_network` mitigate the worst
-   outcome — attaching or removing a jail whose jid was reused — by resolving
-   the jail by its `ocifbsd-<id>` name via `jail_getid` and refusing on a
-   mismatch, but a narrow get-then-act window remains (the same window
-   `jail(8) -r` has, since there is no atomic remove-by-name syscall). The
-   robust fix is an exclusive `flock`/`lockf` on the per-container state file
-   held across the read-check-act sequence in every lifecycle op.
+3. **~~No cross-invocation locking of container state.~~ FIXED 2026-08-31.**
+   Lifecycle operations previously serialized only with an in-process pthread
+   mutex, so two concurrent CLI invocations on the same container (e.g.
+   `start` racing `network set`, whose jail rebuild removes and recreates the
+   jail) were not mutually excluded across processes. Resolved by adding
+   `state_lock_container()`/`state_unlock_container()` (`src/state.c`) — an
+   exclusive `flock(2)` on a per-container `<statedir>/<id>.lock` file (root /
+   `ocifbsd` group only, 0640), acquired **before** the container is loaded
+   and released after the operation, wrapping the whole read-check-act
+   sequence. It is held across the mutating CLI ops (`start`, `stop`, `kill`,
+   `pause`, `resume`, `delete`, `network set`); a failed lock fails closed.
+   `exec` is intentionally left unlocked so a long-running exec does not block
+   lifecycle. The existing `jail_getid` name/jid re-use check remains as
+   defense in depth. Validated on the build host: cross-process exclusion
+   proven via `lockf(1)` contention (`ocifbsd` blocks while the lock is held,
+   completes once released) and pinned by two ATF regression cases
+   (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
 ## 🧩 **2026-08-31 — Phase 5 boot-time tooling landed (rc.d + ocifbsd.conf)**
 

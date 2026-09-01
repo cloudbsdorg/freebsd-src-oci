@@ -123,6 +123,72 @@ get_state_path(const char *id, char *path, size_t path_len)
 }
 
 /*
+ * Cross-process advisory lock for a single container's lifecycle.
+ *
+ * The in-process state_mutex above only serializes threads within one
+ * process; two concurrent CLI invocations on the same container (e.g.
+ * `start` racing `network set`) are separate processes and share no such
+ * mutex. state_lock_container takes an exclusive flock(2) on a per-container
+ * lock file so that the whole read-check-act sequence of a lifecycle op is
+ * mutually excluded across processes. The returned fd is passed to
+ * state_unlock_container, which releases the lock and closes it.
+ *
+ * The lock file lives alongside the state JSON, is created with the same
+ * restrictive owner/mode as other state (root / ocifbsd group only), and is
+ * intentionally left in place after unlock: an empty marker is cheap and
+ * removing it would reintroduce a create/open race between contenders.
+ *
+ * Returns a non-negative fd on success, or -1 on error (errno set). A -1
+ * return from a failed lock must be treated as "do not proceed": callers
+ * fail closed rather than act without exclusion.
+ */
+int
+state_lock_container(const char *id)
+{
+	char path[PATH_MAX];
+	int fd;
+
+	if (id == NULL || id[0] == '\0') {
+		errno = EINVAL;
+		return (-1);
+	}
+	/* Ensure the state directory exists and is secured first. */
+	if (state_init() != 0)
+		return (-1);
+	if (snprintf(path, sizeof(path), "%s/%s.lock", state_base_dir(), id) >=
+	    (int)sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
+	fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, OCIFBSD_STATE_FILE_MODE);
+	if (fd < 0)
+		return (-1);
+	/* Best-effort tighten of owner/mode in case of a pre-existing file. */
+	ocifbsd_secure_path(path, OCIFBSD_STATE_FILE_MODE);
+	if (flock(fd, LOCK_EX) != 0) {
+		int saved = errno;
+
+		close(fd);
+		errno = saved;
+		return (-1);
+	}
+	return (fd);
+}
+
+/*
+ * Release a lock taken by state_lock_container. A negative fd is a no-op so
+ * callers can unconditionally unlock in a cleanup path.
+ */
+void
+state_unlock_container(int fd)
+{
+	if (fd < 0)
+		return;
+	(void)flock(fd, LOCK_UN);
+	(void)close(fd);
+}
+
+/*
  * Save container state to disk
  */
 int

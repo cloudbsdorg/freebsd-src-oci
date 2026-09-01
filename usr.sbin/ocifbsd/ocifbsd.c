@@ -476,6 +476,7 @@ cmd_start(int argc, char **argv)
 	struct ocifbsd_container *c;
 	const char *id;
 	int ret;
+	int lockfd;
 
 	/* Parse start-specific options */
 	static struct option longopts[] = {
@@ -508,10 +509,22 @@ cmd_start(int argc, char **argv)
 
 	id = argv[0];
 
+	/*
+	 * Serialize this lifecycle op against other processes acting on the
+	 * same container. Fail closed if the lock cannot be taken.
+	 */
+	lockfd = state_lock_container(id);
+	if (lockfd < 0) {
+		fprintf(stderr, "error: failed to lock container %s: %s\n",
+		    id, strerror(errno));
+		return (1);
+	}
+
 	/* Get container */
 	c = container_get_by_id(id);
 	if (c == NULL) {
 		fprintf(stderr, "error: container not found: %s\n", id);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
@@ -524,12 +537,14 @@ cmd_start(int argc, char **argv)
 		fprintf(stderr, "error: failed to start container: %s\n",
 		    strerror(errno));
 		container_free(c);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
 	printf("%s\n", c->id);
 
 	container_free(c);
+	state_unlock_container(lockfd);
 	return (0);
 }
 
@@ -540,6 +555,7 @@ cmd_kill(int argc, char **argv)
 	const char *id;
 	int sig = SIGTERM;
 	int ret;
+	int lockfd;
 
 	/* Parse kill-specific options */
 	static struct option longopts[] = {
@@ -596,10 +612,18 @@ cmd_kill(int argc, char **argv)
 		sig = psig;
 	}
 
+	lockfd = state_lock_container(id);
+	if (lockfd < 0) {
+		fprintf(stderr, "error: failed to lock container %s: %s\n",
+		    id, strerror(errno));
+		return (1);
+	}
+
 	/* Get container */
 	c = container_get_by_id(id);
 	if (c == NULL) {
 		fprintf(stderr, "error: container not found: %s\n", id);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
@@ -612,12 +636,14 @@ cmd_kill(int argc, char **argv)
 		fprintf(stderr, "error: failed to send signal: %s\n",
 		    strerror(errno));
 		container_free(c);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
 	printf("%s\n", c->id);
 
 	container_free(c);
+	state_unlock_container(lockfd);
 	return (0);
 }
 
@@ -628,6 +654,7 @@ cmd_delete(int argc, char **argv)
 	const char *id;
 	bool force = false;
 	int ret;
+	int lockfd;
 
 	/* Parse delete-specific options */
 	static struct option longopts[] = {
@@ -664,10 +691,18 @@ cmd_delete(int argc, char **argv)
 
 	id = argv[0];
 
+	lockfd = state_lock_container(id);
+	if (lockfd < 0) {
+		fprintf(stderr, "error: failed to lock container %s: %s\n",
+		    id, strerror(errno));
+		return (1);
+	}
+
 	/* Get container */
 	c = container_get_by_id(id);
 	if (c == NULL) {
 		fprintf(stderr, "error: container not found: %s\n", id);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
@@ -675,6 +710,7 @@ cmd_delete(int argc, char **argv)
 	if (c->state == OCIFBSD_STATE_RUNNING && !force) {
 		fprintf(stderr, "error: container is running, use --force to stop and delete\n");
 		container_free(c);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
@@ -687,12 +723,14 @@ cmd_delete(int argc, char **argv)
 		fprintf(stderr, "error: failed to delete container: %s\n",
 		    strerror(errno));
 		container_free(c);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
 	printf("%s\n", id);
 
 	container_free(c);
+	state_unlock_container(lockfd);
 	return (0);
 }
 
@@ -1358,6 +1396,7 @@ cmd_stop(int argc, char **argv)
 	const char *id;
 	int timeout = 10;
 	int ch, ret;
+	int lockfd;
 
 	static struct option longopts[] = {
 		{ "timeout",	required_argument,	NULL, 't' },
@@ -1404,9 +1443,18 @@ cmd_stop(int argc, char **argv)
 	}
 
 	id = argv[0];
+
+	lockfd = state_lock_container(id);
+	if (lockfd < 0) {
+		fprintf(stderr, "error: failed to lock container %s: %s\n",
+		    id, strerror(errno));
+		return (1);
+	}
+
 	c = container_get_by_id(id);
 	if (c == NULL) {
 		fprintf(stderr, "error: container not found: %s\n", id);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
@@ -1418,11 +1466,13 @@ cmd_stop(int argc, char **argv)
 		fprintf(stderr, "error: failed to stop container: %s\n",
 		    strerror(errno));
 		container_free(c);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
 	printf("%s\n", c->id);
 	container_free(c);
+	state_unlock_container(lockfd);
 	return (0);
 }
 
@@ -1436,6 +1486,7 @@ cmd_pause_resume(int argc, char **argv, bool do_pause)
 	const char *id;
 	const char *name = do_pause ? "pause" : "resume";
 	int ch, ret;
+	int lockfd;
 
 	static struct option longopts[] = {
 		{ "help",	no_argument,	NULL, 'h' },
@@ -1462,9 +1513,18 @@ cmd_pause_resume(int argc, char **argv, bool do_pause)
 	}
 
 	id = argv[0];
+
+	lockfd = state_lock_container(id);
+	if (lockfd < 0) {
+		fprintf(stderr, "error: failed to lock container %s: %s\n",
+		    id, strerror(errno));
+		return (1);
+	}
+
 	c = container_get_by_id(id);
 	if (c == NULL) {
 		fprintf(stderr, "error: container not found: %s\n", id);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
@@ -1476,11 +1536,13 @@ cmd_pause_resume(int argc, char **argv, bool do_pause)
 		fprintf(stderr, "error: failed to %s container: %s\n",
 		    name, strerror(errno));
 		container_free(c);
+		state_unlock_container(lockfd);
 		return (1);
 	}
 
 	printf("%s\n", c->id);
 	container_free(c);
+	state_unlock_container(lockfd);
 	return (0);
 }
 
@@ -1793,6 +1855,7 @@ cmd_network_set(int argc, char **argv)
 	char *json;
 	size_t jlen;
 	int ch, ret = 1;
+	int lockfd = -1;
 	bool changed = false;
 
 	enum {
@@ -1832,10 +1895,24 @@ cmd_network_set(int argc, char **argv)
 	}
 	id = c->id;
 
+	/*
+	 * Hold the per-container lock across the load-modify-write-apply
+	 * sequence so a concurrent lifecycle op (e.g. start) cannot race the
+	 * jail rebuild in container_reconfigure_network. Fail closed.
+	 */
+	lockfd = state_lock_container(id);
+	if (lockfd < 0) {
+		fprintf(stderr, "error: failed to lock container %s: %s\n",
+		    id, strerror(errno));
+		container_free(c);
+		return (1);
+	}
+
 	/* Load any existing config so options accumulate onto it. */
 	netcfg_init(&nc);
 	if (network_config_path(id, path, sizeof(path)) != 0) {
 		fprintf(stderr, "error: network config path too long\n");
+		state_unlock_container(lockfd);
 		container_free(c);
 		return (1);
 	}
@@ -1973,6 +2050,7 @@ cmd_network_set(int argc, char **argv)
 	ret = 0;
 out:
 	netcfg_free(&nc);
+	state_unlock_container(lockfd);
 	container_free(c);
 	return (ret);
 }

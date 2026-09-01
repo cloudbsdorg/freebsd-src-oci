@@ -347,6 +347,70 @@ pull_no_args_fails_body()
 	atf_check -s not-exit:0 -e ignore "${bin}" rmi
 }
 
+atf_test_case lock_file_created
+lock_file_created_head()
+{
+	atf_set "descr" "a lifecycle op creates a per-container lock file (0640)"
+}
+lock_file_created_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	mkdir -p "${PWD}/state"
+	# 'stop' on a missing id still takes and releases the per-container
+	# lock before reporting not-found; the lock file is left as a marker.
+	atf_check -s not-exit:0 -e ignore \
+	    env OCIFBSD_STATE_DIR="${PWD}/state" "${bin}" stop lockcheck-id
+	atf_check -s exit:0 test -f "${PWD}/state/lockcheck-id.lock"
+	# root/ocifbsd-group only: no world/other access bits.
+	mode=$(stat -f "%Lp" "${PWD}/state/lockcheck-id.lock")
+	atf_check_equal "640" "${mode}"
+}
+
+atf_test_case lock_excludes_concurrent
+lock_excludes_concurrent_head()
+{
+	atf_set "descr" "a held lock blocks a concurrent lifecycle op"
+}
+lock_excludes_concurrent_body()
+{
+	local bin start end rc
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	if ! command -v lockf >/dev/null 2>&1; then
+		atf_skip "lockf(1) not available to hold the lock"
+	fi
+	mkdir -p "${PWD}/state"
+	# lockf(1) and ocifbsd both use flock(2) on the same path, so holding
+	# the lock externally must make ocifbsd's blocking acquire wait. The
+	# holder keeps the lock well past the timeout window (5s > 0.5s start
+	# offset + 2s timeout) so the block is unambiguous, not a boundary race.
+	lockf -k "${PWD}/state/contend-id.lock" sh -c 'sleep 5' &
+	holder=$!
+	sleep 1
+	start=$(date +%s)
+	# 2s wall clock while the holder still holds the lock: must time out.
+	timeout 2 env OCIFBSD_STATE_DIR="${PWD}/state" \
+	    "${bin}" stop contend-id >/dev/null 2>&1
+	rc=$?
+	end=$(date +%s)
+	wait "${holder}" 2>/dev/null || true
+	atf_check_equal "124" "${rc}"		# 124 == timed out => blocked
+	if [ $((end - start)) -lt 2 ]; then
+		atf_fail "ocifbsd did not block on the held lock"
+	fi
+	# After release it completes promptly (not-found, exit != 0).
+	atf_check -s not-exit:0 -e ignore \
+	    env OCIFBSD_STATE_DIR="${PWD}/state" "${bin}" stop contend-id
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case help_lists_commands
@@ -366,4 +430,6 @@ atf_init_test_cases()
 	atf_add_test_case run_image_missing_fails
 	atf_add_test_case start_missing_fails
 	atf_add_test_case list_empty_ok
+	atf_add_test_case lock_file_created
+	atf_add_test_case lock_excludes_concurrent
 }

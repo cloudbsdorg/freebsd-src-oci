@@ -223,6 +223,12 @@ struct ocifbsd_container *state_load(const char *id);
 struct ocifbsd_container **state_list(int *n);
 int	state_lock(void);
 void	state_unlock(void);
+/*
+ * Cross-process per-container advisory lock. state_lock_container returns a
+ * fd (>= 0) to pass to state_unlock_container, or -1 on error (fail closed).
+ */
+int	state_lock_container(const char *id);
+void	state_unlock_container(int fd);
 
 /* Hooks execution */
 int	hooks_run_prestart(const struct ocifbsd_container *c);
