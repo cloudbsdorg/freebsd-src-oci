@@ -81,6 +81,7 @@ MK_TESTS?=	no
 
 # Module subdirectories
 SUBDIR+=	contrib/json-c
+SUBDIR+=	contrib/curl
 SUBDIR+=	api
 SUBDIR+=	cert
 SUBDIR+=	clustering
@@ -127,13 +128,12 @@ LIBADD=	\
 	md \
 	archive
 
-# json-c is vendored in-tree (contrib/json-c); curl is still a port (LDADD).
-# Install for the networked features: pkg install curl
+# json-c and libcurl are both vendored in-tree (contrib/); no ports needed.
+# The tree is fully self-contained — see LICENSING-DEPS.md.
 JSONC_DIR=	${.CURDIR}/contrib/json-c
 .include "${.CURDIR}/jsonc.inc.mk"
-CFLAGS+=	-I/usr/local/include
-LDFLAGS+=	-L/usr/local/lib
-LDADD+=		-lcurl
+CURL_DIR=	${.CURDIR}/contrib/curl
+.include "${.CURDIR}/curl.inc.mk"
 #
 # Image module (registry pull, unpack, ZFS paths). Build the archive
 # first, then link it. Works with and without MAKEOBJDIRPREFIX.

@@ -17,20 +17,15 @@ MAN=	ocifbsd-cert.8
 # crypto, ssl, z, pthread, util are in FreeBSD base
 LIBADD=	 crypto ssl z pthread util
 
-# json-c and libcurl are ports (not in FreeBSD base). Port path + LDADD (not
-# LIBADD, which is validated against src.libnames.mk and rejects port libs).
-# libcurl is the ACME (acme.c) HTTP transport.
-# Install on VM with:  sudo pkg install json-c curl
-CFLAGS+= -I/usr/local/include
-LDFLAGS+=	-L/usr/local/lib
-LDADD+=	-lcurl
-
 CFLAGS+=	-I${SRCDIR}/include
 
 WARNS?=	3
 
-# json-c is vendored in-tree (contrib/json-c); no port needed.
+# json-c and libcurl are vendored in-tree (contrib/); no ports needed.
+# libcurl is the ACME (acme.c) HTTP transport.
 JSONC_DIR=	${SRCDIR}/contrib/json-c
 .include "${SRCDIR}/jsonc.inc.mk"
+CURL_DIR=	${SRCDIR}/contrib/curl
+.include "${SRCDIR}/curl.inc.mk"
 
 .include <bsd.prog.mk>

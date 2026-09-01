@@ -15,19 +15,16 @@ MAN=	ocifbsd-logd.8
 # m, z, crypto, pthread are in FreeBSD base
 LIBADD=	 m z crypto pthread
 
-# json-c is a port (not in FreeBSD base). Port path + LDADD.
-# Install on VM with:  sudo pkg install json-c
-LDFLAGS+=	-L/usr/local/lib
-
 CFLAGS+=	-I${SRCDIR}/include
 CFLAGS+=	-I${SRCDIR}/metrics
-CFLAGS+=	-I/usr/local/include
-LDADD+=		-lcurl
 
 WARNS?=	3
 
-# json-c is vendored in-tree (contrib/json-c); no port needed.
+# json-c and libcurl are vendored in-tree (contrib/); no ports needed.
+# libcurl is the remote log-forwarding (forward.c) HTTP transport.
 JSONC_DIR=	${SRCDIR}/contrib/json-c
 .include "${SRCDIR}/jsonc.inc.mk"
+CURL_DIR=	${SRCDIR}/contrib/curl
+.include "${SRCDIR}/curl.inc.mk"
 
 .include <bsd.prog.mk>
