@@ -27,17 +27,23 @@ BSD/permissive. No GNU toolchain requirement.
 None of these are GPL. CDDL (libzfs) and Apache-2.0 (OpenSSL) are the base
 system's own choices and ship with FreeBSD.
 
-### Ports (NOT in base, NOT yet vendored in-repo)
+### Vendored in-tree (no port needed)
 
 | Library | Used by | License | Notes |
 |---------|---------|---------|-------|
-| **libcurl** (curl 8.x) | image (registry pull/push), cert/acme, logd/forward, api | **curl license** (MIT-derived, permissive) | needs response-header access (Replay-Nonce/Location) for ACME |
-| **json-c** (0.19) | most subsystems (JSON encode/parse) | **MIT** | small, easily vendorable |
+| **json-c** (0.18) | most subsystems (JSON encode/parse) | **MIT** | vendored under `contrib/json-c` as a private static lib; `ldd` shows no `libjson-c`. Built with json-c's own cmake-generated `config.h` (ENABLE_THREADING off, HAVE_XLOCALE_H on), `-fPIC` (PIE binaries), `-DNDEBUG`. |
 
-Both port dependencies are **permissive (no copyleft)** — so there is no
-license conflict with a BSD base. The only issue is *self-containment*: a clean
-checkout on a stock FreeBSD needs these two ports installed
-(`pkg install curl json-c`) before it will build the networked/JSON subsystems.
+### Ports still required to build
+
+| Library | Used by | License | Notes |
+|---------|---------|---------|-------|
+| **libcurl** (curl 8.x) | image (registry pull/push), cert/acme, logd/forward, api | **curl license** (MIT-derived, permissive) | needs response-header access (Replay-Nonce/Location) for ACME; pulls a large transitive tree (nghttp2, idn2, ssh2, …). Candidate to replace with base `libfetch` or vendor. |
+
+Both are **permissive (no copyleft)** — no license conflict with a BSD base.
+json-c is now vendored, so a clean checkout needs only `pkg install curl`
+(and that dependency is tracked for removal). Verified self-contained on json-c
+on the 15.1 build host and a FreeBSD 16 VM: builds with no json-c port, `ldd`
+shows no `libjson-c`, suite 160/160, e2e 19/19.
 
 ## Self-contained release build — plan
 
