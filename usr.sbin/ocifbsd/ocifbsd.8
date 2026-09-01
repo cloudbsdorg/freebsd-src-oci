@@ -225,24 +225,19 @@ Force
 .Cm delete
 of a running container.
 .El
-.Sh EXAMPLES
-Create a container from an OCI bundle:
-.Bd -literal
-ocifbsd create --name my-container /path/to/bundle
-.Ed
-.Pp
-Start, inspect state, signal, and delete:
-.Bd -literal
-ocifbsd start <id>
-ocifbsd state <id>
-ocifbsd kill <id>
-ocifbsd delete --force <id>
-.Ed
-.Pp
-Create and run in one command:
-.Bd -literal
-ocifbsd run --name web /path/to/bundle
-.Ed
+.Sh ENVIRONMENT
+.Bl -tag -width ".Ev OCIFBSD_REGISTRIES_CONF"
+.It Ev OCIFBSD_DATA_DIR
+Override the image and volume data directory
+.Pq default Pa /var/lib/ocifbsd .
+.It Ev OCIFBSD_STATE_DIR
+Override the runtime state directory
+.Pq default Pa /var/run/ocifbsd ,
+useful for tests or an unprivileged, self-contained instance.
+.It Ev OCIFBSD_REGISTRIES_CONF
+Override the path to the registry alias table
+.Pq see Sx FILES .
+.El
 .Sh FILES
 .Bl -tag -width ".Pa /var/run/ocifbsd" -compact
 .It Pa /var/run/ocifbsd/
@@ -265,19 +260,24 @@ directive
 Built-in defaults cover Docker Hub, so this file is optional.
 See the shipped example for the format.
 .El
-.Sh ENVIRONMENT
-.Bl -tag -width ".Ev OCIFBSD_REGISTRIES_CONF"
-.It Ev OCIFBSD_DATA_DIR
-Override the image and volume data directory
-.Pq default Pa /var/lib/ocifbsd .
-.It Ev OCIFBSD_STATE_DIR
-Override the runtime state directory
-.Pq default Pa /var/run/ocifbsd ,
-useful for tests or an unprivileged, self-contained instance.
-.It Ev OCIFBSD_REGISTRIES_CONF
-Override the path to the registry alias table
-.Pq see Sx FILES .
-.El
+.Sh EXAMPLES
+Create a container from an OCI bundle:
+.Bd -literal
+ocifbsd create --name my-container /path/to/bundle
+.Ed
+.Pp
+Start, inspect state, signal, and delete:
+.Bd -literal
+ocifbsd start <id>
+ocifbsd state <id>
+ocifbsd kill <id>
+ocifbsd delete --force <id>
+.Ed
+.Pp
+Create and run in one command:
+.Bd -literal
+ocifbsd run --name web /path/to/bundle
+.Ed
 .Sh SEE ALSO
 .Xr jail 3 ,
 .Xr ocifbsd.conf 5 ,
@@ -291,6 +291,8 @@ Phase 1 acceptance covers create/start/state/kill/delete with ATF
 unit and root integration tests on FreeBSD lab hosts.
 .Sh AUTHORS
 .Nm
-was developed by REVYTECH, Inc.,
-with REVYTECH, Inc. lifecycle and test work on
-.Li feature/oci-bootstrap .
+was developed by
+.An "REVYTECH, Inc." ,
+including the lifecycle and test work on the
+.Li feature/oci-bootstrap
+branch.

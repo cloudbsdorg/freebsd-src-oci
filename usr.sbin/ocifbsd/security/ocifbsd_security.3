@@ -67,7 +67,8 @@ manages the
 .Xr mac 4
 labels that ocifbsd applies to jails, including
 Biba integrity labels, MLS sensitivity labels,
-and partition visibility labels. It can list,
+and partition visibility labels.
+It can list,
 load, and unload MAC policy modules and parse
 the
 .Sq Cm jail -j Ar jail Cm label= Ns ...
@@ -105,13 +106,13 @@ the format produced by
 .Fl j Ar jail ) .
 .El
 .Sh SEE ALSO
-.Xr ocifbsd 8 ,
-.Xr rctl 8 ,
-.Xr mac 4 ,
-.Xr capsicum 4 ,
-.Xr jail 8 ,
 .Xr biba 4 ,
-.Xr mls 4
+.Xr capsicum 4 ,
+.Xr mac 4 ,
+.Xr mls 4 ,
+.Xr jail 8 ,
+.Xr ocifbsd 8 ,
+.Xr rctl 8
 .Sh HISTORY
 The
 .Nm
