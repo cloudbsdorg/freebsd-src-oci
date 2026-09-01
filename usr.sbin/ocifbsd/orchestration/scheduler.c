@@ -386,6 +386,72 @@ scheduler_add_node(const char *node_name)
 	return (0);
 }
 
+int
+scheduler_sync_nodes(const struct sched_node *in, int count)
+{
+	if (in == NULL && count > 0)
+		return (-1);
+
+	/* Retire cluster nodes no longer present (never the local node). */
+	pthread_mutex_lock(&scheduler_lock);
+	for (int i = 0; i < node_count; i++) {
+		struct node_info *n = nodes[i];
+		int found = 0;
+
+		if (n == NULL || strcmp(n->name, "localhost") == 0)
+			continue;
+		for (int j = 0; j < count; j++) {
+			if (strcmp(n->name, in[j].name) == 0) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found) {
+			n->ready = false;
+			n->schedulable = false;
+		}
+	}
+	pthread_mutex_unlock(&scheduler_lock);
+
+	/* (Re)register each present node as ready + schedulable. */
+	for (int j = 0; j < count; j++) {
+		struct node_info *n = NULL;
+
+		pthread_mutex_lock(&scheduler_lock);
+		for (int i = 0; i < node_count; i++) {
+			if (nodes[i] != NULL &&
+			    strcmp(nodes[i]->name, in[j].name) == 0) {
+				n = nodes[i];
+				break;
+			}
+		}
+		if (n != NULL) {
+			n->ready = true;
+			n->schedulable = true;
+			strlcpy(n->address, in[j].address, sizeof(n->address));
+		}
+		pthread_mutex_unlock(&scheduler_lock);
+
+		if (n != NULL)
+			continue;
+
+		/* New node: scheduler_add_node takes the lock itself. */
+		if (scheduler_add_node(in[j].name) != 0)
+			return (-1);
+		pthread_mutex_lock(&scheduler_lock);
+		for (int i = 0; i < node_count; i++) {
+			if (nodes[i] != NULL &&
+			    strcmp(nodes[i]->name, in[j].name) == 0) {
+				strlcpy(nodes[i]->address, in[j].address,
+				    sizeof(nodes[i]->address));
+				break;
+			}
+		}
+		pthread_mutex_unlock(&scheduler_lock);
+	}
+	return (0);
+}
+
 /*
  * Cordon or uncordon a node. A cordoned (schedulable=false) node keeps its
  * running pods but receives no new placements. Returns 0 on success, -1 if

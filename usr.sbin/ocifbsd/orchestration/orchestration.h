@@ -466,6 +466,24 @@ int		scheduler_score_node(const char *node, struct pod_spec *spec);
 char		**scheduler_list_nodes(int *count);
 int		scheduler_add_node(const char *node);
 int		scheduler_set_node_schedulable(const char *node, bool schedulable);
+
+/*
+ * A minimal node descriptor used to feed cluster membership into the
+ * scheduler without coupling it to the clustering module. A thin glue layer
+ * builds this array from cluster_nodes_list() and calls scheduler_sync_nodes().
+ */
+struct sched_node {
+	char	name[256];
+	char	address[64];
+};
+
+/*
+ * Reconcile the scheduler's node set with the cluster: nodes in the array are
+ * (re)registered as ready and schedulable; previously-synced nodes no longer
+ * present are retired (marked not ready / not schedulable). The local node is
+ * never retired. Returns 0 on success, -1 on bad arguments.
+ */
+int		scheduler_sync_nodes(const struct sched_node *nodes, int count);
 int		scheduler_remove_node(const char *node);
 int		scheduler_node_ready(const char *node);
 int		scheduler_node_not_ready(const char *node);
