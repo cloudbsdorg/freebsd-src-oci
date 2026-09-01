@@ -91,6 +91,9 @@ different node — three real containers, one per node, spread across the
 cluster, entirely automatically. The mTLS channel remains available for
 out-of-band control (remote exec/logs), not needed for the core deploy loop.
 
-- **Remaining:** front the running replicas with the pf load balancer in the
-  same flow, and measure image-pull fan-out to decide whether our own
+- **Load balancer endpoints:** validated live -- a 3-node `CREATE web 3` has the
+  leader auto-derive 3 backend endpoints (one per replica at its node address),
+  replicated to every node (`endpoints=3`), and `controller_lb_ruleset()` turns
+  them into a `pfctl -n`-valid round-robin pool.
+- **Remaining:** assign a service VIP and apply the ruleset via pfctl, and measure image-pull fan-out to decide whether our own
   BitTorrent-style P2P layer distribution is warranted.
