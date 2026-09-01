@@ -108,9 +108,49 @@ ATF_TC_BODY(agent_reconcile_image_change, tc)
 	    "image change should stop the old and launch the new replica");
 }
 
+/* The launch argv is 'ocifbsd run --name <svc>-<id> --image <image>'. */
+ATF_TC_WITHOUT_HEAD(agent_launch_argv_builds_run);
+ATF_TC_BODY(agent_launch_argv_builds_run, tc)
+{
+	struct agent_replica r = mk("web", 0, "nginx:1.27");
+	char name[192];
+	const char *argv[8];
+	int argc = 0;
+
+	ATF_REQUIRE_EQ(0, agent_launch_argv(&r, "/usr/sbin/ocifbsd",
+	    name, sizeof(name), argv, 8, &argc));
+	ATF_CHECK_STREQ("web-0", name);
+	ATF_CHECK_STREQ("/usr/sbin/ocifbsd", argv[0]);
+	ATF_CHECK_STREQ("run", argv[1]);
+	ATF_CHECK_STREQ("--name", argv[2]);
+	ATF_CHECK_STREQ("web-0", argv[3]);
+	ATF_CHECK_STREQ("--image", argv[4]);
+	ATF_CHECK_STREQ("nginx:1.27", argv[5]);
+	ATF_CHECK(argv[argc] == NULL);		/* NULL-terminated for execv */
+}
+
+/* The stop argv deletes the replica's container by name. */
+ATF_TC_WITHOUT_HEAD(agent_stop_argv_builds_delete);
+ATF_TC_BODY(agent_stop_argv_builds_delete, tc)
+{
+	struct agent_replica r = mk("db", 2, "postgres:16");
+	char name[192];
+	const char *argv[8];
+	int argc = 0;
+
+	ATF_REQUIRE_EQ(0, agent_stop_argv(&r, "/usr/sbin/ocifbsd",
+	    name, sizeof(name), argv, 8, &argc));
+	ATF_CHECK_STREQ("db-2", name);
+	ATF_CHECK_STREQ("delete", argv[1]);
+	ATF_CHECK_STREQ("db-2", argv[2]);
+	ATF_CHECK(argv[argc] == NULL);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, agent_marshal_roundtrip);
+	ATF_TP_ADD_TC(tp, agent_launch_argv_builds_run);
+	ATF_TP_ADD_TC(tp, agent_stop_argv_builds_delete);
 	ATF_TP_ADD_TC(tp, agent_reconcile_launch_and_stop);
 	ATF_TP_ADD_TC(tp, agent_reconcile_noop);
 	ATF_TP_ADD_TC(tp, agent_reconcile_image_change);

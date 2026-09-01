@@ -65,4 +65,27 @@ int	agent_reconcile(const struct agent_replica *desired, int nd,
 	    const struct agent_replica *running, int nr,
 	    struct agent_action *out, int max, int *nout);
 
+/*
+ * A replica's container name is "<service>-<replica_id>". These build the
+ * argv to launch or stop it via the local ocifbsd(8) runtime:
+ *   launch: ocifbsd run --name <name> --image <image>
+ *   stop:   ocifbsd delete <name> --force   (after a graceful stop)
+ * namebuf receives the container name (argv points into it); argv is filled
+ * with the NULL-terminated command and *argc gets the argument count. Returns
+ * 0 on success, -1 on bad arguments or too-small buffers.
+ */
+int	agent_launch_argv(const struct agent_replica *r, const char *ocifbsd,
+	    char *namebuf, size_t namelen, const char *argv[], int max,
+	    int *argc);
+int	agent_stop_argv(const struct agent_replica *r, const char *ocifbsd,
+	    char *namebuf, size_t namelen, const char *argv[], int max,
+	    int *argc);
+
+/*
+ * Apply one reconcile action against the local ocifbsd(8) runtime (LAUNCH runs
+ * the replica's jail; STOP gracefully stops then deletes it). ocifbsd is the
+ * path to the ocifbsd binary. Returns 0 on success, non-zero on failure.
+ */
+int	agent_apply_action(const struct agent_action *a, const char *ocifbsd);
+
 #endif /* OCIFBSD_NODE_AGENT_H */

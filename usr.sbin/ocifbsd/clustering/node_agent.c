@@ -7,9 +7,12 @@
  * Node agent: assignment wire format and reconciliation. See node_agent.h.
  */
 
+#include <sys/wait.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "node_agent.h"
 
@@ -124,4 +127,108 @@ agent_reconcile(const struct agent_replica *desired, int nd,
 
 	*nout = k;
 	return (0);
+}
+
+/* Build "<service>-<replica_id>" into buf. Returns 0 on success. */
+static int
+replica_name(const struct agent_replica *r, char *buf, size_t buflen)
+{
+	int w = snprintf(buf, buflen, "%s-%d", r->service, r->replica_id);
+
+	return (w > 0 && (size_t)w < buflen) ? 0 : -1;
+}
+
+int
+agent_launch_argv(const struct agent_replica *r, const char *ocifbsd,
+    char *namebuf, size_t namelen, const char *argv[], int max, int *argc)
+{
+	int k = 0;
+
+	if (r == NULL || ocifbsd == NULL || namebuf == NULL || argv == NULL ||
+	    argc == NULL || max < 7)
+		return (-1);
+	if (replica_name(r, namebuf, namelen) != 0)
+		return (-1);
+	argv[k++] = ocifbsd;
+	argv[k++] = "run";
+	argv[k++] = "--name";
+	argv[k++] = namebuf;
+	argv[k++] = "--image";
+	argv[k++] = r->image;
+	argv[k] = NULL;
+	*argc = k;
+	return (0);
+}
+
+int
+agent_stop_argv(const struct agent_replica *r, const char *ocifbsd,
+    char *namebuf, size_t namelen, const char *argv[], int max, int *argc)
+{
+	int k = 0;
+
+	if (r == NULL || ocifbsd == NULL || namebuf == NULL || argv == NULL ||
+	    argc == NULL || max < 5)
+		return (-1);
+	if (replica_name(r, namebuf, namelen) != 0)
+		return (-1);
+	argv[k++] = ocifbsd;
+	argv[k++] = "delete";
+	argv[k++] = namebuf;
+	argv[k++] = "--force";
+	argv[k] = NULL;
+	*argc = k;
+	return (0);
+}
+
+/* Run a NULL-terminated argv to completion. Returns the child's exit status. */
+static int
+run_argv(const char *argv[])
+{
+	pid_t pid = fork();
+	int status;
+
+	if (pid < 0)
+		return (-1);
+	if (pid == 0) {
+		execv(argv[0], (char *const *)argv);
+		_exit(127);
+	}
+	if (waitpid(pid, &status, 0) < 0)
+		return (-1);
+	return (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+}
+
+/*
+ * Apply one action against the local runtime: LAUNCH runs the replica's jail;
+ * STOP gracefully stops then deletes it. ocifbsd is the path to the ocifbsd(8)
+ * binary. Returns 0 on success, non-zero on failure.
+ */
+int
+agent_apply_action(const struct agent_action *a, const char *ocifbsd)
+{
+	char name[192];
+	const char *argv[8];
+	int argc;
+
+	if (a == NULL || ocifbsd == NULL)
+		return (-1);
+
+	if (a->op == AGENT_LAUNCH) {
+		if (agent_launch_argv(&a->replica, ocifbsd, name, sizeof(name),
+		    argv, 8, &argc) != 0)
+			return (-1);
+		return (run_argv(argv));
+	}
+
+	/* STOP: a best-effort graceful stop, then delete --force. */
+	if (replica_name(&a->replica, name, sizeof(name)) != 0)
+		return (-1);
+	{
+		const char *stop_argv[] = { ocifbsd, "stop", name, NULL };
+		(void)run_argv(stop_argv);
+	}
+	if (agent_stop_argv(&a->replica, ocifbsd, name, sizeof(name),
+	    argv, 8, &argc) != 0)
+		return (-1);
+	return (run_argv(argv));
 }
