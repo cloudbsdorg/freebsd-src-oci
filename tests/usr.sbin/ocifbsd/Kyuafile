@@ -6,6 +6,7 @@ test_suite("FreeBSD")
 
 atf_test_program{name="cli_test", }
 atf_test_program{name="cluster_pki_test", }
+atf_test_program{name="control_plane_test", }
 atf_test_program{name="ensemble_test", }
 atf_test_program{name="hooks_test", }
 atf_test_program{name="image_parse_test", }
