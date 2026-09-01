@@ -132,6 +132,48 @@ binary, the real implementations override the stubs.
 .Pp
 The full public API is declared in
 .In ocifbsd/orchestration.h .
+.Ss Load balancing
+A service is fronted by a virtual IP (VIP). The load balancer distributes
+connections to the VIP across the service's ready replica endpoints using
+.Xr pf 4
+redirection pools, native to FreeBSD and requiring no external daemon.
+.Fn service_lb_build_rules
+generates the ruleset and
+.Fn service_lb_apply
+loads it into a per-service anchor
+.Pa ocifbsd/lb/ Ns Aq Ar service .
+The
+.Va lb_algorithm
+selects the pool type:
+.Ic roundrobin
+(the default) maps to a
+.Ic round-robin
+pool,
+.Ic iphash
+(or
+.Ic clientip
+session affinity) to a
+.Ic source-hash
+pool, and
+.Ic leastconn
+falls back to round-robin
+.Pq Xr pf 4 has no least-connections pool .
+Only replicas in the
+.Dv REPLICA_STATE_RUNNING
+state become backends, so the pool works regardless of which node a replica
+runs on as long as its address is routable.
+.Ss Scheduling and placement
+.Fn scheduler_select_node
+places each replica on the ready, uncordoned node with the best score,
+preferring nodes running fewer pods so replicas spread across the cluster.
+.Fn scheduler_add_node
+registers a worker;
+.Fn scheduler_set_node_schedulable
+cordons or uncordons a node (a cordoned node keeps its pods but receives no new
+placements); and
+.Fn scheduler_sync_nodes
+reconciles the node set with the cluster membership, retiring nodes that have
+left while never retiring the local node.
 .Sh FILES
 .Bl -tag -width /var/run/ocifbsd/pods -compact
 .It Pa /etc/ocifbsd/orchestration.conf
@@ -143,6 +185,7 @@ Per-pod state directory.
 Stack manifests.
 .El
 .Sh SEE ALSO
+.Xr pf 4 ,
 .Xr ocifbsd 8 ,
 .Xr ocifbsd_network 3
 .Sh HISTORY
