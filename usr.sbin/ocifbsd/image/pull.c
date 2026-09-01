@@ -50,6 +50,7 @@
 #include <zlib.h>
 
 #include "pull.h"
+#include "registries.h"
 #include "unpack.h"
 #include "zfs_store.h"
 
@@ -222,29 +223,40 @@ registry_init(struct registry *reg, const char *reference)
 	}
 
 	/*
-	 * Docker Hub API host is registry-1.docker.io; token service is
-	 * registry.docker.io. References still use docker.io as the name.
+	 * Resolve the registry name through the alias table (config-driven,
+	 * with built-in defaults for Docker Hub): a name like "docker.io" maps
+	 * to a concrete API host and token service, and the table also decides
+	 * whether plain HTTP is permitted. TLS is the default; only localhost
+	 * or an explicitly-insecure registry falls back to HTTP.
 	 */
-	if (strcmp(registry, "docker.io") == 0 ||
-	    strcmp(registry, "index.docker.io") == 0) {
-		free(registry);
-		registry = strdup("registry-1.docker.io");
+	{
+		const struct registry_alias *alias =
+		    registry_alias_lookup(registry);
+		int insecure = registry_alias_insecure(registry);
+
+		if (alias != NULL && alias->api_host != NULL) {
+			free(registry);
+			registry = strdup(alias->api_host);
+			if (registry == NULL)
+				return (-1);
+		}
+
+		reg->host = registry;
+		reg->port = insecure ? REGISTRY_DEFAULT_HTTP_PORT :
+		    REGISTRY_DEFAULT_PORT;
+		reg->path_prefix = strdup(REGISTRY_API_PREFIX);
+		reg->tls = insecure ? false : true;
+		reg->repository = repo;
+		reg->tag = tag != NULL ? tag : strdup("latest");
+		reg->auth = calloc(1, sizeof(struct registry_auth));
+		if (reg->auth == NULL)
+			return (-1);
+
+		reg->auth->type = AUTH_ANONYMOUS;
+		reg->auth->registry = strdup(registry);
+		if (alias != NULL && alias->auth_service != NULL)
+			reg->auth->service = strdup(alias->auth_service);
 	}
-
-	reg->host = registry;
-	reg->port = REGISTRY_DEFAULT_PORT;
-	reg->path_prefix = strdup(REGISTRY_API_PREFIX);
-	reg->tls = true;
-	reg->repository = repo;
-	reg->tag = tag != NULL ? tag : strdup("latest");
-	reg->auth = calloc(1, sizeof(struct registry_auth));
-	if (reg->auth == NULL)
-		return (-1);
-
-	reg->auth->type = AUTH_ANONYMOUS;
-	reg->auth->registry = strdup(registry);
-	if (strcmp(registry, "registry-1.docker.io") == 0)
-		reg->auth->service = strdup("registry.docker.io");
 
 	free(digest);
 
@@ -677,15 +689,17 @@ authenticate(struct registry *reg, const char *scope)
 	}
 	if (realm[0] == '\0' && response_code == 401) {
 		/*
-		 * Docker Hub always challenges on /v2/. Fall back to the
-		 * well-known token endpoint when the header is missing.
+		 * Some registries (Docker Hub among them) challenge on /v2/
+		 * without a WWW-Authenticate header. Fall back to the token
+		 * endpoint configured for this API host in the alias table.
 		 */
-		if (strcmp(reg->host, "registry-1.docker.io") == 0 ||
-		    strcmp(reg->host, "registry.docker.io") == 0) {
-			strlcpy(realm, "https://auth.docker.io/token",
-			    sizeof(realm));
-			if (service[0] == '\0')
-				strlcpy(service, "registry.docker.io",
+		const struct registry_alias *alias =
+		    registry_alias_by_host(reg->host);
+
+		if (alias != NULL && alias->auth_realm != NULL) {
+			strlcpy(realm, alias->auth_realm, sizeof(realm));
+			if (service[0] == '\0' && alias->auth_service != NULL)
+				strlcpy(service, alias->auth_service,
 				    sizeof(service));
 		}
 	}

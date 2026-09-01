@@ -24,6 +24,7 @@
 #include "image/paths.c"
 #include "image/whiteout.c"
 #include "image/unpack.c"
+#include "image/registries.c"
 #include "image/pull.c"
 
 /* Minimal Docker v2 / OCI image manifest with one layer */

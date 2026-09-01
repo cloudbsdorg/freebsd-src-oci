@@ -253,10 +253,16 @@ Image and volume data directory (future image store)
 Per-container network configuration
 .Pq Cm network set
 .It Pa /etc/ocifbsd/
-Configuration directory (reserved)
+Configuration directory
+.It Pa /usr/local/etc/ocifbsd/registries.conf , Pa /etc/ocifbsd/registries.conf
+Registry alias table: maps a registry reference name to its API host and token
+endpoint and selects the transport (TLS by default; plain HTTP for registries
+marked insecure and for localhost).
+Built-in defaults cover Docker Hub, so this file is optional.
+See the shipped example for the format.
 .El
 .Sh ENVIRONMENT
-.Bl -tag -width ".Ev OCIFBSD_STATE_DIR"
+.Bl -tag -width ".Ev OCIFBSD_REGISTRIES_CONF"
 .It Ev OCIFBSD_DATA_DIR
 Override the image and volume data directory
 .Pq default Pa /var/lib/ocifbsd .
@@ -264,6 +270,9 @@ Override the image and volume data directory
 Override the runtime state directory
 .Pq default Pa /var/run/ocifbsd ,
 useful for tests or an unprivileged, self-contained instance.
+.It Ev OCIFBSD_REGISTRIES_CONF
+Override the path to the registry alias table
+.Pq see Sx FILES .
 .El
 .Sh SEE ALSO
 .Xr jail 3 ,
