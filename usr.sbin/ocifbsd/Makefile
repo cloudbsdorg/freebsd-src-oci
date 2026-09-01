@@ -16,7 +16,19 @@
 
 PROG=	ocifbsd
 VERSION=	0.1.0
-MAN=	ocifbsd.8
+MAN=	ocifbsd.8 ocifbsd.conf.5
+
+# Boot-time integration: the sample configuration file for the ocifbsd
+# rc.d(8) service (see ocifbsd.conf(5)). The service script itself is a
+# base rc.d script installed from libexec/rc/rc.d/. Installed via
+# CONFGROUPS so it lands in the base 'ocifbsd' pkgbase package without
+# being clobbered on upgrade if locally modified.
+CONFGROUPS=	OCICONF
+OCICONF=	etc/ocifbsd.conf
+OCICONFPACKAGE=	${PACKAGE}
+OCICONFNAME=	ocifbsd.conf
+OCICONFDIR=	/etc/ocifbsd
+OCICONFMODE=	0644
 # pkgbase package name → FreeBSD-ocifbsd
 PACKAGE=	ocifbsd
 

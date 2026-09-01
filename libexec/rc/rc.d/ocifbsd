@@ -1,0 +1,172 @@
+#!/bin/sh
+#
+# Copyright (c) 2026 REVYTECH, Inc.
+# SPDX-License-Identifier: BSD-2-Clause
+#
+
+# PROVIDE: ocifbsd
+# REQUIRE: LOGIN FILESYSTEMS jail
+# KEYWORD: shutdown
+
+#
+# Autostart OCI containers with the native ocifbsd(8) runtime.
+#
+# Add the following lines to /etc/rc.conf to enable ocifbsd:
+#
+#	ocifbsd_enable="YES"
+#	ocifbsd_containers="web db"		# names to start at boot
+#	ocifbsd_web_image="docker.io/library/nginx:latest"
+#	ocifbsd_db_bundle="/var/lib/ocifbsd/bundles/db"
+#
+# The list of containers and their definitions may instead live in the
+# standalone configuration file ${ocifbsd_config} (default
+# /etc/ocifbsd/ocifbsd.conf); see ocifbsd.conf(5).  For each name N in
+# ${ocifbsd_containers}, the following per-container variables are honored:
+#
+#	ocifbsd_N_image		OCI image reference (run --image); if the
+#				image is not present locally it is pulled first
+#	ocifbsd_N_bundle	path to an OCI bundle (used when no image is
+#				set)
+#	ocifbsd_N_args		extra arguments appended to the run command
+#
+
+. /etc/rc.subr
+
+name="ocifbsd"
+desc="Autostart OCI containers via the native ocifbsd runtime"
+rcvar="ocifbsd_enable"
+
+start_cmd="ocifbsd_start"
+stop_cmd="ocifbsd_stop"
+status_cmd="ocifbsd_status"
+extra_commands="status"
+
+: ${ocifbsd_enable:="NO"}
+: ${ocifbsd_program:="/usr/sbin/ocifbsd"}
+: ${ocifbsd_config:="/etc/ocifbsd/ocifbsd.conf"}
+: ${ocifbsd_containers:=""}
+
+load_rc_config $name
+
+# The standalone config may define ${ocifbsd_containers} and the per-container
+# variables.  It is sourced after load_rc_config so that rc.conf settings take
+# precedence unless the file explicitly overrides them.
+if [ -r "$ocifbsd_config" ]; then
+	. "$ocifbsd_config"
+fi
+
+# ocifbsd_running name -- return 0 if the container is created or running.
+ocifbsd_running()
+{
+	${ocifbsd_program} state "$1" >/dev/null 2>&1
+}
+
+# ocifbsd_start_one name
+ocifbsd_start_one()
+{
+	local _n _image _bundle _args _eval
+
+	_n=$1
+	eval _image=\"\${ocifbsd_${_n}_image:-}\"
+	eval _bundle=\"\${ocifbsd_${_n}_bundle:-}\"
+	eval _args=\"\${ocifbsd_${_n}_args:-}\"
+
+	if ocifbsd_running "$_n"; then
+		warn "ocifbsd container '$_n' already exists; skipping"
+		return 0
+	fi
+
+	if [ -n "$_image" ]; then
+		# Pull the image if it is not already present in the store.
+		if ! ${ocifbsd_program} run --name "$_n" ${_args} \
+		    --image "$_image" >/dev/null 2>&1; then
+			echo "Pulling image for ocifbsd container '$_n': $_image"
+			if ! ${ocifbsd_program} pull "$_image"; then
+				warn "failed to pull image '$_image' for '$_n'"
+				return 1
+			fi
+			${ocifbsd_program} run --name "$_n" ${_args} \
+			    --image "$_image" || {
+				warn "failed to start ocifbsd container '$_n'"
+				return 1
+			}
+		fi
+	elif [ -n "$_bundle" ]; then
+		${ocifbsd_program} run --name "$_n" ${_args} "$_bundle" || {
+			warn "failed to start ocifbsd container '$_n'"
+			return 1
+		}
+	else
+		warn "ocifbsd container '$_n' has neither" \
+		    "ocifbsd_${_n}_image nor ocifbsd_${_n}_bundle set"
+		return 1
+	fi
+	echo "Started ocifbsd container: $_n"
+	return 0
+}
+
+# ocifbsd_stop_one name
+ocifbsd_stop_one()
+{
+	local _n
+
+	_n=$1
+	if ! ocifbsd_running "$_n"; then
+		return 0
+	fi
+	${ocifbsd_program} stop "$_n" >/dev/null 2>&1
+	${ocifbsd_program} delete "$_n" >/dev/null 2>&1
+	echo "Stopped ocifbsd container: $_n"
+}
+
+ocifbsd_start()
+{
+	local _n
+
+	if [ ! -x "$ocifbsd_program" ]; then
+		warn "$ocifbsd_program not found or not executable"
+		return 1
+	fi
+	if [ -z "$ocifbsd_containers" ]; then
+		return 0
+	fi
+	for _n in $ocifbsd_containers; do
+		ocifbsd_start_one "$_n"
+	done
+}
+
+# ocifbsd_reverse_list list -- echo the words of $list in reverse order so
+# containers stop in the opposite order they were started.
+ocifbsd_reverse_list()
+{
+	local _w _out
+
+	_out=""
+	for _w in $1; do
+		_out="$_w $_out"
+	done
+	echo $_out
+}
+
+ocifbsd_stop()
+{
+	local _n
+
+	if [ ! -x "$ocifbsd_program" ]; then
+		return 0
+	fi
+	for _n in $(ocifbsd_reverse_list "$ocifbsd_containers"); do
+		ocifbsd_stop_one "$_n"
+	done
+}
+
+ocifbsd_status()
+{
+	if [ ! -x "$ocifbsd_program" ]; then
+		warn "$ocifbsd_program not found"
+		return 1
+	fi
+	${ocifbsd_program} list
+}
+
+run_rc_command "$1"

@@ -47,6 +47,7 @@ CONFS=	DAEMON \
 	netoptions \
 	netwait \
 	noshutdown \
+	ocifbsd \
 	os-release \
 	pwcheck \
 	quota \

@@ -1,0 +1,167 @@
+.\" Copyright (c) 2026 REVYTECH, Inc.
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+.\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+.\" IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+.\" INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+.\" BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+.\" LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+.\" AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+.\" OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+.\" THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+.\" DAMAGE.
+.\"
+.\" $FreeBSD$
+.Dd August 31, 2026
+.Dt OCIFBSD.CONF 5
+.Os
+.Sh NAME
+.Nm ocifbsd.conf
+.Nd boot-time container definitions for the ocifbsd runtime
+.Sh DESCRIPTION
+The
+.Nm
+file defines the OCI containers that the
+.Xr ocifbsd 8
+.Xr rc 8
+service starts at boot and stops at shutdown.
+It is an optional companion to
+.Xr rc.conf 5 :
+the same
+.Va ocifbsd_*
+variables may be set either directly in
+.Xr rc.conf 5
+or in this file, whichever is more convenient for organizing a large set
+of container definitions.
+.Pp
+The file is read by the
+.Pa /etc/rc.d/ocifbsd
+script as a
+.Xr sh 1
+script, and is sourced
+.Em after
+.Xr rc.conf 5
+so that settings placed in
+.Xr rc.conf 5
+take precedence unless this file explicitly overrides them.
+Its default location is
+.Pa /etc/ocifbsd/ocifbsd.conf ,
+which may be changed with the
+.Va ocifbsd_config
+variable in
+.Xr rc.conf 5 .
+.Pp
+Nothing in this file takes effect unless
+.Va ocifbsd_enable
+is set to
+.Dq Li YES
+in
+.Xr rc.conf 5 .
+.Sh VARIABLES
+The following variables control the service.
+.Bl -tag -width ".Va ocifbsd_containers"
+.It Va ocifbsd_enable
+.Pq Dq Li NO
+Set to
+.Dq Li YES
+to enable boot-time container management.
+This variable is read from
+.Xr rc.conf 5 ,
+not from
+.Nm .
+.It Va ocifbsd_program
+.Pq Pa /usr/sbin/ocifbsd
+Path to the
+.Xr ocifbsd 8
+runtime binary.
+.It Va ocifbsd_config
+.Pq Pa /etc/ocifbsd/ocifbsd.conf
+Path to this configuration file.
+This variable is read from
+.Xr rc.conf 5 ,
+not from
+.Nm .
+.It Va ocifbsd_containers
+.Pq empty
+A space-separated list of container names to create and start at boot.
+At shutdown the same containers are stopped in the reverse order.
+.El
+.Pp
+For each name
+.Ar N
+listed in
+.Va ocifbsd_containers ,
+the container's source is defined with exactly one of the following, plus
+optional extra arguments:
+.Bl -tag -width ".Va ocifbsd_N_bundle"
+.It Va ocifbsd_ Ns Ar N Ns Va _image
+An OCI image reference, for example
+.Dq Li docker.io/library/nginx:latest .
+If the referenced image is not already present in the local image store it
+is pulled automatically before the container is started.
+.It Va ocifbsd_ Ns Ar N Ns Va _bundle
+Path to a local OCI bundle directory.
+It is used only when
+.Va ocifbsd_ Ns Ar N Ns Va _image
+is unset.
+.It Va ocifbsd_ Ns Ar N Ns Va _args
+Extra arguments appended to the
+.Ic ocifbsd run
+command for this container.
+.El
+.Sh FILES
+.Bl -tag -width ".Pa /etc/ocifbsd/ocifbsd.conf" -compact
+.It Pa /etc/ocifbsd/ocifbsd.conf
+The default configuration file.
+.It Pa /etc/rc.d/ocifbsd
+The service script that reads this file.
+.El
+.Sh EXAMPLES
+Enable the service in
+.Xr rc.conf 5
+and define two containers, one from an image and one from a local bundle:
+.Bd -literal -offset indent
+# in /etc/rc.conf
+ocifbsd_enable="YES"
+
+# in /etc/ocifbsd/ocifbsd.conf
+ocifbsd_containers="web db"
+ocifbsd_web_image="docker.io/library/nginx:latest"
+ocifbsd_db_bundle="/var/lib/ocifbsd/bundles/db"
+.Ed
+.Sh SEE ALSO
+.Xr sh 1 ,
+.Xr rc.conf 5 ,
+.Xr ocifbsd 8 ,
+.Xr rc 8
+.Sh AUTHORS
+This software and manual page were developed by
+.An REVYTECH, Inc.
+.Sh SECURITY CONSIDERATIONS
+Container state and the image store are readable and writable only by
+.Li root
+and members of the
+.Li ocifbsd
+group.
+Because
+.Nm
+is executed as
+.Xr sh 1
+by a process running as
+.Li root
+during boot, it must be writable only by
+.Li root ;
+treat it with the same care as any other
+.Xr rc 8
+configuration file.
