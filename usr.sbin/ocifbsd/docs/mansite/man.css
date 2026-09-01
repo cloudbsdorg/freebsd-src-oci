@@ -1,0 +1,54 @@
+/* Stylesheet for mandoc(1) -T html output — ocifbsd manual pages. */
+:root {
+  --fg: #1b1b1b; --bg: #ffffff; --muted: #666; --accent: #7a1500;
+  --rule: #e2e2e2; --code-bg: #f5f5f5; --link: #0b5cad;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6e6e6; --bg: #1a1a1a; --muted: #9a9a9a; --accent: #ff8a5c;
+    --rule: #333; --code-bg: #262626; --link: #6bb3ff;
+  }
+}
+html { -webkit-text-size-adjust: 100%; }
+body {
+  color: var(--fg); background: var(--bg);
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5; margin: 0; padding: 1.5rem clamp(1rem, 5vw, 3rem);
+  max-width: 52rem; margin-inline: auto;
+}
+a { color: var(--link); }
+/* Running header/footer tables mandoc emits. */
+table.head, table.foot {
+  width: 100%; font-size: 0.8rem; color: var(--muted);
+  border-collapse: collapse;
+}
+table.head { border-bottom: 1px solid var(--rule); margin-bottom: 1.25rem; padding-bottom: 0.4rem; }
+table.foot { border-top: 1px solid var(--rule); margin-top: 2rem; padding-top: 0.4rem; }
+td.head-vol, td.foot-os { text-align: center; }
+td.head-rtitle, td.foot-date { text-align: right; }
+/* Section and subsection headings. */
+.manual-text { }
+h1.Sh, section.Sh > h1 {
+  color: var(--accent); font-size: 1.15rem; margin: 1.8rem 0 0.6rem;
+  border-bottom: 1px solid var(--rule); padding-bottom: 0.2rem;
+}
+h2.Ss, section.Ss > h2 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
+/* Names, flags, paths, etc. */
+.Nm { font-weight: 600; }
+code, .Fl, .Cm, .Ar, .Pa, .Ev, .Fn, .Fa, .Fd, .Vt, .Dv, .Er, .Li, .Sy {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.Ar { font-style: italic; }
+.Pa, .Ev { color: var(--accent); }
+/* Definition/option lists (.Bl -tag). */
+dl.Bl-tag { margin: 0.5rem 0; }
+dl.Bl-tag > dt { font-family: ui-monospace, Menlo, Consolas, monospace; margin-top: 0.6rem; }
+dl.Bl-tag > dd { margin: 0 0 0.4rem 2rem; }
+/* Literal / code display blocks (.Bd -literal). */
+.Bd, pre, .Li {
+  background: var(--code-bg); border-radius: 6px;
+}
+.Bd, pre { padding: 0.6rem 0.8rem; overflow-x: auto; }
+/* Tables inside pages scroll rather than overflow the body. */
+table:not(.head):not(.foot) { display: block; overflow-x: auto; border-collapse: collapse; }

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ocifbsd — FreeBSD native OCI runtime — manual pages</title>
+<link rel="stylesheet" href="man.css">
+<style>
+  body { max-width: 60rem; }
+  .hero { margin: .5rem 0 2rem; }
+  .hero h1 { color: var(--accent); font-size: 1.9rem; margin: 0 0 .3rem;
+             border: 0; padding: 0; letter-spacing: -0.01em; }
+  .hero .tag { color: var(--muted); font-size: 1.05rem; margin: 0; }
+  .hero .lead { margin: 1rem 0 0; }
+  .hero code { background: var(--code-bg); padding: .1rem .35rem; border-radius: 5px; }
+
+  /* Highlight chips */
+  ul.hi { list-style: none; padding: 0; margin: 1.4rem 0 0;
+          display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .7rem; }
+  ul.hi li { border: 1px solid var(--rule); border-radius: 10px; padding: .7rem .85rem; background: var(--code-bg); }
+  ul.hi b { display: block; color: var(--accent); font-size: .95rem; }
+  ul.hi span { color: var(--muted); font-size: .87rem; }
+
+  figure.arch { margin: 2rem 0 0; }
+  figure.arch svg { width: 100%; height: auto; display: block;
+                    border: 1px solid var(--rule); border-radius: 12px; background: var(--code-bg); }
+  figure.arch figcaption { color: var(--muted); font-size: .82rem; text-align: center; margin-top: .5rem; }
+
+  h2.sec { color: var(--fg); font-size: 1.1rem; margin: 2.2rem 0 .6rem;
+           border-bottom: 1px solid var(--rule); padding-bottom: .25rem; }
+  ul.man { list-style: none; padding: 0; margin: 0;
+           display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .6rem; }
+  ul.man li { margin: 0; padding: .65rem .85rem; border: 1px solid var(--rule); border-radius: 10px;
+              transition: border-color .15s ease; }
+  ul.man li:hover { border-color: var(--accent); }
+  ul.man a { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600;
+             text-decoration: none; font-size: .98rem; }
+  ul.man .desc { color: var(--muted); display: block; margin-top: .25rem; font-size: .88rem; }
+
+  footer { color: var(--muted); font-size: .8rem; margin-top: 2.5rem;
+           border-top: 1px solid var(--rule); padding-top: .7rem; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>ocifbsd</h1>
+  <p class="tag">FreeBSD-native OCI container runtime — jails as first-class containers.</p>
+  <p class="lead">
+    <code>ocifbsd</code> runs OCI-compliant containers on FreeBSD using
+    native <code>jail(8)</code>, VNET, RCTL, and ZFS — no Linux emulation.
+    It ships a full toolchain: image pull/push, pods and orchestration,
+    a Raft-backed cluster daemon, a native ACME certificate client, and
+    log forwarding. The whole tree builds from FreeBSD base with
+    <b>zero ports</b>.
+  </p>
+
+  <ul class="hi">
+    <li><b>Self-contained</b><span>Builds with no ports — json-c and libcurl are vendored in-tree; links only FreeBSD base libraries. No GPL anywhere.</span></li>
+    <li><b>Native jails</b><span>Each container is a jail with VNET isolation, RCTL resource limits, and a ZFS-backed image store.</span></li>
+    <li><b>Full Raft cluster</b><span>Leader election, log replication, persistence, membership changes, and snapshots — via <code>ocifbsd-cluster(8)</code>.</span></li>
+    <li><b>Native ACME</b><span>RFC 8555 client with ES256/JWS and HTTP-01 challenges, built on FreeBSD base OpenSSL 3.</span></li>
+  </ul>
+
+  <figure class="arch">
+    <!-- Theme-aware inline SVG: inherits the page's CSS custom properties. -->
+    <svg viewBox="0 0 920 380" role="img" aria-label="ocifbsd architecture diagram"
+         xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, Menlo, Consolas, monospace">
+      <style>
+        .box  { fill: var(--bg); stroke: var(--rule); stroke-width: 1.5; }
+        .box2 { fill: var(--code-bg); stroke: var(--rule); stroke-width: 1.5; }
+        .acc  { stroke: var(--accent); }
+        .lbl  { fill: var(--fg); font-size: 13px; font-weight: 600; }
+        .sub  { fill: var(--muted); font-size: 11px; }
+        .accf { fill: var(--accent); font-size: 12px; font-weight: 700; }
+        .flow { stroke: var(--muted); stroke-width: 1.4; fill: none; marker-end: url(#ar); }
+      </style>
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+
+      <!-- Tooling row -->
+      <text x="30" y="34" class="accf">CLI &amp; daemons</text>
+      <rect x="30"  y="44" width="150" height="46" rx="8" class="box2 acc"/>
+      <text x="105" y="66" text-anchor="middle" class="lbl">ocifbsd</text>
+      <text x="105" y="82" text-anchor="middle" class="sub">create · run · exec</text>
+      <rect x="196" y="44" width="150" height="46" rx="8" class="box2"/>
+      <text x="271" y="66" text-anchor="middle" class="lbl">ocifbsd-cluster</text>
+      <text x="271" y="82" text-anchor="middle" class="sub">Raft consensus</text>
+      <rect x="362" y="44" width="140" height="46" rx="8" class="box2"/>
+      <text x="432" y="66" text-anchor="middle" class="lbl">ocifbsd-cert</text>
+      <text x="432" y="82" text-anchor="middle" class="sub">ACME / rotation</text>
+      <rect x="518" y="44" width="140" height="46" rx="8" class="box2"/>
+      <text x="588" y="66" text-anchor="middle" class="lbl">ocifbsd-logd</text>
+      <text x="588" y="82" text-anchor="middle" class="sub">log forwarding</text>
+
+      <!-- Core runtime -->
+      <rect x="30" y="140" width="628" height="70" rx="10" class="box acc"/>
+      <text x="52" y="167" class="lbl">core runtime</text>
+      <text x="52" y="187" class="sub">OCI config → jail params · lifecycle · hooks · state reconciliation</text>
+
+      <line x1="105" y1="90" x2="105" y2="140" class="flow"/>
+      <line x1="271" y1="90" x2="271" y2="140" class="flow"/>
+      <line x1="432" y1="90" x2="432" y2="140" class="flow"/>
+      <line x1="588" y1="90" x2="588" y2="140" class="flow"/>
+
+      <!-- Kernel substrate -->
+      <text x="30" y="250" class="accf">FreeBSD base</text>
+      <rect x="30"  y="262" width="146" height="54" rx="8" class="box2"/>
+      <text x="103" y="286" text-anchor="middle" class="lbl">jail(8) + VNET</text>
+      <text x="103" y="303" text-anchor="middle" class="sub">isolated containers</text>
+      <rect x="192" y="262" width="146" height="54" rx="8" class="box2"/>
+      <text x="265" y="286" text-anchor="middle" class="lbl">RCTL</text>
+      <text x="265" y="303" text-anchor="middle" class="sub">CPU / mem limits</text>
+      <rect x="354" y="262" width="146" height="54" rx="8" class="box2"/>
+      <text x="427" y="286" text-anchor="middle" class="lbl">ZFS store</text>
+      <text x="427" y="303" text-anchor="middle" class="sub">image layers</text>
+      <rect x="516" y="262" width="142" height="54" rx="8" class="box2"/>
+      <text x="587" y="286" text-anchor="middle" class="lbl">OpenSSL 3</text>
+      <text x="587" y="303" text-anchor="middle" class="sub">base TLS</text>
+
+      <line x1="120" y1="210" x2="110" y2="262" class="flow"/>
+      <line x1="300" y1="210" x2="290" y2="262" class="flow"/>
+      <line x1="430" y1="210" x2="427" y2="262" class="flow"/>
+      <line x1="560" y1="210" x2="580" y2="262" class="flow"/>
+
+      <!-- Cluster panel -->
+      <text x="710" y="34" class="accf">cluster</text>
+      <rect x="700" y="44" width="190" height="272" rx="10" class="box"/>
+      <text x="795" y="70" text-anchor="middle" class="sub">gossip + Raft over UDP</text>
+      <circle cx="795" cy="120" r="26" class="box2 acc"/><text x="795" y="124" text-anchor="middle" class="lbl">L</text>
+      <circle cx="745" cy="210" r="24" class="box2"/><text x="745" y="214" text-anchor="middle" class="lbl">F</text>
+      <circle cx="845" cy="210" r="24" class="box2"/><text x="845" y="214" text-anchor="middle" class="lbl">F</text>
+      <line x1="778" y1="140" x2="752" y2="188" class="flow"/>
+      <line x1="812" y1="140" x2="838" y2="188" class="flow"/>
+      <text x="795" y="285" text-anchor="middle" class="sub">elect · replicate</text>
+      <text x="795" y="301" text-anchor="middle" class="sub">persist · snapshot</text>
+    </svg>
+    <figcaption>ocifbsd maps OCI containers onto native FreeBSD jails; the cluster daemon adds Raft consensus over the gossip transport.</figcaption>
+  </figure>
+</header>
+
+<h2 class="sec">Section 8 — system management</h2>
+<ul class="man">
+  <li><a href="ocifbsd.8.html">ocifbsd(8)</a><span class="desc">the main CLI — create, start, exec, stop, run, pull, push, load, images, rmi, network</span></li>
+  <li><a href="ocifbsd-cluster.8.html">ocifbsd-cluster(8)</a><span class="desc">Raft cluster daemon — election, replication, membership, snapshots</span></li>
+  <li><a href="ocifbsd-cert.8.html">ocifbsd-cert(8)</a><span class="desc">certificate management — ACME (RFC 8555), rotation, backup, recovery</span></li>
+  <li><a href="ocifbsd-logd.8.html">ocifbsd-logd(8)</a><span class="desc">log aggregation and remote HTTP forwarding daemon</span></li>
+  <li><a href="ocifbsd-gc.8.html">ocifbsd-gc(8)</a><span class="desc">garbage collection daemon</span></li>
+  <li><a href="ocifbsd-export.8.html">ocifbsd-export(8)</a><span class="desc">cloud export and migration tool</span></li>
+  <li><a href="pam_ocifbsd.8.html">pam_ocifbsd(8)</a><span class="desc">PAM authentication module</span></li>
+</ul>
+
+<h2 class="sec">Section 3 — libraries</h2>
+<ul class="man">
+  <li><a href="ocifbsd_image.3.html">ocifbsd_image(3)</a><span class="desc">OCI image management — pull, unpack, ZFS storage, references</span></li>
+  <li><a href="ocifbsd_network.3.html">ocifbsd_network(3)</a><span class="desc">networking — bridge, VNET, CNI</span></li>
+  <li><a href="ocifbsd_orchestration.3.html">ocifbsd_orchestration(3)</a><span class="desc">pods, stacks, services, scheduling</span></li>
+  <li><a href="ocifbsd_security.3.html">ocifbsd_security(3)</a><span class="desc">security policy and resource-limit library</span></li>
+</ul>
+
+<footer>
+  HTML renderings of the ocifbsd manual pages, generated with <code>mandoc -T html</code>.
+  &copy; 2026 REVYTECH, Inc. — BSD-2-Clause. Vendored json-c (MIT) and libcurl (curl license) retain their upstream licenses.
+</footer>
+</body>
+</html>
