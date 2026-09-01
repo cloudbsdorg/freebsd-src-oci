@@ -213,8 +213,39 @@ ATF_TC_BODY(controller_endpoints_from_placement, tc)
 	cp_free(st);
 }
 
+/* The controller assigns a VIP to each service that lacks one. */
+ATF_TC_WITHOUT_HEAD(controller_assigns_vips);
+ATF_TC_BODY(controller_assigns_vips, tc)
+{
+	struct cp_state *st = cp_new();
+	char cmds[16][256];
+	int n = 0;
+
+	ATF_REQUIRE(st != NULL);
+	ATF_REQUIRE_EQ(0, cp_apply(st, "CREATE web 2 nginx"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "CREATE db 1 postgres"));
+
+	ATF_REQUIRE_EQ(0, controller_vip_commands(st, "198.51.100", cmds, 16,
+	    &n));
+	ATF_CHECK_EQ_MSG(2, n, "expected a VIP per service, got %d", n);
+	for (int i = 0; i < n; i++)
+		ATF_REQUIRE_EQ(0, cp_apply(st, cmds[i]));
+
+	ATF_CHECK(cp_service_vip(st, "web") != NULL);
+	ATF_CHECK(cp_service_vip(st, "db") != NULL);
+	/* Distinct VIPs. */
+	ATF_CHECK(strcmp(cp_service_vip(st, "web"), cp_service_vip(st, "db")) != 0);
+
+	/* Converged: a second pass assigns nothing. */
+	ATF_REQUIRE_EQ(0, controller_vip_commands(st, "198.51.100", cmds, 16,
+	    &n));
+	ATF_CHECK_EQ(0, n);
+	cp_free(st);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
+	ATF_TP_ADD_TC(tp, controller_assigns_vips);
 	ATF_TP_ADD_TC(tp, controller_endpoints_from_placement);
 	ATF_TP_ADD_TC(tp, controller_lb_from_endpoints);
 	ATF_TP_ADD_TC(tp, controller_node_assignments_slice);

@@ -265,6 +265,7 @@ int cluster_controller_tick(const char *const *names, const char *const *addrs,
     int nnodes);
 int cluster_placement_count(void);
 int cluster_service_endpoint_count(const char *service);
+int cluster_lb_ruleset(const char *service, char *out, size_t outlen);
 int cluster_node_assignments(const char *node, struct agent_replica *out,
     int max, int *nout);
 int raft_replicate_log(const char *target_id);

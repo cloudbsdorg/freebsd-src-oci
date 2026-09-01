@@ -60,6 +60,30 @@ controller_lb_ruleset(const struct cp_state *st, const char *service,
 }
 
 int
+controller_vip_commands(const struct cp_state *st, const char *prefix,
+    char (*out)[256], int max, int *nout)
+{
+	int k = 0, ns;
+
+	if (st == NULL || prefix == NULL || out == NULL || nout == NULL)
+		return (-1);
+
+	ns = cp_service_count(st);
+	for (int i = 0; i < ns; i++) {
+		const char *name = cp_service_name(st, i);
+
+		if (name == NULL || cp_service_vip(st, name) != NULL)
+			continue;
+		if (k >= max)
+			return (-1);
+		snprintf(out[k], 256, "VIP %s %s.%d", name, prefix, 10 + i);
+		k++;
+	}
+	*nout = k;
+	return (0);
+}
+
+int
 controller_endpoint_commands(const struct cp_state *st,
     const char *const *names, const char *const *addrs, int nnodes,
     char (*out)[256], int max, int *nout)

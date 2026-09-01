@@ -11,6 +11,7 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 
 #include <arpa/inet.h>
 #include <err.h>
@@ -44,6 +45,36 @@ primary_ipv4(char *buf, size_t buflen)
 		break;
 	}
 	freeifaddrs(ifa);
+}
+
+/* Load a pf(4) ruleset into an anchor. Returns 0 on success. */
+static int
+apply_pf_ruleset(const char *anchor, const char *rules)
+{
+	char tmpl[] = "/tmp/ocifbsd-lb.XXXXXX";
+	int fd = mkstemp(tmpl);
+	size_t n = strlen(rules);
+	pid_t pid;
+	int status, rc = -1;
+
+	if (fd < 0)
+		return (-1);
+	if (write(fd, rules, n) != (ssize_t)n) {
+		close(fd);
+		unlink(tmpl);
+		return (-1);
+	}
+	close(fd);
+	pid = fork();
+	if (pid == 0) {
+		execl("/sbin/pfctl", "pfctl", "-a", anchor, "-f", tmpl,
+		    (char *)NULL);
+		_exit(127);
+	}
+	if (pid > 0 && waitpid(pid, &status, 0) == pid)
+		rc = (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
+	unlink(tmpl);
+	return (rc);
 }
 
 #include "cluster.h"
@@ -119,7 +150,7 @@ main(int argc, char **argv)
 	const char *node_names[65], *node_addrs[65];
 	char self_ip[64];
 	int nnodes = 0;
-	int npeers = 0, interval = 0, ch, controller = 0;
+	int npeers = 0, interval = 0, ch, controller = 0, lb = 0;
 	int port = 6789;
 
 	static struct option lo[] = {
@@ -131,12 +162,13 @@ main(int argc, char **argv)
 		{ "propose",	required_argument,	NULL, 'c' },
 		{ "controller",	no_argument,		NULL, 'C' },
 		{ "agent",	required_argument,	NULL, 'A' },
+		{ "lb",		no_argument,		NULL, 'L' },
 		{ "help",	no_argument,		NULL, 'h' },
 		{ "version",	no_argument,		NULL, 'v' },
 		{ NULL,		0,			NULL, 0 }
 	};
 
-	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:c:CA:hv", lo, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:c:CA:Lhv", lo, NULL)) != -1) {
 		switch (ch) {
 		case 'p': port = atoi(optarg); break;
 		case 'P':
@@ -149,6 +181,7 @@ main(int argc, char **argv)
 		case 'c': propose = optarg; break;
 		case 'C': controller = 1; break;
 		case 'A': agent_path = optarg; break;
+		case 'L': lb = 1; break;
 		case 'v': printf("ocifbsd-cluster %s\n", OCLUSTER_VERSION);
 			return (0);
 		case 'h': usage(argv[0]); return (0);
@@ -322,6 +355,26 @@ main(int argc, char **argv)
 						    (size_t)nd * sizeof(running[0]));
 						nrunning = nd;
 					}
+				}
+			}
+			/*
+			 * Load balancer: build the pf ruleset for the observed
+			 * service from its VIP + endpoints and load it into a
+			 * per-service anchor.
+			 */
+			if (lb && propose_svc[0] != '\0') {
+				char rules[4096];
+
+				if (cluster_lb_ruleset(propose_svc, rules,
+				    sizeof(rules)) == 0 &&
+				    strstr(rules, "rdr") != NULL) {
+					char anchor[192];
+
+					snprintf(anchor, sizeof(anchor),
+					    "ocifbsd/lb/%s", propose_svc);
+					printf("lb: %s anchor=%s\n",
+					    apply_pf_ruleset(anchor, rules) == 0 ?
+					    "applied" : "apply-failed", anchor);
 				}
 			}
 			if (status_requested) {

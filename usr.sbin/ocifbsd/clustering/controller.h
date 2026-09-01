@@ -53,6 +53,15 @@ int	controller_endpoint_commands(const struct cp_state *st,
 	    char (*out)[256], int max, int *nout);
 
 /*
+ * Assign a virtual IP to each service that lacks one: emit "VIP <service> <ip>"
+ * using prefix and the service's index (prefix.10, prefix.11, ...). The leader
+ * proposes these so every service gets a stable load-balancer front. Idempotent.
+ * Returns 0 on success.
+ */
+int	controller_vip_commands(const struct cp_state *st, const char *prefix,
+	    char (*out)[256], int max, int *nout);
+
+/*
  * Compute the placement commands to converge st toward its desired replica
  * counts across nodes[0..nnodes-1]. Each command (a control-plane command line
  * such as "ASSIGN web 0 node1") is written to out[k] (each at least 256 bytes);

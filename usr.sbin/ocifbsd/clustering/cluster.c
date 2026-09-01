@@ -1901,12 +1901,15 @@ cluster_controller_tick(const char *const *names, const char *const *addrs,
 {
     char plan[64][256];
     char eps[64][256];
-    int nplan = 0, neps = 0, proposed = 0, is_leader;
+    char vips[64][256];
+    int nplan = 0, neps = 0, nvips = 0, proposed = 0, is_leader;
 
     pthread_mutex_lock(&cluster_lock);
     is_leader = (raft.state == RAFT_LEADER);
     if (is_leader && raft.cp != NULL) {
         (void)controller_plan(raft.cp, names, nnodes, plan, 64, &nplan);
+        (void)controller_vip_commands(raft.cp, "198.51.100", vips, 64,
+            &nvips);
         if (addrs != NULL)
             (void)controller_endpoint_commands(raft.cp, names, addrs,
                 nnodes, eps, 64, &neps);
@@ -1915,6 +1918,9 @@ cluster_controller_tick(const char *const *names, const char *const *addrs,
 
     if (!is_leader)
         return (0);
+    for (int i = 0; i < nvips; i++)
+        if (cluster_cp_propose(vips[i]) == 0)
+            proposed++;
     for (int i = 0; i < nplan; i++)
         if (cluster_cp_propose(plan[i]) == 0)
             proposed++;
@@ -1922,6 +1928,26 @@ cluster_controller_tick(const char *const *names, const char *const *addrs,
         if (cluster_cp_propose(eps[i]) == 0)
             proposed++;
     return (proposed);
+}
+
+/*
+ * Build the pf load-balancer ruleset for a service from the replicated state
+ * (its VIP and endpoints). Returns 0 and fills out on success; -1 if the
+ * service has no VIP yet. Frontend and backend both use port 80 for now.
+ */
+int
+cluster_lb_ruleset(const char *service, char *out, size_t outlen)
+{
+    const char *vip;
+    int rc = -1;
+
+    pthread_mutex_lock(&cluster_lock);
+    vip = cp_service_vip(raft.cp, service);
+    if (vip != NULL)
+        rc = controller_lb_ruleset(raft.cp, service, vip, 80, 80, out,
+            outlen);
+    pthread_mutex_unlock(&cluster_lock);
+    return (rc);
 }
 
 /* Total placements in the replicated state (thread-safe). */
