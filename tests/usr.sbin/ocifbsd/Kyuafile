@@ -5,16 +5,17 @@ syntax(2)
 test_suite("FreeBSD")
 
 atf_test_program{name="cli_test", }
+atf_test_program{name="ensemble_test", }
 atf_test_program{name="hooks_test", }
 atf_test_program{name="image_parse_test", }
 atf_test_program{name="image_ref_test", }
 atf_test_program{name="jsonfmt_test", }
-atf_test_program{name="k8s_test", }
 atf_test_program{name="lifecycle_test", }
 atf_test_program{name="logd_forward_test", }
 atf_test_program{name="netcfg_test", }
 atf_test_program{name="oci2jail_test", }
 atf_test_program{name="parser_test", }
+atf_test_program{name="registries_test", }
 atf_test_program{name="unpack_layer_test", }
 atf_test_program{name="utils_test", }
 atf_test_program{name="whiteout_test", }
