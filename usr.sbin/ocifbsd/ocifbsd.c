@@ -310,12 +310,28 @@ rm_rf_at(int parentfd, const char *name, dev_t top_dev)
 				close(fd);
 				return (-1);
 			}
-			while ((e = readdir(d)) != NULL) {
-				if (strcmp(e->d_name, ".") == 0 ||
-				    strcmp(e->d_name, "..") == 0)
-					continue;
-				if (rm_rf_at(fd, e->d_name, top_dev) != 0)
-					ret = -1;
+			/*
+			 * Unlinking while readdir() walks the same directory
+			 * may (per POSIX) cause other entries to be skipped in
+			 * that pass. Rescan until a full pass removes nothing,
+			 * so no entry is left behind by the iteration itself.
+			 */
+			for (;;) {
+				int removed = 0;
+
+				rewinddir(d);
+				while ((e = readdir(d)) != NULL) {
+					if (strcmp(e->d_name, ".") == 0 ||
+					    strcmp(e->d_name, "..") == 0)
+						continue;
+					if (rm_rf_at(fd, e->d_name,
+					    top_dev) != 0)
+						ret = -1;
+					else
+						removed = 1;
+				}
+				if (!removed || ret == -1)
+					break;
 			}
 			closedir(d);	/* also closes fd */
 		}
@@ -758,9 +774,17 @@ cmd_delete(int argc, char **argv)
 		return (1);
 	}
 
-	/* Stop if running and not forced */
-	if (c->state == OCIFBSD_STATE_RUNNING && !force) {
-		fprintf(stderr, "error: container is running, use --force to stop and delete\n");
+	/*
+	 * Refuse live containers unless forced. A PAUSED container still has
+	 * (SIGSTOPped) processes — deleting it without --force would tear down
+	 * live workload just like deleting a running one.
+	 */
+	if ((c->state == OCIFBSD_STATE_RUNNING ||
+	    c->state == OCIFBSD_STATE_PAUSED ||
+	    c->state == OCIFBSD_STATE_PAUSED_HIGH) && !force) {
+		fprintf(stderr, "error: container is %s, use --force to stop "
+		    "and delete\n", c->state == OCIFBSD_STATE_RUNNING ?
+		    "running" : "paused");
 		container_free(c);
 		state_unlock_container(lockfd);
 		return (1);
@@ -1074,18 +1098,38 @@ cmd_run(int argc, char **argv)
 	if (verbose)
 		fprintf(stderr, "Starting container: %s\n", c->id);
 
-	ret = container_start(c);
-	if (ret != 0) {
-		/*
-		 * `run` is create+start; the start failed, so tear the created
-		 * container back down rather than leaving an orphaned container
-		 * on disk that a later run could collide with.
-		 */
-		fprintf(stderr, "error: failed to start container %s: %s\n",
-		    c->id, strerror(errno));
-		container_delete(c);
-		container_free(c);
-		return (1);
+	/* Serialize the start against other processes acting on the new id
+	 * (the same per-container lock every other lifecycle op takes). */
+	{
+		int lockfd = state_lock_container(c->id);
+
+		if (lockfd < 0) {
+			fprintf(stderr, "error: failed to lock container %s: "
+			    "%s\n", c->id, strerror(errno));
+			container_delete(c);
+			container_free(c);
+			return (1);
+		}
+
+		ret = container_start(c);
+		if (ret != 0) {
+			/*
+			 * `run` is create+start; the start failed, so tear the
+			 * created container back down rather than leaving an
+			 * orphan on disk that a later run could collide with.
+			 * A failed rollback is reported, not swallowed.
+			 */
+			fprintf(stderr, "error: failed to start container %s: "
+			    "%s\n", c->id, strerror(errno));
+			if (container_delete(c) != 0)
+				fprintf(stderr, "warning: rollback failed; "
+				    "container %s left on disk (delete it "
+				    "manually)\n", c->id);
+			container_free(c);
+			state_unlock_container(lockfd);
+			return (1);
+		}
+		state_unlock_container(lockfd);
 	}
 
 	printf("%s\n", c->id);
@@ -1229,7 +1273,9 @@ cmd_images(int argc, char **argv)
 
 	paths[0] = basebuf;
 	paths[1] = NULL;
-	fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+	/* FTS_COMFOLLOW: follow the root itself if OCIFBSD_DATA_DIR is a
+	 * symlink (entries below it are still walked physically). */
+	fts = fts_open(paths, FTS_PHYSICAL | FTS_COMFOLLOW | FTS_NOCHDIR, NULL);
 	if (fts == NULL) {
 		if (errno == ENOENT)
 			return (0);	/* empty store is success */
@@ -1269,9 +1315,13 @@ cmd_images(int argc, char **argv)
 		if (ent->fts_info != FTS_D)
 			continue;
 
-		/* Is this directory a usable image root? */
-		snprintf(cfg, sizeof(cfg), "%s/config.json", ent->fts_path);
-		snprintf(rfs, sizeof(rfs), "%s/rootfs", ent->fts_path);
+		/* Is this directory a usable image root? A truncated path
+		 * would stat something other than fts_path — skip instead. */
+		if ((size_t)snprintf(cfg, sizeof(cfg), "%s/config.json",
+		    ent->fts_path) >= sizeof(cfg) ||
+		    (size_t)snprintf(rfs, sizeof(rfs), "%s/rootfs",
+		    ent->fts_path) >= sizeof(rfs))
+			continue;
 		if (stat(cfg, &st) != 0 || !S_ISREG(st.st_mode))
 			continue;
 		if (stat(rfs, &st) != 0 || !S_ISDIR(st.st_mode))
@@ -1820,7 +1870,14 @@ network_resolve(const char *ref)
 	if (ref == NULL)
 		return (NULL);
 	list = state_list(&n);
-	if (list == NULL || n <= 0) {
+	if (list == NULL) {
+		/* A state-read failure is not "no such container" — surface
+		 * the real cause before the caller's not-found message. */
+		fprintf(stderr, "error: failed to read container state: %s\n",
+		    strerror(errno));
+		return (NULL);
+	}
+	if (n <= 0) {
 		free(list);
 		return (NULL);
 	}
@@ -1952,7 +2009,13 @@ cmd_network_list(int argc, char **argv)
 		int n, i;
 
 		list = state_list(&n);
-		if (list == NULL || n <= 0) {
+		if (list == NULL) {	/* NULL is a real error, not "empty" */
+			fprintf(stderr,
+			    "error: failed to list containers: %s\n",
+			    strerror(errno));
+			return (1);
+		}
+		if (n <= 0) {
 			free(list);
 			return (0);
 		}
@@ -2044,7 +2107,20 @@ cmd_network_set(int argc, char **argv)
 	}
 	json = read_file(path, &jlen);
 	if (json != NULL) {
-		(void)netcfg_parse(json, &nc);
+		/*
+		 * An existing config that fails to parse must abort, not be
+		 * silently replaced: writing a fresh file over it would discard
+		 * whatever settings it held.
+		 */
+		if (netcfg_parse(json, &nc) != 0) {
+			fprintf(stderr, "error: existing network config %s is "
+			    "unreadable; refusing to overwrite it\n", path);
+			free(json);
+			netcfg_free(&nc);
+			state_unlock_container(lockfd);
+			container_free(c);
+			return (1);
+		}
 		free(json);
 	}
 
