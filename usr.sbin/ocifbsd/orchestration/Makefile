@@ -4,7 +4,7 @@
 #
 
 SRCS=	pod.c stack.c scheduler.c health.c rolling_update.c \
-	orch_cli.c orch_init.c stubs.c
+	loadbalancer.c orch_cli.c orch_init.c stubs.c
 
 LIB=	ocifbsd_orchestration
 SHLIB_NAME=	ocifbsd_orchestration.so.1

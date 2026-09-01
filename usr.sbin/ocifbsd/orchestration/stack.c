@@ -45,6 +45,7 @@
 #include <sha256.h>
 
 #include "orchestration.h"
+#include "loadbalancer.h"
 #include "../include/ocifbsd.h"
 
 extern int mkdirp(const char *path, mode_t mode);
@@ -545,9 +546,17 @@ service_create(struct service_spec *spec)
 	pthread_mutex_unlock(&service_registry_lock);
 	
 	orch_event_publish("Normal", "ServiceCreated", service->namespace,
-	    "Service %s created with %d replicas", 
+	    "Service %s created with %d replicas",
 	    service->name, spec->replicas);
-	
+
+	/*
+	 * Install the load-balancer redirect for the VIP across the replicas.
+	 * Best-effort: a service without a VIP or running on a host without pf
+	 * simply has no redirect, which must not fail service creation.
+	 */
+	if (service->status->load_balancer_ip[0] != '\0')
+		(void)service_lb_apply(service);
+
 	return (service);
 }
 
@@ -839,7 +848,11 @@ service_scale(struct service *service, int replicas)
 	
 	orch_event_publish("Normal", "Scaled", service->namespace,
 	    "Service %s scaled to %d replicas", service->name, replicas);
-	
+
+	/* Rebalance the load-balancer pool to match the new replica set. */
+	if (service->status->load_balancer_ip[0] != '\0')
+		(void)service_lb_apply(service);
+
 	return (0);
 }
 

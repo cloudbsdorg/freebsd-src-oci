@@ -10,6 +10,7 @@ atf_test_program{name="hooks_test", }
 atf_test_program{name="image_parse_test", }
 atf_test_program{name="image_ref_test", }
 atf_test_program{name="jsonfmt_test", }
+atf_test_program{name="lb_test", }
 atf_test_program{name="lifecycle_test", }
 atf_test_program{name="logd_forward_test", }
 atf_test_program{name="netcfg_test", }
