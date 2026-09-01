@@ -85,6 +85,7 @@ main(int argc, char **argv)
 	struct cluster_config cfg;
 	char hn[256];
 	const char *state = NULL, *name = NULL, *propose = NULL;
+	const char *agent_path = NULL;
 	char propose_svc[128] = "";
 	char *peers[64];
 	const char *node_names[65];
@@ -100,12 +101,13 @@ main(int argc, char **argv)
 		{ "interval",	required_argument,	NULL, 'i' },
 		{ "propose",	required_argument,	NULL, 'c' },
 		{ "controller",	no_argument,		NULL, 'C' },
+		{ "agent",	required_argument,	NULL, 'A' },
 		{ "help",	no_argument,		NULL, 'h' },
 		{ "version",	no_argument,		NULL, 'v' },
 		{ NULL,		0,			NULL, 0 }
 	};
 
-	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:c:Chv", lo, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:c:CA:hv", lo, NULL)) != -1) {
 		switch (ch) {
 		case 'p': port = atoi(optarg); break;
 		case 'P':
@@ -117,6 +119,7 @@ main(int argc, char **argv)
 		case 'i': interval = atoi(optarg); break;
 		case 'c': propose = optarg; break;
 		case 'C': controller = 1; break;
+		case 'A': agent_path = optarg; break;
 		case 'v': printf("ocifbsd-cluster %s\n", OCLUSTER_VERSION);
 			return (0);
 		case 'h': usage(argv[0]); return (0);
@@ -199,6 +202,8 @@ main(int argc, char **argv)
 		int last_role = -1, secs = 0, proposed = 0;
 		uint64_t last_term = 0;
 		char last_leader[256] = "";
+		struct agent_replica running[64];	/* what the agent runs */
+		int nrunning = 0;
 
 		while (!stop_requested) {
 			char leader[256] = "";
@@ -245,6 +250,39 @@ main(int argc, char **argv)
 				    name ? name : hn, mine, 64, &nmine) == 0)
 					printf("placements: total=%d mine=%d\n",
 					    cluster_placement_count(), nmine);
+			}
+
+			/*
+			 * Agent: reconcile this node's assigned replicas against
+			 * what it is running and apply the launch/stop actions
+			 * via the local ocifbsd runtime.
+			 */
+			if (agent_path != NULL) {
+				struct agent_replica desired[64];
+				struct agent_action act[128];
+				int nd = 0, na = 0;
+
+				if (cluster_node_assignments(name ? name : hn,
+				    desired, 64, &nd) == 0 &&
+				    agent_reconcile(desired, nd, running,
+				    nrunning, act, 128, &na) == 0) {
+					for (int a = 0; a < na; a++) {
+						int rc = agent_apply_action(
+						    &act[a], agent_path);
+						printf("agent: %s %s-%d rc=%d\n",
+						    act[a].op == AGENT_LAUNCH ?
+						    "LAUNCH" : "STOP",
+						    act[a].replica.service,
+						    act[a].replica.replica_id,
+						    rc);
+					}
+					/* Adopt the desired set as running. */
+					if (nd <= 64) {
+						memcpy(running, desired,
+						    (size_t)nd * sizeof(running[0]));
+						nrunning = nd;
+					}
+				}
 			}
 			if (status_requested) {
 				status_requested = 0;
