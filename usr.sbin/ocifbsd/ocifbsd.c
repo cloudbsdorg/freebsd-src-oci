@@ -180,6 +180,9 @@ ref_component_is_safe(const char *s)
 	return (1);
 }
 
+/* Resolve a container spec (ID or name) to its canonical ID; see definition. */
+static const char *resolve_cid(const char *spec);
+
 /*
  * Resolve an image reference to a local store path (OCIFBSD_DATA_DIR layout).
  */
@@ -574,7 +577,7 @@ cmd_start(int argc, char **argv)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 
 	/*
 	 * Serialize this lifecycle op against other processes acting on the
@@ -662,7 +665,7 @@ cmd_kill(int argc, char **argv)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 
 	/*
 	 * A positional signal (kill <id> TERM / kill <id> 9) is documented in
@@ -714,6 +717,53 @@ cmd_kill(int argc, char **argv)
 	return (0);
 }
 
+/*
+ * Resolve a container spec (an ID or a --name) to its canonical container ID.
+ * A direct ID hit wins; otherwise the on-disk state is scanned for a container
+ * whose name matches. Returns a pointer to an internal buffer holding the ID,
+ * or the original spec unchanged when nothing matches (so the downstream
+ * "not found" error still fires). Lets every container subcommand accept a
+ * name as well as an ID, matching common runtime UX. Not reentrant, which is
+ * fine for the single-threaded, one-command-per-process CLI.
+ */
+static const char *
+resolve_cid(const char *spec)
+{
+	static char buf[128];
+	struct ocifbsd_container *c;
+	struct ocifbsd_container **list;
+	int n = 0;
+	const char *out = spec;
+
+	if (spec == NULL)
+		return (spec);
+
+	/* Direct ID hit. */
+	c = container_get_by_id(spec);
+	if (c != NULL) {
+		if (c->id != NULL && strlcpy(buf, c->id, sizeof(buf)) <
+		    sizeof(buf))
+			out = buf;
+		container_free(c);
+		return (out);
+	}
+
+	/* Otherwise match by human-readable name. */
+	list = state_list(&n);
+	if (list == NULL)
+		return (spec);
+	for (int i = 0; i < n && list[i] != NULL; i++)
+		if (out == spec && list[i]->name != NULL &&
+		    list[i]->id != NULL &&
+		    strcmp(list[i]->name, spec) == 0 &&
+		    strlcpy(buf, list[i]->id, sizeof(buf)) < sizeof(buf))
+			out = buf;
+	for (int i = 0; i < n && list[i] != NULL; i++)
+		container_free(list[i]);
+	free(list);
+	return (out);
+}
+
 static int
 cmd_delete(int argc, char **argv)
 {
@@ -756,7 +806,7 @@ cmd_delete(int argc, char **argv)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 
 	lockfd = state_lock_container(id);
 	if (lockfd < 0) {
@@ -844,7 +894,7 @@ cmd_state(int argc, char **argv)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 
 	/* Get container */
 	c = container_get_by_id(id);
@@ -962,7 +1012,7 @@ cmd_inspect(int argc, char **argv)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 
 	/* Get container */
 	c = container_get_by_id(id);
@@ -1513,7 +1563,7 @@ cmd_exec(int argc, char **argv)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 	c = container_get_by_id(id);
 	if (c == NULL) {
 		fprintf(stderr, "error: container not found: %s\n", id);
@@ -1590,7 +1640,7 @@ cmd_stop(int argc, char **argv)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 
 	lockfd = state_lock_container(id);
 	if (lockfd < 0) {
@@ -1660,7 +1710,7 @@ cmd_pause_resume(int argc, char **argv, bool do_pause)
 		return (1);
 	}
 
-	id = argv[0];
+	id = resolve_cid(argv[0]);
 
 	lockfd = state_lock_container(id);
 	if (lockfd < 0) {
