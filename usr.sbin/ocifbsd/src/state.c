@@ -463,11 +463,15 @@ state_list(int *n)
 	if (dir == NULL) {
 		/*
 		 * A missing state directory means no containers exist yet, not
-		 * a failure. Clear errno so callers treat it as an empty list
-		 * (a genuine error such as EACCES is left in errno to surface).
+		 * a failure: return an allocated, NULL-terminated empty list.
+		 * A genuine error (e.g. EACCES) returns NULL so callers can
+		 * distinguish "no containers" from "could not read state" and
+		 * fail closed on the latter.
 		 */
-		if (errno == ENOENT)
-			errno = 0;
+		if (errno == ENOENT) {
+			list = calloc(1, sizeof(*list));  /* [NULL] */
+			return (list);
+		}
 		return (NULL);
 	}
 
@@ -505,15 +509,17 @@ state_list(int *n)
 
 	closedir(dir);
 
-	/* Null-terminate list */
-	if (count > 0) {
-		list = realloc(list, (count + 1) * sizeof(*list));
-		if (list == NULL) {
-			*n = 0;
-			return (NULL);
-		}
-		list[count] = NULL;
+	/*
+	 * Return a NULL-terminated array. For an existing-but-empty store
+	 * (count == 0) allocate a [NULL] list rather than returning NULL, so
+	 * NULL is reserved for genuine errors.
+	 */
+	list = realloc(list, (count + 1) * sizeof(*list));
+	if (list == NULL) {
+		*n = 0;
+		return (NULL);
 	}
+	list[count] = NULL;
 
 	*n = count;
 	return (list);

@@ -1368,19 +1368,34 @@ cmd_rmi(int argc, char **argv)
 	if (!force) {
 		int n = 0, i;
 		struct ocifbsd_container **list = state_list(&n);
-		char *inuse = NULL;
+		char inuse[64];
+		int found = 0;
 
-		for (i = 0; list != NULL && i < n; i++) {
-			if (inuse == NULL && list[i]->bundle_path != NULL &&
-			    strcmp(list[i]->bundle_path, store_path) == 0)
-				inuse = strdup(list[i]->id);
+		/*
+		 * Fail closed: if the container state cannot be read we cannot
+		 * prove the image is unused, so refuse rather than delete it.
+		 * (state_list returns an empty non-NULL list when the state dir
+		 * is simply absent; NULL means a real error.)
+		 */
+		if (list == NULL) {
+			fprintf(stderr, "error: cannot verify whether image %s "
+			    "is in use (use --force to override)\n", ref);
+			free(store_path);
+			return (1);
+		}
+		inuse[0] = '\0';
+		for (i = 0; i < n; i++) {
+			if (!found && list[i]->bundle_path != NULL &&
+			    strcmp(list[i]->bundle_path, store_path) == 0) {
+				strlcpy(inuse, list[i]->id, sizeof(inuse));
+				found = 1;
+			}
 			container_free(list[i]);
 		}
 		free(list);
-		if (inuse != NULL) {
+		if (found) {
 			fprintf(stderr, "error: image %s is in use by container "
 			    "%s (use --force to remove anyway)\n", ref, inuse);
-			free(inuse);
 			free(store_path);
 			return (1);
 		}
@@ -1808,22 +1823,49 @@ network_resolve(const char *ref)
 		return (NULL);
 	}
 	reflen = strlen(ref);
+	int nmatch = 0;
 	for (i = 0; i < n; i++) {
 		struct ocifbsd_container *c = list[i];
-		bool hit = false;
+		bool exact = false, hit = false;
 
 		if (c->name != NULL && strcmp(c->name, ref) == 0)
-			hit = true;
-		else if (c->id != NULL && (strcmp(c->id, ref) == 0 ||
-		    (reflen >= 6 && strncmp(c->id, ref, reflen) == 0)))
-			hit = true;
+			exact = hit = true;
+		else if (c->id != NULL && strcmp(c->id, ref) == 0)
+			exact = hit = true;
+		else if (c->id != NULL && reflen >= 6 &&
+		    strncmp(c->id, ref, reflen) == 0)
+			hit = true;             /* id prefix (may be ambiguous) */
 
-		if (hit && match == NULL)
+		/*
+		 * An exact name/id match wins outright. Otherwise collect prefix
+		 * hits and require exactly one — a prefix that matches several
+		 * containers must not silently mutate an arbitrary one.
+		 */
+		if (exact) {
+			if (match != NULL)
+				container_free(match);
 			match = c;
-		else
+			nmatch = 1;
+			/* keep scanning only to free the rest */
+			for (i++; i < n; i++)
+				container_free(list[i]);
+			break;
+		} else if (hit) {
+			if (match == NULL)
+				match = c;
+			else
+				container_free(c);
+			nmatch++;
+		} else {
 			container_free(c);
+		}
 	}
 	free(list);
+	if (nmatch != 1) {              /* none, or an ambiguous prefix */
+		if (match != NULL)
+			container_free(match);
+		return (NULL);
+	}
 	return (match);
 }
 
