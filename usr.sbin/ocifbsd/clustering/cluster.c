@@ -113,6 +113,18 @@ struct raft_wire_entry {
 };
 #define RAFT_MAX_BATCH  16   /* entries per AppendEntries */
 
+/*
+ * InstallSnapshot: sent when a follower's needed entries have been compacted
+ * away on the leader. Our state machine is the log itself, so the snapshot is
+ * just the (index, term) boundary; a real state machine would ship its state
+ * blob here. The reply reuses raft_append_resp with match_index = last_index.
+ */
+struct raft_snap_req {
+    uint64_t term;
+    uint64_t last_index;
+    uint64_t last_term;
+};
+
 /* Gossip transport internals, used before their definitions below. */
 static void *gossip_loop(void *arg);
 static void gossip_handle_message(uint8_t *buf, size_t len,
@@ -125,8 +137,11 @@ static void raft_on_vote_resp(const char *from, const struct raft_vote_resp *r);
 static void raft_on_append_req(const char *from, const struct raft_append_req *r);
 static void raft_on_append_resp(const char *from,
     const struct raft_append_resp *r);
+static void raft_on_install_snap(const char *from,
+    const struct raft_snap_req *r);
 static void raft_replicate_to_peers(void);
 static void raft_advance_commit(void);
+static void raft_maybe_compact(void);
 
 /* Event callback */
 static cluster_event_cb event_callback;
@@ -815,6 +830,12 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
                     (const struct raft_append_resp *)msg->payload);
             break;
 
+        case GOSSIP_MSG_INSTALL_SNAP:
+            if (msg->length >= sizeof(struct raft_snap_req))
+                raft_on_install_snap(msg->source_id,
+                    (const struct raft_snap_req *)msg->payload);
+            break;
+
         default:
             break;
     }
@@ -1103,11 +1124,14 @@ raft_persist(void)
     f = fopen(tmp, "wb");
     if (f == NULL)
         return;
+    ver = 2;    /* v2 adds the snapshot boundary */
     n = (uint32_t)raft.log_size;
     fwrite(&magic, sizeof(magic), 1, f);
     fwrite(&ver, sizeof(ver), 1, f);
     fwrite(&raft.current_term, sizeof(raft.current_term), 1, f);
     fwrite(raft.voted_for, sizeof(raft.voted_for), 1, f);
+    fwrite(&raft.snapshot_index, sizeof(raft.snapshot_index), 1, f);
+    fwrite(&raft.snapshot_term, sizeof(raft.snapshot_term), 1, f);
     fwrite(&n, sizeof(n), 1, f);
     for (i = 0; i < raft.log_size; i++) {
         fwrite(&raft.log[i].term, sizeof(uint64_t), 1, f);
@@ -1141,8 +1165,20 @@ raft_load(void)
     }
     if (fread(&ver, sizeof(ver), 1, f) != 1 ||
         fread(&raft.current_term, sizeof(raft.current_term), 1, f) != 1 ||
-        fread(raft.voted_for, sizeof(raft.voted_for), 1, f) != 1 ||
-        fread(&n, sizeof(n), 1, f) != 1) {
+        fread(raft.voted_for, sizeof(raft.voted_for), 1, f) != 1) {
+        fclose(f);
+        return;
+    }
+    if (ver >= 2) {     /* snapshot boundary (absent in v1) */
+        if (fread(&raft.snapshot_index, sizeof(raft.snapshot_index), 1, f)
+            != 1 ||
+            fread(&raft.snapshot_term, sizeof(raft.snapshot_term), 1, f)
+            != 1) {
+            fclose(f);
+            return;
+        }
+    }
+    if (fread(&n, sizeof(n), 1, f) != 1) {
         fclose(f);
         return;
     }
@@ -1235,16 +1271,31 @@ raft_cluster_size(void)
     return (count + 1);
 }
 
-/* Log tips — call with cluster_lock held. */
+/* Log tips — call with cluster_lock held. Indices are absolute; the log array
+ * begins at absolute index snapshot_index + 1. */
 static uint64_t
 raft_last_log_index(void)
 {
-    return ((uint64_t)raft.log_size);
+    return (raft.snapshot_index + (uint64_t)raft.log_size);
 }
 static uint64_t
 raft_last_log_term(void)
 {
-    return (raft.log_size > 0 ? raft.log[raft.log_size - 1].term : 0);
+    return (raft.log_size > 0 ? raft.log[raft.log_size - 1].term :
+        raft.snapshot_term);
+}
+/* Term of the entry at absolute index idx: the snapshot term at the boundary,
+ * the log entry's term if present, or 0 if unknown (compacted below the
+ * snapshot, or beyond the log). */
+static uint64_t
+raft_term_at(uint64_t idx)
+{
+    if (idx == raft.snapshot_index)
+        return (raft.snapshot_term);
+    if (idx > raft.snapshot_index &&
+        idx <= raft.snapshot_index + (uint64_t)raft.log_size)
+        return (raft.log[idx - raft.snapshot_index - 1].term);
+    return (0);
 }
 
 static void *
@@ -1398,10 +1449,14 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
     strlcpy(raft.leader_id, from, sizeof(raft.leader_id));
     raft_reset_election_timer();
 
-    /* Log matching: the entry preceding the new ones must agree. */
-    if (r->prev_log_index > 0 &&
-        (r->prev_log_index > (uint64_t)raft.log_size ||
-         raft.log[r->prev_log_index - 1].term != r->prev_log_term)) {
+    /*
+     * Log matching: the entry preceding the new ones must agree. Anything at
+     * or below our snapshot boundary is already committed, so only verify when
+     * prev_log_index is above it.
+     */
+    if (r->prev_log_index > raft.snapshot_index &&
+        (r->prev_log_index > raft_last_log_index() ||
+         raft_term_at(r->prev_log_index) != r->prev_log_term)) {
         resp.term = raft.current_term;
         resp.success = 0;
         resp.match_index = raft_last_log_index();
@@ -1409,14 +1464,19 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
         goto out;
     }
 
-    /* Append entries, truncating on the first conflicting term (Raft §5.3). */
+    /* Append entries, truncating on the first conflicting term (Raft §5.3).
+     * Indices are absolute; array position is idx - snapshot_index - 1. */
     for (k = 0; k < r->n_entries; k++) {
         uint64_t idx = r->prev_log_index + 1 + k;
+        uint64_t pos;
 
-        if (idx <= (uint64_t)raft.log_size) {
-            if (raft.log[idx - 1].term == we[k].term)
+        if (idx <= raft.snapshot_index)
+            continue;                          /* already compacted/committed */
+        pos = idx - raft.snapshot_index - 1;
+        if (pos < (uint64_t)raft.log_size) {
+            if (raft.log[pos].term == we[k].term)
                 continue;                      /* already present */
-            raft.log_size = (int)(idx - 1);    /* conflict: truncate */
+            raft.log_size = (int)pos;          /* conflict: truncate */
         }
         if (raft.log_size >= raft.log_capacity) {
             int nc = raft.log_capacity ? raft.log_capacity * 2 : 16;
@@ -1452,6 +1512,7 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
 out:
     pthread_mutex_unlock(&cluster_lock);
     gossip_send_message(from, GOSSIP_MSG_APPEND_RESP, &resp, sizeof(resp));
+    raft_maybe_compact();       /* cap the log once entries commit (no lock) */
 }
 
 /* Handle an AppendEntries reply: update the peer's next/match cursors and try
@@ -1522,7 +1583,10 @@ raft_replicate_to_peers(void)
         uint32_t nsent = 0;
         uint64_t ni, prev_index, idx;
         size_t len;
+        int send_snap = 0;
+        struct raft_snap_req snap;
 
+        memset(&snap, 0, sizeof(snap));
         pthread_mutex_lock(&cluster_lock);
         if (raft.state != RAFT_LEADER) {
             pthread_mutex_unlock(&cluster_lock);
@@ -1537,24 +1601,40 @@ raft_replicate_to_peers(void)
         ni = peers[i]->raft_next_index;
         if (ni < 1)
             ni = 1;
+        /*
+         * If the entries this peer needs (from prev_index = ni-1) have been
+         * compacted away, send an InstallSnapshot to fast-forward it to the
+         * snapshot boundary instead of AppendEntries.
+         */
+        if (ni <= raft.snapshot_index) {
+            snap.term = raft.current_term;
+            snap.last_index = raft.snapshot_index;
+            snap.last_term = raft.snapshot_term;
+            send_snap = 1;
+            pthread_mutex_unlock(&cluster_lock);
+            gossip_send_message(target, GOSSIP_MSG_INSTALL_SNAP, &snap,
+                sizeof(snap));
+            continue;
+        }
         prev_index = ni - 1;
         req->term = raft.current_term;
         req->prev_log_index = prev_index;
-        req->prev_log_term = (prev_index >= 1 &&
-            prev_index <= (uint64_t)raft.log_size) ?
-            raft.log[prev_index - 1].term : 0;
+        req->prev_log_term = raft_term_at(prev_index);
         req->leader_commit = raft.commit_index;
-        for (idx = ni; idx <= (uint64_t)raft.log_size &&
+        for (idx = ni; idx <= raft_last_log_index() &&
             nsent < RAFT_MAX_BATCH; idx++) {
-            we[nsent].term = raft.log[idx - 1].term;
-            we[nsent].index = raft.log[idx - 1].index;
-            strlcpy(we[nsent].command, raft.log[idx - 1].command,
+            uint64_t pos = idx - raft.snapshot_index - 1;
+
+            we[nsent].term = raft.log[pos].term;
+            we[nsent].index = raft.log[pos].index;
+            strlcpy(we[nsent].command, raft.log[pos].command,
                 sizeof(we[nsent].command));
             nsent++;
         }
         req->n_entries = nsent;
         pthread_mutex_unlock(&cluster_lock);
 
+        (void)send_snap;
         len = sizeof(*req) + (size_t)nsent * sizeof(struct raft_wire_entry);
         gossip_send_message(target, GOSSIP_MSG_APPEND_REQ, buf, len);
     }
@@ -1575,12 +1655,13 @@ raft_advance_commit(void)
     pthread_mutex_lock(&cluster_lock);
     if (raft.state == RAFT_LEADER) {
         int majority = (count + 1) / 2 + 1;     /* +1 for the leader */
-        uint64_t N;
+        uint64_t N;                             /* absolute index */
 
-        for (N = (uint64_t)raft.log_size; N > raft.commit_index; N--) {
+        for (N = raft_last_log_index(); N > raft.commit_index &&
+            N > raft.snapshot_index; N--) {
             int cnt = 1;                        /* leader has entry N */
 
-            if (raft.log[N - 1].term != raft.current_term)
+            if (raft_term_at(N) != raft.current_term)
                 continue;
             for (i = 0; peers != NULL && i < count; i++)
                 if (peers[i]->raft_match_index >= N)
@@ -1595,6 +1676,82 @@ raft_advance_commit(void)
     }
     pthread_mutex_unlock(&cluster_lock);
     free(peers);
+
+    raft_maybe_compact();       /* leader compacts once entries commit */
+}
+
+/*
+ * Compact the log once enough committed entries have accumulated: snapshot up
+ * to commit_index and discard those entries. Call WITHOUT cluster_lock held.
+ * Threshold-gated so compaction is periodic, not per-entry.
+ */
+#define RAFT_COMPACT_THRESHOLD  32
+
+static void
+raft_maybe_compact(void)
+{
+    pthread_mutex_lock(&cluster_lock);
+    if (raft.commit_index > raft.snapshot_index &&
+        raft.commit_index - raft.snapshot_index >= RAFT_COMPACT_THRESHOLD) {
+        uint64_t upto = raft.commit_index;
+        uint64_t newterm = raft_term_at(upto);
+        int discard = (int)(upto - raft.snapshot_index);
+
+        if (discard > 0 && discard <= raft.log_size) {
+            memmove(raft.log, raft.log + discard,
+                (raft.log_size - discard) * sizeof(struct raft_log_entry));
+            raft.log_size -= discard;
+            raft.snapshot_index = upto;
+            raft.snapshot_term = newterm;
+            raft_persist();
+        }
+    }
+    pthread_mutex_unlock(&cluster_lock);
+}
+
+/*
+ * Follower: install a snapshot from the leader. Our state machine is the log,
+ * so installing means adopting the (index, term) boundary, discarding the now
+ * -superseded log, and advancing commit to the snapshot. A real state machine
+ * would also load the shipped state blob here.
+ */
+static void
+raft_on_install_snap(const char *from, const struct raft_snap_req *r)
+{
+    struct raft_append_resp resp;
+
+    memset(&resp, 0, sizeof(resp));
+    pthread_mutex_lock(&cluster_lock);
+    if (r->term < raft.current_term) {
+        resp.term = raft.current_term;
+        resp.success = 0;
+        resp.match_index = raft_last_log_index();
+        pthread_mutex_unlock(&cluster_lock);
+        gossip_send_message(from, GOSSIP_MSG_APPEND_RESP, &resp, sizeof(resp));
+        return;
+    }
+    raft.current_term = r->term;
+    raft.state = RAFT_FOLLOWER;
+    strlcpy(raft.leader_id, from, sizeof(raft.leader_id));
+    raft_reset_election_timer();
+
+    if (r->last_index > raft.snapshot_index) {
+        /* Adopt the snapshot: drop the entire in-memory log (any suffix will
+         * be re-replicated by AppendEntries from last_index+1). */
+        raft.log_size = 0;
+        raft.snapshot_index = r->last_index;
+        raft.snapshot_term = r->last_term;
+        if (raft.commit_index < r->last_index)
+            raft.commit_index = r->last_index;
+        if (raft.last_applied < r->last_index)
+            raft.last_applied = r->last_index;
+        raft_persist();
+    }
+    resp.term = raft.current_term;
+    resp.success = 1;
+    resp.match_index = raft_last_log_index();
+    pthread_mutex_unlock(&cluster_lock);
+    gossip_send_message(from, GOSSIP_MSG_APPEND_RESP, &resp, sizeof(resp));
 }
 
 int
@@ -1668,6 +1825,17 @@ raft_log_len(void)
     n = raft.log_size;
     pthread_mutex_unlock(&cluster_lock);
     return (n);
+}
+
+uint64_t
+raft_snapshot_index(void)
+{
+    uint64_t s;
+
+    pthread_mutex_lock(&cluster_lock);
+    s = raft.snapshot_index;
+    pthread_mutex_unlock(&cluster_lock);
+    return (s);
 }
 
 /*
@@ -1744,7 +1912,7 @@ raft_append_entry(const char *command, size_t len)
     
     entry = &raft.log[raft.log_size];
     entry->term = raft.current_term;
-    entry->index = raft.log_size + 1;
+    entry->index = raft_last_log_index() + 1;   /* absolute (snapshot-aware) */
     strlcpy(entry->command, command, sizeof(entry->command));
     entry->timestamp = time(NULL);
 

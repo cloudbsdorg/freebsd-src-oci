@@ -72,13 +72,17 @@ main(int argc, char **argv)
 		const char *rs = role == 2 ? "LEADER" :
 		    role == 1 ? "CANDIDATE" : "FOLLOWER";
 
-		/* As leader, propose a new command every ~3s so replication and
-		 * commit advancement can be observed across the cluster. */
-		if (role == 2 && (tick % 3) == 0) {
-			char cmd[64];
+		/* As leader, propose a small burst each tick so replication,
+		 * commit advancement, and log compaction can be observed. */
+		if (role == 2) {
+			int b;
 
-			snprintf(cmd, sizeof(cmd), "set x=%d", ++proposed);
-			raft_append_entry(cmd, strlen(cmd));
+			for (b = 0; b < 4; b++) {
+				char cmd[64];
+
+				snprintf(cmd, sizeof(cmd), "set x=%d", ++proposed);
+				raft_append_entry(cmd, strlen(cmd));
+			}
 		}
 
 		int nc = 0;
@@ -87,10 +91,11 @@ main(int argc, char **argv)
 
 		raft_get_leader(leader, sizeof(leader));
 		printf("[%s] role=%-9s term=%llu leader=%-12s "
-		    "nodes=%d log=%d commit=%llu\n", hn, rs,
+		    "nodes=%d log=%d commit=%llu snap=%llu\n", hn, rs,
 		    (unsigned long long)raft_term(),
 		    leader[0] ? leader : "(none)", nc + 1,
-		    raft_log_len(), (unsigned long long)raft_commit_index());
+		    raft_log_len(), (unsigned long long)raft_commit_index(),
+		    (unsigned long long)raft_snapshot_index());
 		fflush(stdout);
 		if ((tick % 5) == 0)
 			cluster_announce();   /* re-announce so late joiners learn us */

@@ -68,6 +68,7 @@
 #define GOSSIP_MSG_VOTE_RESP     9
 #define GOSSIP_MSG_APPEND_REQ   10
 #define GOSSIP_MSG_APPEND_RESP  11
+#define GOSSIP_MSG_INSTALL_SNAP 12   /* InstallSnapshot (log compaction) */
 
 /* Cluster configuration */
 struct cluster_config {
@@ -178,7 +179,16 @@ struct raft_state {
     char leader_id[256];
     time_t last_heartbeat;
     
-    /* Log */
+    /*
+     * Snapshot boundary: log[] holds entries with absolute index
+     * > snapshot_index only; everything up to (snapshot_index, snapshot_term)
+     * has been compacted away. absolute index N maps to log[N -
+     * snapshot_index - 1].
+     */
+    uint64_t snapshot_index;
+    uint64_t snapshot_term;
+
+    /* Log (entries after the snapshot boundary) */
     struct raft_log_entry {
         uint64_t term;
         uint64_t index;
@@ -227,6 +237,7 @@ int raft_role(void);    /* 0=follower, 1=candidate, 2=leader */
 uint64_t raft_term(void);
 uint64_t raft_commit_index(void);
 int raft_log_len(void);
+uint64_t raft_snapshot_index(void);
 int raft_become_leader(void);
 int raft_become_follower(const char *leader_id);
 int raft_become_candidate(void);

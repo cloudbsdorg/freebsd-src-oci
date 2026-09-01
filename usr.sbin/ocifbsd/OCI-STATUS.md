@@ -71,6 +71,30 @@ and the `ocifbsd.c` CLI:
    completes once released) and pinned by two ATF regression cases
    (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
+## 📦 **2026-09-01 — Raft log compaction / snapshots (stage 4b) — FULL RAFT COMPLETE**
+
+Added the final Raft piece: log compaction and InstallSnapshot. The log now
+has a snapshot boundary `(snapshot_index, snapshot_term)`; absolute index N
+maps to `log[N - snapshot_index - 1]`, and all index math (last-index/term,
+consistency check, append, commit advancement, replication) is
+snapshot-aware. Once committed entries pass a threshold the leader/followers
+compact — dropping the prefix and advancing the snapshot — and the boundary is
+persisted (state format bumped to v2, v1 still readable). A leader whose peer
+needs already-compacted entries sends **InstallSnapshot** instead of
+AppendEntries; the follower adopts the boundary and resumes from there.
+
+Validated on the real 4-node FreeBSD 16 cluster: with the leader at commit=88
+the in-memory log stayed **bounded** (log≈28, snapshot=64) instead of growing
+to 88; and a **freshly-added node with no state** was caught up via
+InstallSnapshot (its snapshot jumped to 128, matching the leader) then tailed
+the rest to commit=136.
+
+**Full Raft is now implemented and validated end-to-end on real hardware:**
+leader election, log replication, commit advancement, crash-durable
+persistence, dynamic membership, and log compaction/snapshots — all exercised
+on a live multi-node FreeBSD 16 cluster. Host tree builds clean; ocifbsd suite
+159/159.
+
 ## ➕ **2026-09-01 — Raft membership changes (stage 4a) implemented + validated on a 4-node cluster**
 
 Enabled dynamic cluster membership: a starting node announces itself
