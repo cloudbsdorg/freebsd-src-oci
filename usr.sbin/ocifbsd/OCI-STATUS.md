@@ -185,19 +185,27 @@ JSON-formatted entry to their endpoint instead of returning a no-op stub (a
 pre-existing `line` leak in `forwarder_send` was fixed too). Validated against
 an in-process HTTP sink and pinned by `logd_forward_test` (3 cases).
 
-**ACME (RFC 8555) — account foundation IMPLEMENTED 2026-08-31; order flow in
-progress.** `cert/acme.c` is now a real native ACME client on libcurl +
-OpenSSL 3: base64url, EC P-256 account key (generated + persisted 0600 or
-loaded), directory discovery, replay-nonce handling with a single badNonce
-retry, RFC 7638 JWK/thumbprint, and **ES256 JWS signing**, driving
-`acme_account_register` (new-account with the `jwk` header). Validated against
-a live local **step-ca** ACME server: account registration returns the
-account URL, and a second run reuses the persisted key to bind the *same*
-account (idempotent JWK identity). Set `OCIFBSD_ACME_CAINFO` to a PEM root to
-trust a test CA; production Let's Encrypt uses the system trust store. The
-remaining order -> authorization -> HTTP-01 challenge -> finalize -> download
-steps (`acme_certificate_request`) build on this foundation and currently
-return `ENOSYS` rather than a false success — next up.
+**ACME (RFC 8555) — COMPLETE and validated end-to-end 2026-08-31.**
+`cert/acme.c` is a full native ACME client on libcurl + OpenSSL 3:
+base64url, EC P-256 account key (generated + persisted 0600 or loaded),
+directory discovery, replay-nonce handling with a badNonce retry, RFC 7638
+JWK/thumbprint, **ES256 JWS signing**, new-account registration, and the
+complete issuance flow in `acme_certificate_request` — new-order,
+authorization fetch, **HTTP-01** challenge publication to the configured
+webroot, challenge notification, authorization/order polling, EC P-256 CSR
+generation (CN + SAN, cert key persisted 0600), finalize, and certificate
+chain download. `acme_certificate_renew` is a fresh order for the same
+identifier. The account key is distinct from the cert key
+(`OCIFBSD_ACME_ACCOUNT_KEY` or `<cert-key>.acct`); `OCIFBSD_ACME_CAINFO`
+trusts a test CA's root, production Let's Encrypt uses the system store.
+
+Validated against a live local **step-ca** ACME server with nginx serving the
+HTTP-01 webroot: a certificate was issued for `acme-test.local`
+(`CN=acme-test.local`, SAN `DNS:acme-test.local`), its public key matches the
+persisted private key, it `openssl verify`s against the CA root+intermediate,
+and a second request (renewal) succeeds. The order flow correctly reported
+step-ca's "could not connect" error while the webroot was unreachable and
+completed once it was served — i.e. it does not fake success.
 
 **Remaining greenfield (need external resources / product decisions):**
 cloud export for AWS/GCP/Azure (`export/*.c`, needs cloud credentials) and

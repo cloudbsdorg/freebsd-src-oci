@@ -29,6 +29,7 @@
 #include <unistd.h>
 
 #include <curl/curl.h>
+#include <json.h>
 
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
@@ -37,6 +38,8 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/sha.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #include "cert.h"
 
@@ -52,7 +55,8 @@ static struct acme_ctx {
 	char		 url_new_order[512];
 	char		 url_revoke[512];
 	char		*cainfo;	/* PEM bundle to trust, or NULL */
-	char		*key_path;	/* account key PEM path */
+	char		*account_key_path;	/* ACME account key PEM path */
+	char		*cert_key_path;	/* issued-cert private key PEM path */
 	char		*challenges_dir;
 	char		*cert_path;
 	char		*chain_path;
@@ -545,12 +549,27 @@ acme_init(struct acme_config *config)
 	if (config->chain_path != NULL)
 		actx.chain_path = strdup(config->chain_path);
 	if (config->private_key_path != NULL)
-		actx.key_path = strdup(config->private_key_path);
+		actx.cert_key_path = strdup(config->private_key_path);
 	cainfo = getenv("OCIFBSD_ACME_CAINFO");
 	if (cainfo != NULL && cainfo[0] != '\0')
 		actx.cainfo = strdup(cainfo);
 
-	if (account_key_load_or_create(actx.key_path) != 0)
+	/*
+	 * The ACME account key is distinct from the certificate key. Its path
+	 * is OCIFBSD_ACME_ACCOUNT_KEY when set, else "<cert-key>.acct" so a
+	 * stable account identity persists alongside the cert material.
+	 */
+	{
+		const char *ak = getenv("OCIFBSD_ACME_ACCOUNT_KEY");
+
+		if (ak != NULL && ak[0] != '\0')
+			actx.account_key_path = strdup(ak);
+		else if (actx.cert_key_path != NULL)
+			asprintf(&actx.account_key_path, "%s.acct",
+			    actx.cert_key_path);
+	}
+
+	if (account_key_load_or_create(actx.account_key_path) != 0)
 		return (-1);
 	actx.initialized = 1;
 	return (0);
@@ -611,27 +630,307 @@ acme_account_kid(void)
 	return (actx.account_kid);
 }
 
+/* ------------------------------------------------------------------ */
+/* Order -> challenge -> finalize -> download                         */
+/* ------------------------------------------------------------------ */
+
+/* Copy a string field out of a json object into dst; 0 if present. */
+static int
+jstr(struct json_object *o, const char *key, char *dst, size_t dstlen)
+{
+	struct json_object *v;
+
+	if (o == NULL || !json_object_object_get_ex(o, key, &v))
+		return (-1);
+	snprintf(dst, dstlen, "%s", json_object_get_string(v));
+	return (0);
+}
+
+/* Write the HTTP-01 key authorization to the webroot challenge path. */
+static int
+write_challenge(const char *token)
+{
+	char dir[PATH_MAX], path[PATH_MAX];
+	char *tp, *keyauth = NULL;
+	int fd, ret = -1;
+
+	if (actx.challenges_dir == NULL)
+		return (-1);
+	tp = account_thumbprint();
+	if (tp == NULL)
+		return (-1);
+	if (asprintf(&keyauth, "%s.%s", token, tp) < 0) {
+		free(tp);
+		return (-1);
+	}
+	free(tp);
+	/* Standard webroot layout: <dir>/.well-known/acme-challenge/<token>. */
+	snprintf(dir, sizeof(dir), "%s/.well-known", actx.challenges_dir);
+	mkdir(dir, 0755);
+	snprintf(dir, sizeof(dir), "%s/.well-known/acme-challenge",
+	    actx.challenges_dir);
+	mkdir(dir, 0755);
+	if (strchr(token, '/') != NULL) {	/* token is server-chosen b64url */
+		free(keyauth);
+		return (-1);
+	}
+	snprintf(path, sizeof(path), "%s/%s", dir, token);
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd >= 0) {
+		if (write(fd, keyauth, strlen(keyauth)) == (ssize_t)strlen(keyauth))
+			ret = 0;
+		close(fd);
+	}
+	free(keyauth);
+	return (ret);
+}
+
+/* Poll a resource (POST-as-GET) until its "status" is want or a terminal
+ * "invalid"; returns 0 when want is reached, -1 otherwise. */
+static int
+poll_status(const char *url, const char *want, int max_tries)
+{
+	struct http_result r;
+	int i;
+
+	for (i = 0; i < max_tries; i++) {
+		struct json_object *o;
+		char status[32] = "";
+
+		if (acme_post(url, NULL, &r) != 0)
+			return (-1);
+		o = r.body.data ? json_tokener_parse(r.body.data) : NULL;
+		if (o != NULL) {
+			jstr(o, "status", status, sizeof(status));
+			json_object_put(o);
+		}
+		http_result_free(&r);
+		if (strcmp(status, want) == 0)
+			return (0);
+		if (strcmp(status, "invalid") == 0)
+			return (-1);
+		sleep(1);
+	}
+	return (-1);
+}
+
+/* Build a CSR for domain with an EC P-256 key, write the key to
+ * cert_key_path (0600), and return the base64url(DER) CSR. */
+static char *
+make_csr(const char *domain)
+{
+	EVP_PKEY *key = NULL;
+	X509_REQ *req = NULL;
+	X509_NAME *name = NULL;
+	STACK_OF(X509_EXTENSION) *exts = NULL;
+	X509_EXTENSION *san = NULL;
+	unsigned char *der = NULL;
+	char sanstr[300];
+	char *out = NULL;
+	int derlen;
+
+	key = EVP_EC_gen("P-256");
+	if (key == NULL)
+		return (NULL);
+	req = X509_REQ_new();
+	if (req == NULL)
+		goto out;
+	X509_REQ_set_version(req, 0);
+	name = X509_REQ_get_subject_name(req);
+	X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+	    (const unsigned char *)domain, -1, -1, 0);
+	/* subjectAltName is what modern validators require. */
+	snprintf(sanstr, sizeof(sanstr), "DNS:%s", domain);
+	san = X509V3_EXT_conf_nid(NULL, NULL, NID_subject_alt_name, sanstr);
+	if (san == NULL)
+		goto out;
+	exts = sk_X509_EXTENSION_new_null();
+	sk_X509_EXTENSION_push(exts, san);
+	X509_REQ_add_extensions(req, exts);
+	if (X509_REQ_set_pubkey(req, key) != 1 ||
+	    X509_REQ_sign(req, key, EVP_sha256()) == 0)
+		goto out;
+	derlen = i2d_X509_REQ(req, &der);
+	if (derlen <= 0)
+		goto out;
+	out = b64url(der, derlen);
+
+	/* Persist the certificate private key. */
+	if (out != NULL && actx.cert_key_path != NULL) {
+		int fd = open(actx.cert_key_path,
+		    O_WRONLY | O_CREAT | O_TRUNC, 0600);
+
+		if (fd >= 0) {
+			FILE *f = fdopen(fd, "w");
+
+			if (f != NULL) {
+				PEM_write_PrivateKey(f, key, NULL, NULL, 0,
+				    NULL, NULL);
+				fclose(f);
+			} else {
+				close(fd);
+			}
+		}
+	}
+out:
+	OPENSSL_free(der);
+	sk_X509_EXTENSION_free(exts);
+	X509_EXTENSION_free(san);
+	X509_REQ_free(req);
+	EVP_PKEY_free(key);
+	return (out);
+}
+
+static int
+write_file_0644(const char *path, const char *data, size_t len)
+{
+	int fd, ret = -1;
+
+	if (path == NULL)
+		return (0);	/* nothing to write is not an error */
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd >= 0) {
+		if (write(fd, data, len) == (ssize_t)len)
+			ret = 0;
+		close(fd);
+	}
+	return (ret);
+}
+
 int
 acme_certificate_request(const char *domain, const char *challenge_dir)
 {
-	/*
-	 * The order -> authorization -> HTTP-01 challenge -> finalize ->
-	 * download flow is implemented incrementally on top of this account
-	 * foundation. Until it lands, report "not yet implemented" rather than
-	 * silently succeeding.
-	 */
-	(void)domain;
-	(void)challenge_dir;
-	errno = ENOSYS;
-	return (-1);
+	struct http_result r;
+	struct json_object *o = NULL, *auths = NULL, *chals = NULL;
+	char order_url[512] = "", finalize_url[512] = "", authz_url[512] = "";
+	char chal_url[512] = "", token[256] = "", cert_url[512] = "";
+	char *payload = NULL, *csr = NULL;
+	int ret = -1, i, n;
+
+	if (!actx.initialized || domain == NULL)
+		return (-1);
+	if (challenge_dir != NULL) {
+		free(actx.challenges_dir);
+		actx.challenges_dir = strdup(challenge_dir);
+	}
+	if (actx.account_kid == NULL && acme_account_register(NULL) != 0)
+		return (-1);
+	if (actx.nonce == NULL && acme_fetch_nonce() != 0)
+		return (-1);
+
+	/* 1. Create the order. */
+	if (asprintf(&payload, "{\"identifiers\":[{\"type\":\"dns\","
+	    "\"value\":\"%s\"}]}", domain) < 0)
+		return (-1);
+	if (acme_post(actx.url_new_order, payload, &r) != 0)
+		goto out;
+	if (r.code != 201 || r.body.data == NULL) {
+		http_result_free(&r);
+		goto out;
+	}
+	if (r.location != NULL)
+		snprintf(order_url, sizeof(order_url), "%s", r.location);
+	o = json_tokener_parse(r.body.data);
+	http_result_free(&r);
+	if (o == NULL)
+		goto out;
+	jstr(o, "finalize", finalize_url, sizeof(finalize_url));
+	if (json_object_object_get_ex(o, "authorizations", &auths) &&
+	    json_object_array_length(auths) > 0)
+		snprintf(authz_url, sizeof(authz_url), "%s",
+		    json_object_get_string(json_object_array_get_idx(auths, 0)));
+	json_object_put(o);
+	o = NULL;
+	if (authz_url[0] == '\0' || finalize_url[0] == '\0')
+		goto out;
+
+	/* 2. Fetch the authorization, pick the http-01 challenge. */
+	if (acme_post(authz_url, NULL, &r) != 0)
+		goto out;
+	o = r.body.data ? json_tokener_parse(r.body.data) : NULL;
+	http_result_free(&r);
+	if (o == NULL || !json_object_object_get_ex(o, "challenges", &chals))
+		goto out;
+	n = json_object_array_length(chals);
+	for (i = 0; i < n; i++) {
+		struct json_object *c = json_object_array_get_idx(chals, i);
+		char type[32] = "";
+
+		jstr(c, "type", type, sizeof(type));
+		if (strcmp(type, "http-01") == 0) {
+			jstr(c, "url", chal_url, sizeof(chal_url));
+			jstr(c, "token", token, sizeof(token));
+			break;
+		}
+	}
+	json_object_put(o);
+	o = NULL;
+	if (chal_url[0] == '\0' || token[0] == '\0')
+		goto out;
+
+	/* 3. Publish the key authorization at the webroot. */
+	if (write_challenge(token) != 0)
+		goto out;
+
+	/* 4. Tell the CA to validate. */
+	if (acme_post(chal_url, "{}", &r) != 0)
+		goto out;
+	http_result_free(&r);
+
+	/* 5. Wait for the authorization to go valid. */
+	if (poll_status(authz_url, "valid", 30) != 0)
+		goto out;
+
+	/* 6. Finalize with a CSR. */
+	csr = make_csr(domain);
+	if (csr == NULL)
+		goto out;
+	free(payload);
+	if (asprintf(&payload, "{\"csr\":\"%s\"}", csr) < 0) {
+		payload = NULL;
+		goto out;
+	}
+	if (acme_post(finalize_url, payload, &r) != 0)
+		goto out;
+	http_result_free(&r);
+
+	/* 7. Wait for the order to go valid, then read the certificate URL. */
+	if (order_url[0] == '\0' || poll_status(order_url, "valid", 30) != 0)
+		goto out;
+	if (acme_post(order_url, NULL, &r) != 0)
+		goto out;
+	o = r.body.data ? json_tokener_parse(r.body.data) : NULL;
+	http_result_free(&r);
+	if (o == NULL)
+		goto out;
+	jstr(o, "certificate", cert_url, sizeof(cert_url));
+	json_object_put(o);
+	o = NULL;
+	if (cert_url[0] == '\0')
+		goto out;
+
+	/* 8. Download the issued certificate chain (PEM). */
+	if (acme_post(cert_url, NULL, &r) != 0)
+		goto out;
+	if (r.code == 200 && r.body.data != NULL) {
+		write_file_0644(actx.cert_path, r.body.data, r.body.len);
+		write_file_0644(actx.chain_path, r.body.data, r.body.len);
+		ret = 0;
+	}
+	http_result_free(&r);
+out:
+	if (o != NULL)
+		json_object_put(o);
+	free(payload);
+	free(csr);
+	return (ret);
 }
 
 int
 acme_certificate_renew(const char *domain)
 {
-	(void)domain;
-	errno = ENOSYS;
-	return (-1);
+	/* Renewal is a fresh order for the same identifier. */
+	return (acme_certificate_request(domain, NULL));
 }
 
 int
