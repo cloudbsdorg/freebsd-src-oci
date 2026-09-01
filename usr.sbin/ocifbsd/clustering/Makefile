@@ -2,7 +2,10 @@
 # Makefile for ocifbsd clustering (gossip + SWIM + Raft) — builds the
 # ocifbsd-cluster node daemon.
 
-.include <src.opts.mk>
+# NOTE: no <src.opts.mk> here. This module references no MK_* knobs, and
+# including it would break builds on a minimal FreeBSD without /usr/src (the
+# self-contained/cleanroom release target). The installed bsd.prog.mk / bsd.lib.mk
+# supply the defaults we need.
 
 PROG=	ocifbsd-cluster
 SRCS=	cluster.c cluster_main.c
