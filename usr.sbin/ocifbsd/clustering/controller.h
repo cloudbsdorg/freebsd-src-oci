@@ -31,6 +31,17 @@ int	controller_node_assignments(const struct cp_state *st, const char *node,
 	    struct agent_replica *out, int max, int *nout);
 
 /*
+ * Build the pf(4) load-balancer ruleset for a service from its replicated
+ * endpoints: a round-robin redirect from vip:port to the pool of reported
+ * replica endpoints (each at backend_port). Written to out (NUL-terminated).
+ * With no endpoints, out holds only a comment (no rdr rule). Returns 0 on
+ * success, -1 on bad arguments or a too-small buffer.
+ */
+int	controller_lb_ruleset(const struct cp_state *st, const char *service,
+	    const char *vip, int port, int backend_port, char *out,
+	    size_t outlen);
+
+/*
  * Compute the placement commands to converge st toward its desired replica
  * counts across nodes[0..nnodes-1]. Each command (a control-plane command line
  * such as "ASSIGN web 0 node1") is written to out[k] (each at least 256 bytes);

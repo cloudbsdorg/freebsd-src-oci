@@ -19,6 +19,7 @@
  *   DELETE   <service>
  *   ASSIGN   <service> <replica_id> <node>
  *   UNASSIGN <service> <replica_id>
+ *   ENDPOINT <service> <replica_id> <ip>
  *
  * cp_apply() is the state-machine transition applied to each committed entry.
  */
@@ -61,6 +62,18 @@ const char	*cp_service_image(const struct cp_state *st, const char *svc);
 /* The node a replica is placed on, or NULL if unplaced/unknown. */
 const char	*cp_replica_node(const struct cp_state *st, const char *svc,
 		    int replica_id);
+
+/* A replica's reported endpoint IP, or NULL if unplaced/not yet reported. */
+const char	*cp_replica_endpoint(const struct cp_state *st,
+		    const char *svc, int replica_id);
+
+/*
+ * Fill ips[][64] with the reported endpoint IPs of a service's placed replicas
+ * (those with an endpoint), up to max. Returns the count. These are the pf
+ * load-balancer backends for the service VIP.
+ */
+int		 cp_service_endpoints(const struct cp_state *st,
+		    const char *svc, char ips[][64], int max);
 
 /* Number of replicas of any service currently placed on a node. */
 int		 cp_node_replica_count(const struct cp_state *st,

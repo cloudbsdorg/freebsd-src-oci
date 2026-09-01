@@ -18,6 +18,48 @@
 #define CTRL_MAX_NODES	256
 
 int
+controller_lb_ruleset(const struct cp_state *st, const char *service,
+    const char *vip, int port, int backend_port, char *out, size_t outlen)
+{
+	char ips[CTRL_MAX_NODES][64];
+	size_t off = 0;
+	int n, w;
+
+	if (st == NULL || service == NULL || vip == NULL || out == NULL ||
+	    outlen == 0)
+		return (-1);
+
+	n = cp_service_endpoints(st, service, ips, CTRL_MAX_NODES);
+
+	w = snprintf(out, outlen,
+	    "# ocifbsd load balancer for service %s (VIP %s)\n", service, vip);
+	if (w < 0 || (size_t)w >= outlen)
+		return (-1);
+	off = (size_t)w;
+
+	if (n == 0) {
+		w = snprintf(out + off, outlen - off,
+		    "# no endpoints reported yet; no redirect installed\n");
+		return (w > 0 && (size_t)w < outlen - off) ? 0 : -1;
+	}
+
+	w = snprintf(out + off, outlen - off,
+	    "rdr pass proto tcp from any to %s port %d -> {", vip, port);
+	if (w < 0 || (size_t)w >= outlen - off)
+		return (-1);
+	off += (size_t)w;
+	for (int i = 0; i < n; i++) {
+		w = snprintf(out + off, outlen - off, " %s", ips[i]);
+		if (w < 0 || (size_t)w >= outlen - off)
+			return (-1);
+		off += (size_t)w;
+	}
+	w = snprintf(out + off, outlen - off, " } port %d round-robin\n",
+	    backend_port);
+	return (w > 0 && (size_t)w < outlen - off) ? 0 : -1;
+}
+
+int
 controller_node_assignments(const struct cp_state *st, const char *node,
     struct agent_replica *out, int max, int *nout)
 {

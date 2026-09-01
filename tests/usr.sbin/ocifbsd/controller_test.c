@@ -147,8 +147,40 @@ ATF_TC_BODY(controller_node_assignments_slice, tc)
 	cp_free(st);
 }
 
+/* The pf load-balancer ruleset is built from the replicated endpoints. */
+ATF_TC_WITHOUT_HEAD(controller_lb_from_endpoints);
+ATF_TC_BODY(controller_lb_from_endpoints, tc)
+{
+	struct cp_state *st = cp_new();
+	char rules[2048];
+
+	ATF_REQUIRE(st != NULL);
+	ATF_REQUIRE_EQ(0, cp_apply(st, "CREATE web 2 nginx"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ASSIGN web 0 n1"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ASSIGN web 1 n2"));
+
+	/* No endpoints yet -> no rdr rule. */
+	ATF_REQUIRE_EQ(0, controller_lb_ruleset(st, "web", "203.0.113.100",
+	    80, 8080, rules, sizeof(rules)));
+	ATF_CHECK(strstr(rules, "rdr") == NULL);
+
+	/* Report endpoints -> a round-robin pool over both. */
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ENDPOINT web 0 203.0.113.11"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ENDPOINT web 1 203.0.113.12"));
+	ATF_REQUIRE_EQ(0, controller_lb_ruleset(st, "web", "203.0.113.100",
+	    80, 8080, rules, sizeof(rules)));
+	ATF_CHECK_MSG(strstr(rules, "rdr") != NULL, "no rdr rule");
+	ATF_CHECK_MSG(strstr(rules, "203.0.113.100") != NULL, "VIP missing");
+	ATF_CHECK_MSG(strstr(rules, "203.0.113.11") != NULL, "backend 1 missing");
+	ATF_CHECK_MSG(strstr(rules, "203.0.113.12") != NULL, "backend 2 missing");
+	ATF_CHECK_MSG(strstr(rules, "round-robin") != NULL, "not round-robin");
+	ATF_CHECK_MSG(strstr(rules, "port 80") != NULL, "frontend port missing");
+	cp_free(st);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
+	ATF_TP_ADD_TC(tp, controller_lb_from_endpoints);
 	ATF_TP_ADD_TC(tp, controller_node_assignments_slice);
 	ATF_TP_ADD_TC(tp, controller_initial_spread);
 	ATF_TP_ADD_TC(tp, controller_scale_up);

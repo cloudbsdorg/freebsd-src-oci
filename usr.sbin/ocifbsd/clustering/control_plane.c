@@ -23,6 +23,7 @@ struct cp_placement {
 	char	service[128];
 	int	replica_id;
 	char	node[256];
+	char	ip[64];
 };
 
 struct cp_state {
@@ -239,6 +240,21 @@ cp_apply(struct cp_state *st, const char *cmd)
 			return (-1);
 		return (placement_unassign(st, a1, rid));
 	}
+	if (strcmp(op, "ENDPOINT") == 0) {
+		struct cp_placement *p;
+
+		a1 = strtok_r(NULL, " \t", &save);	/* service */
+		a2 = strtok_r(NULL, " \t", &save);	/* replica_id */
+		a3 = strtok_r(NULL, " \t", &save);	/* ip */
+		if (a1 == NULL || a2 == NULL || a3 == NULL ||
+		    parse_int(a2, &rid) != 0)
+			return (-1);
+		p = find_placement(st, a1, rid);
+		if (p == NULL)
+			return (-1);		/* endpoint for an unplaced replica */
+		strlcpy(p->ip, a3, sizeof(p->ip));
+		return (0);
+	}
 	return (-1);
 }
 
@@ -301,6 +317,32 @@ cp_replica_node(const struct cp_state *st, const char *svc, int replica_id)
 		return (NULL);
 	p = find_placement(st, svc, replica_id);
 	return (p != NULL ? p->node : NULL);
+}
+
+const char *
+cp_replica_endpoint(const struct cp_state *st, const char *svc, int replica_id)
+{
+	struct cp_placement *p;
+
+	if (st == NULL)
+		return (NULL);
+	p = find_placement(st, svc, replica_id);
+	return (p != NULL && p->ip[0] != '\0') ? p->ip : NULL;
+}
+
+int
+cp_service_endpoints(const struct cp_state *st, const char *svc,
+    char ips[][64], int max)
+{
+	int n = 0;
+
+	if (st == NULL || svc == NULL || ips == NULL)
+		return (0);
+	for (int i = 0; i < st->npls && n < max; i++)
+		if (strcmp(st->pls[i].service, svc) == 0 &&
+		    st->pls[i].ip[0] != '\0')
+			strlcpy(ips[n++], st->pls[i].ip, 64);
+	return (n);
 }
 
 int

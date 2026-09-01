@@ -176,9 +176,41 @@ ATF_TC_BODY(cp_stress_scale, tc)
 	cp_free(s);
 }
 
+/* ENDPOINT records a replica's IP; endpoints feed the load balancer. */
+ATF_TC_WITHOUT_HEAD(cp_endpoints);
+ATF_TC_BODY(cp_endpoints, tc)
+{
+	struct cp_state *s = cp_new();
+	char ips[8][64];
+	int n;
+
+	ATF_REQUIRE(s != NULL);
+	ATF_REQUIRE_EQ(0, cp_apply(s, "CREATE web 3 nginx"));
+	ATF_REQUIRE_EQ(0, cp_apply(s, "ASSIGN web 0 n1"));
+	ATF_REQUIRE_EQ(0, cp_apply(s, "ASSIGN web 1 n2"));
+
+	/* No endpoints reported yet. */
+	n = cp_service_endpoints(s, "web", ips, 8);
+	ATF_CHECK_EQ(0, n);
+
+	/* Report two replica endpoints. */
+	ATF_REQUIRE_EQ(0, cp_apply(s, "ENDPOINT web 0 203.0.113.11"));
+	ATF_REQUIRE_EQ(0, cp_apply(s, "ENDPOINT web 1 203.0.113.12"));
+	ATF_CHECK_STREQ("203.0.113.11", cp_replica_endpoint(s, "web", 0));
+
+	n = cp_service_endpoints(s, "web", ips, 8);
+	ATF_CHECK_EQ_MSG(2, n, "expected 2 endpoints, got %d", n);
+
+	/* An endpoint for an unplaced replica is ignored. */
+	ATF_CHECK(cp_apply(s, "ENDPOINT web 2 203.0.113.13") != 0);
+	ATF_CHECK_EQ(2, cp_service_endpoints(s, "web", ips, 8));
+	cp_free(s);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, cp_service_lifecycle);
+	ATF_TP_ADD_TC(tp, cp_endpoints);
 	ATF_TP_ADD_TC(tp, cp_stress_scale);
 	ATF_TP_ADD_TC(tp, cp_placement);
 	ATF_TP_ADD_TC(tp, cp_delete_drops_placements);
