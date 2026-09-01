@@ -22,7 +22,7 @@
 
 ATF_TESTS_C=	parser_test k8s_test utils_test oci2jail_test hooks_test \
 		image_ref_test whiteout_test image_parse_test unpack_layer_test \
-		netcfg_test jsonfmt_test
+		netcfg_test jsonfmt_test logd_forward_test
 ATF_TESTS_SH=	cli_test lifecycle_test
 
 # convert/ sources compile at WARNS=3; match for #include tests
@@ -69,5 +69,13 @@ LDADD.jsonfmt_test+=	-ljson-c
 CFLAGS.unpack_layer_test+=	-I/usr/local/include
 LDFLAGS.unpack_layer_test+=	-L/usr/local/lib
 LIBADD.unpack_layer_test+=	archive
+
+# logd_forward_test #includes logd/forward.c (libcurl HTTP POST) and needs the
+# logd/ include dir plus curl; the in-process HTTP sink uses pthreads.
+CFLAGS.logd_forward_test+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/logd \
+				-I/usr/local/include
+LDFLAGS.logd_forward_test+=	-L/usr/local/lib
+LDADD.logd_forward_test+=	-lcurl
+LIBADD.logd_forward_test+=	pthread
 
 .include <bsd.test.mk>

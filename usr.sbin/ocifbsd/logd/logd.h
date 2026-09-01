@@ -268,6 +268,8 @@ int     log_write_from_jail(const char *jail_name, int severity,
 int     log_capture_fd(int fd, const char *source_name);
 
 /* Log forwarding */
+int     logd_http_post(const char *url, const char *body,
+	    const char *content_type, const char *extra_header);
 int     forwarder_add(struct log_forwarder *fw);
 int     forwarder_remove(const char *name);
 int     forwarder_enable(const char *name);

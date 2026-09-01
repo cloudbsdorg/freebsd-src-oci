@@ -177,13 +177,21 @@ run under sudo). New CLI verbs landed: `exec`, `stop`, `pause`, `resume`,
   bugs, and a reference-counted cluster-node lifetime (fixes a UAF) with
   validated gossip/JOIN network input.
 
-**Remaining (feature work, not bugs — mostly comment-only stub files):**
-real ACME/Let's Encrypt (`cert/acme.c`), cloud export for AWS/GCP/Azure
-(`export/*.c`), HTTP log forwarding (`logd/forward.c`), and full Raft. These
-are greenfield implementations that need external resources (credentials,
-registry/cloud endpoints) and product decisions; they are the natural next
-targets once prioritized. (TPM support was **removed** from the project on
-2026-08-31 — see the removal note below.)
+**HTTP log forwarding — IMPLEMENTED 2026-08-31.** `logd/forward.c` now has a
+real libcurl `logd_http_post()` (2xx-checked, bounded timeouts), and the
+fluentd, Elasticsearch (`/_doc`), Splunk HEC (`{"event": …}`, optional
+`OCIFBSD_SPLUNK_TOKEN`), and custom-webhook senders in `logd.c` post the
+JSON-formatted entry to their endpoint instead of returning a no-op stub (a
+pre-existing `line` leak in `forwarder_send` was fixed too). Validated against
+an in-process HTTP sink and pinned by `logd_forward_test` (3 cases).
+
+**Remaining greenfield (need external resources / product decisions):**
+real ACME/Let's Encrypt (`cert/acme.c`, needs an ACME account + reachable
+domain or a local Pebble server), cloud export for AWS/GCP/Azure
+(`export/*.c`, needs cloud credentials), and full Raft (`clustering/`). These
+need external endpoints/credentials to implement *and validate*, so they are
+the natural next targets once that infrastructure is available. (TPM support
+was **removed** from the project on 2026-08-31 — see the removal note below.)
 
 ## 🎉🎉🎉 **ALL 15 SUBDIRs RE-ENABLED — BOOTSTRAP 100% COMPLETE!**
 

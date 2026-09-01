@@ -79,11 +79,11 @@ static void	event_trigger_webhooks(struct event_entry *event);
 static struct log_forwarder *forwarder_find(const char *name);
 static int	forwarder_send_udp(struct log_forwarder *fw, const char *line);
 static int	forwarder_send_fluentd(struct log_forwarder *fw,
-    struct log_entry *entry);
+    const char *line);
 static int	forwarder_send_elastic(struct log_forwarder *fw,
-    struct log_entry *entry);
+    const char *line);
 static int	forwarder_send_splunk(struct log_forwarder *fw,
-    struct log_entry *entry);
+    const char *line);
 static int	forwarder_send_custom(struct log_forwarder *fw, const char *line);
 static int	webhook_deliver(struct webhook_delivery *wh);
 static void	sig_handler(int sig);
@@ -1257,6 +1257,8 @@ forwarder_send(struct log_entry *entry)
         return (0);
 
     line = log_format_entry(entry, LOG_FORMAT_JSON);
+    if (line == NULL)
+        return (-1);
 
     pthread_mutex_lock(&logd_state_lock);
 
@@ -1271,13 +1273,13 @@ forwarder_send(struct log_entry *entry)
             forwarder_send_udp(fw, line);
             break;
         case 1: /* fluentd */
-            forwarder_send_fluentd(fw, entry);
+            forwarder_send_fluentd(fw, line);
             break;
         case 2: /* elasticsearch */
-            forwarder_send_elastic(fw, entry);
+            forwarder_send_elastic(fw, line);
             break;
         case 3: /* splunk */
-            forwarder_send_splunk(fw, entry);
+            forwarder_send_splunk(fw, line);
             break;
         default:
             forwarder_send_custom(fw, line);
@@ -1287,6 +1289,7 @@ forwarder_send(struct log_entry *entry)
 
     pthread_mutex_unlock(&logd_state_lock);
 
+    free(line);
     return (0);
 }
 
@@ -1350,39 +1353,65 @@ forwarder_send_udp(struct log_forwarder *fw, const char *line)
 }
 
 static int
-forwarder_send_fluentd(struct log_forwarder *fw, struct log_entry *entry)
+forwarder_send_fluentd(struct log_forwarder *fw, const char *line)
 {
-    (void)fw;
-    (void)entry;
-    /* Fluentd forward protocol implementation */
-    return (0);
+    /* Fluentd's HTTP input accepts a JSON record POSTed to the tag URL. */
+    if (fw == NULL || line == NULL)
+        return (-1);
+    return (logd_http_post(fw->endpoint, line, "application/json", NULL));
 }
 
 static int
-forwarder_send_elastic(struct log_forwarder *fw, struct log_entry *entry)
+forwarder_send_elastic(struct log_forwarder *fw, const char *line)
 {
-    (void)fw;
-    (void)entry;
-    /* Elasticsearch bulk API implementation */
-    return (0);
+    char url[640];
+
+    /* Index a single document: POST <endpoint>/_doc with the JSON line. */
+    if (fw == NULL || line == NULL)
+        return (-1);
+    if ((size_t)snprintf(url, sizeof(url), "%s/_doc", fw->endpoint) >=
+        sizeof(url))
+        return (-1);
+    return (logd_http_post(url, line, "application/json", NULL));
 }
 
 static int
-forwarder_send_splunk(struct log_forwarder *fw, struct log_entry *entry)
+forwarder_send_splunk(struct log_forwarder *fw, const char *line)
 {
-    (void)fw;
-    (void)entry;
-    /* Splunk HTTP Event Collector implementation */
-    return (0);
+    char *body = NULL, *auth = NULL;
+    const char *token;
+    int ret;
+
+    /*
+     * Splunk HEC wraps the record as {"event": <record>} and authenticates
+     * with an "Authorization: Splunk <token>" header. The token is taken
+     * from the OCIFBSD_SPLUNK_TOKEN environment variable when set (the
+     * forwarder struct does not model per-destination secrets); without a
+     * token the POST is still made, which suits a tokenless test collector.
+     */
+    if (fw == NULL || line == NULL)
+        return (-1);
+    if (asprintf(&body, "{\"event\": %s}", line) < 0)
+        return (-1);
+    token = getenv("OCIFBSD_SPLUNK_TOKEN");
+    if (token != NULL && token[0] != '\0' &&
+        asprintf(&auth, "Authorization: Splunk %s", token) < 0) {
+        free(body);
+        return (-1);
+    }
+    ret = logd_http_post(fw->endpoint, body, "application/json", auth);
+    free(body);
+    free(auth);
+    return (ret);
 }
 
 static int
 forwarder_send_custom(struct log_forwarder *fw, const char *line)
 {
-    (void)fw;
-    (void)line;
-    /* Custom webhook implementation */
-    return (0);
+    /* Generic webhook: POST the JSON record to the configured endpoint. */
+    if (fw == NULL || line == NULL)
+        return (-1);
+    return (logd_http_post(fw->endpoint, line, "application/json", NULL));
 }
 
 /*
