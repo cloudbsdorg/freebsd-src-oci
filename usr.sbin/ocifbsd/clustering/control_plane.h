@@ -66,4 +66,14 @@ const char	*cp_replica_node(const struct cp_state *st, const char *svc,
 int		 cp_node_replica_count(const struct cp_state *st,
 		    const char *node);
 
+/* Total number of placements (across all services and nodes). */
+int		 cp_placement_count(const struct cp_state *st);
+
+/*
+ * Read the i-th placement (0..cp_placement_count-1) into the caller's buffers
+ * (any of svc/id/node may be NULL). Returns 0 on success, -1 if out of range.
+ */
+int		 cp_placement_at(const struct cp_state *st, int i, char *svc,
+		    size_t svclen, int *id, char *node, size_t nodelen);
+
 #endif /* OCIFBSD_CONTROL_PLANE_H */

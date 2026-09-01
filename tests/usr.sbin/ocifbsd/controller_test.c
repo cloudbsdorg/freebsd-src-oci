@@ -113,8 +113,43 @@ ATF_TC_BODY(controller_converges, tc)
 	cp_free(st);
 }
 
+/* Per-node assignment extraction: a node gets exactly its placed replicas. */
+ATF_TC_WITHOUT_HEAD(controller_node_assignments_slice);
+ATF_TC_BODY(controller_node_assignments_slice, tc)
+{
+	struct cp_state *st = cp_new();
+	struct agent_replica set[8];
+	int n = 0;
+
+	ATF_REQUIRE(st != NULL);
+	ATF_REQUIRE_EQ(0, cp_apply(st, "CREATE web 3 nginx:1.27"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ASSIGN web 0 n1"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ASSIGN web 1 n2"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ASSIGN web 2 n1"));
+
+	/* n1 hosts web-0 and web-2, each with the service image. */
+	ATF_REQUIRE_EQ(0, controller_node_assignments(st, "n1", set, 8, &n));
+	ATF_CHECK_EQ_MSG(2, n, "n1 should have 2 assignments, got %d", n);
+	for (int i = 0; i < n; i++) {
+		ATF_CHECK_STREQ("web", set[i].service);
+		ATF_CHECK_STREQ("nginx:1.27", set[i].image);
+		ATF_CHECK(set[i].replica_id == 0 || set[i].replica_id == 2);
+	}
+
+	/* n2 hosts only web-1. */
+	ATF_REQUIRE_EQ(0, controller_node_assignments(st, "n2", set, 8, &n));
+	ATF_CHECK_EQ(1, n);
+	ATF_CHECK_EQ(1, set[0].replica_id);
+
+	/* A node with nothing placed gets an empty set. */
+	ATF_REQUIRE_EQ(0, controller_node_assignments(st, "n3", set, 8, &n));
+	ATF_CHECK_EQ(0, n);
+	cp_free(st);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
+	ATF_TP_ADD_TC(tp, controller_node_assignments_slice);
 	ATF_TP_ADD_TC(tp, controller_initial_spread);
 	ATF_TP_ADD_TC(tp, controller_scale_up);
 	ATF_TP_ADD_TC(tp, controller_scale_down);

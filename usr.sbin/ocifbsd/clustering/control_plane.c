@@ -315,3 +315,24 @@ cp_node_replica_count(const struct cp_state *st, const char *node)
 			n++;
 	return (n);
 }
+
+int
+cp_placement_count(const struct cp_state *st)
+{
+	return (st != NULL ? st->npls : 0);
+}
+
+int
+cp_placement_at(const struct cp_state *st, int i, char *svc, size_t svclen,
+    int *id, char *node, size_t nodelen)
+{
+	if (st == NULL || i < 0 || i >= st->npls)
+		return (-1);
+	if (svc != NULL)
+		strlcpy(svc, st->pls[i].service, svclen);
+	if (id != NULL)
+		*id = st->pls[i].replica_id;
+	if (node != NULL)
+		strlcpy(node, st->pls[i].node, nodelen);
+	return (0);
+}

@@ -13,8 +13,43 @@
 
 #include "control_plane.h"
 #include "controller.h"
+#include "node_agent.h"
 
 #define CTRL_MAX_NODES	256
+
+int
+controller_node_assignments(const struct cp_state *st, const char *node,
+    struct agent_replica *out, int max, int *nout)
+{
+	int k = 0, npl;
+
+	if (st == NULL || node == NULL || out == NULL || nout == NULL)
+		return (-1);
+
+	npl = cp_placement_count(st);
+	for (int i = 0; i < npl; i++) {
+		char svc[128], n[256];
+		int id;
+		const char *img;
+
+		if (cp_placement_at(st, i, svc, sizeof(svc), &id, n,
+		    sizeof(n)) != 0)
+			continue;
+		if (strcmp(n, node) != 0)
+			continue;
+		if (k >= max)
+			return (-1);
+		memset(&out[k], 0, sizeof(out[k]));
+		strlcpy(out[k].service, svc, sizeof(out[k].service));
+		out[k].replica_id = id;
+		img = cp_service_image(st, svc);
+		if (img != NULL)
+			strlcpy(out[k].image, img, sizeof(out[k].image));
+		k++;
+	}
+	*nout = k;
+	return (0);
+}
 
 int
 controller_plan(const struct cp_state *st, const char *const *nodes,

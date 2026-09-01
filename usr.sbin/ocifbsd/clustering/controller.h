@@ -19,6 +19,16 @@
 #define OCIFBSD_CONTROLLER_H
 
 #include "control_plane.h"
+#include "node_agent.h"
+
+/*
+ * Build the assignment set for a single node: the replicas currently placed on
+ * `node` (with each service's image), as an agent_replica array to marshal and
+ * send to that node's agent over the mTLS channel. Writes up to max entries to
+ * out and sets *nout. Returns 0 on success, -1 on error.
+ */
+int	controller_node_assignments(const struct cp_state *st, const char *node,
+	    struct agent_replica *out, int max, int *nout);
 
 /*
  * Compute the placement commands to converge st toward its desired replica
