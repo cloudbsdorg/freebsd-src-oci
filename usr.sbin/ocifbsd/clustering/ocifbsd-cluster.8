@@ -1,0 +1,105 @@
+.\" Copyright (c) 2026 REVYTECH, Inc.
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+.\" IMPLIED WARRANTIES ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE
+.\" LIABLE FOR ANY DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE.
+.\"
+.\" $FreeBSD$
+.Dd September 1, 2026
+.Dt OCIFBSD-CLUSTER 8
+.Os
+.Sh NAME
+.Nm ocifbsd-cluster
+.Nd run an ocifbsd cluster node (gossip membership and Raft consensus)
+.Sh SYNOPSIS
+.Nm
+.Op Fl p Ar port
+.Op Fl P Ar host@ip
+.Op Fl s Ar statefile
+.Op Fl n Ar name
+.Op Fl i Ar interval
+.Cm run
+.Nm
+.Fl h | Fl v
+.Sh DESCRIPTION
+.Nm
+runs a single node of an ocifbsd cluster.
+Nodes discover one another through a UDP gossip protocol with SWIM-style
+failure detection, and agree on a replicated log through the Raft consensus
+algorithm: leader election, log replication with commit on a quorum,
+crash-durable persistence, dynamic membership, and log compaction with
+snapshots.
+.Pp
+The options are as follows:
+.Bl -tag -width ".Fl i Ar interval"
+.It Fl p , Fl Fl port Ar port
+UDP port for gossip and consensus traffic.
+The default is 6789.
+All nodes in a cluster must use the same port.
+.It Fl P , Fl Fl peer Ar host@ip
+A seed peer, given as its node name and reachable IP address
+.Pq for example Ar db1@192.168.1.241 .
+Repeat for each seed peer.
+A newly started node announces itself to its seed peers, so a running cluster
+learns of it automatically.
+.It Fl s , Fl Fl state Ar statefile
+Path to the Raft state file.
+When set, the current term, the vote, and the log are persisted here so the
+node recovers its state across a restart; when unset, state is kept only in
+memory.
+.It Fl n , Fl Fl name Ar name
+Override this node's identifier.
+The default is the host's name.
+.It Fl i , Fl Fl interval Ar interval
+Print a status line every
+.Ar interval
+seconds.
+The default is 0, which prints only when the role, term, or leader changes.
+.El
+.Pp
+The
+.Cm run
+operand starts the node and runs until it receives
+.Dv SIGINT
+or
+.Dv SIGTERM .
+Sending
+.Dv SIGINFO
+.Pq Ic Ctrl-T
+prints the node's current status on demand.
+.Sh EXAMPLES
+Start a three-node cluster, one command per host, all on the default port with
+persistent state:
+.Bd -literal -offset indent
+# on n1 (192.168.1.240)
+ocifbsd-cluster -s /var/db/ocifbsd/raft \e
+    -P n2@192.168.1.241 -P n3@192.168.1.242 run
+
+# on n2 (192.168.1.241)
+ocifbsd-cluster -s /var/db/ocifbsd/raft \e
+    -P n1@192.168.1.240 -P n3@192.168.1.242 run
+
+# on n3 (192.168.1.242)
+ocifbsd-cluster -s /var/db/ocifbsd/raft \e
+    -P n1@192.168.1.240 -P n2@192.168.1.241 run
+.Ed
+.Sh SEE ALSO
+.Xr ocifbsd 8
+.Sh AUTHORS
+This software was developed by
+.An REVYTECH, Inc.
+.Sh SECURITY CONSIDERATIONS
+Cluster traffic is carried over UDP on the configured port; restrict that port
+to the trusted cluster network with the host firewall.
+Raft state files contain the replicated log and should be readable only by the
+account that runs the node.

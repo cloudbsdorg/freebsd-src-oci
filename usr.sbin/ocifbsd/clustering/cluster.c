@@ -388,7 +388,6 @@ cluster_join(const char *manager_address)
 int
 cluster_leave(const char *reason)
 {
-    struct gossip_message msg;
     char payload[512];
     size_t payload_len;
     
@@ -2082,9 +2081,9 @@ cluster_nodes_json(char **json_out, size_t *json_len)
 {
     struct cluster_node **nodes;
     char *json, *p;
-    size_t json_size, written;
+    size_t json_size;
     int count, i;
-    
+
     if (json_out == NULL)
         return (-1);
     
