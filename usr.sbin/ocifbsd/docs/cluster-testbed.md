@@ -60,6 +60,20 @@ cluster_pki_issue_node("/var/db/ocifbsd/pki", "freebsd-16-1");
 - **Provisioned and reachable:** 6 cluster nodes + 1 standalone.
 - **Build:** each node builds `ocifbsd` self-contained (no ports; `ldd` shows
   no `libcurl`/`libjson-c`).
-- **Offline PKI e2e:** green on FreeBSD 16 (CA + 6 node identities + verify).
-- **In progress:** the mTLS control channel, Raft-backed control state, and the
-  node agent that launches replicas remotely.
+
+Distributed-services stages, each built red-green and validated on this
+testbed:
+
+| Stage | What | Live validation |
+|-------|------|-----------------|
+| Placement | scheduler spread + cordon + cluster sync | unit |
+| Load balancer | `pf` round-robin/source-hash pools | ruleset validated with `pfctl -n` |
+| Raft-backed control state | replicated desired state (services/placements) | **3-node cluster: propose → replicate → apply, all converge** |
+| Offline internal CA | self-signed cluster PKI, no internet | CA + 6 node mTLS identities issued/verified |
+| mTLS control channel | mutual auth over the cluster CA | **cross-host handshake between two nodes** |
+| Node agent | assignment protocol + reconcile + apply | **assignment over mTLS → correct actions; agent LAUNCH/STOP creates and removes real containers** |
+
+- **Remaining:** unify the stages into one automatic daemon flow (leader
+  computes placements → sends assignments to each node's agent over mTLS →
+  agents launch), and measure image-pull fan-out to decide whether P2P layer
+  distribution is warranted.
