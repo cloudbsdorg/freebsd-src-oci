@@ -21,6 +21,8 @@
   ul.hi b { display: block; color: var(--accent); font-size: .95rem; }
   ul.hi span { color: var(--muted); font-size: .87rem; }
 
+  img.banner { width: 100%; height: auto; display: block; border-radius: 12px;
+               border: 1px solid var(--rule); margin: 0 0 1.5rem; }
   figure.arch { margin: 2rem 0 0; }
   figure.arch svg { width: 100%; height: auto; display: block;
                     border: 1px solid var(--rule); border-radius: 12px; background: var(--code-bg); }
@@ -44,6 +46,7 @@
 <body>
 
 <header class="hero">
+  <img class="banner" src="hero.png" alt="Isometric illustration of interconnected shipping containers, evoking OCI containers on FreeBSD">
   <h1>ocifbsd</h1>
   <p class="tag">FreeBSD-native OCI container runtime — jails as first-class containers.</p>
   <p class="lead">

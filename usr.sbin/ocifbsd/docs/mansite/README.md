@@ -18,8 +18,10 @@ vendored `contrib/` copies are skipped.
 
 ## Files
 
-- `index.html` — curated landing page: overview, feature highlights, a
-  theme-aware inline SVG architecture diagram, and a linked index of every page.
+- `index.html` — curated landing page: hero banner, overview, feature
+  highlights, a theme-aware inline SVG architecture diagram, and a linked index
+  of every page.
+- `hero.png` — hero banner image (1200×400) used at the top of the landing page.
 - `man.css` — stylesheet shared by the landing page and the rendered manual
   pages; supports light and dark color schemes via `prefers-color-scheme`.
 - `generate.sh` — the generator.

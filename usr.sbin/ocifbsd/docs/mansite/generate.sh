@@ -29,9 +29,10 @@ command -v mandoc >/dev/null 2>&1 || {
 
 mkdir -p "$out"
 
-# Curated, hand-authored front page and stylesheet.
+# Curated, hand-authored front page, stylesheet, and hero banner.
 cp "$here/index.html" "$out/index.html"
 cp "$here/man.css"    "$out/man.css"
+[ -f "$here/hero.png" ] && cp "$here/hero.png" "$out/hero.png"
 
 # Render every manual page in the tree, skipping the vendored contrib/ copies.
 count=0
