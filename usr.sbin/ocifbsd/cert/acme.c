@@ -119,13 +119,20 @@ struct http_result {
 	char		*location;	/* Location header, if any */
 };
 
+/* Hard cap on a single ACME response body — an order/authz/cert reply is a few
+ * KB; refuse a runaway (or hostile) response rather than growing without bound. */
+#define ACME_MAX_BODY  (8 * 1024 * 1024)
+
 static size_t
 body_cb(char *ptr, size_t size, size_t nmemb, void *userp)
 {
 	struct http_buf *b = userp;
 	size_t add = size * nmemb;
-	char *n = realloc(b->data, b->len + add + 1);
+	char *n;
 
+	if (b->len + add + 1 > ACME_MAX_BODY)
+		return (0);             /* abort the transfer */
+	n = realloc(b->data, b->len + add + 1);
 	if (n == NULL)
 		return (0);
 	b->data = n;
