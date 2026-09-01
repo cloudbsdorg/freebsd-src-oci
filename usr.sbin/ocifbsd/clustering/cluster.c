@@ -50,11 +50,49 @@
 #include <unistd.h>
 #include <sha256.h>
 
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+
 #include "cluster.h"
 #include "control_plane.h"
 #include "controller.h"
 #include "node_agent.h"
 #include "../include/ocifbsd.h"
+
+/*
+ * Gossip/Raft message authentication.
+ *
+ * The membership and Raft transport is UDP; committed Raft commands schedule
+ * and run containers, so an unauthenticated datagram is remote code execution
+ * on every node. When a cluster key is configured, every datagram carries a
+ * trailing HMAC-SHA256 tag over the whole message and packets that fail
+ * verification are dropped before any state is touched. With no key the cluster
+ * runs unauthenticated (the open default) and warns once at startup so the
+ * operator knows to confine the port to a trusted network or set a key.
+ */
+#define GOSSIP_HMAC_LEN 32
+static unsigned char g_gossip_key[128];
+static size_t g_gossip_key_len;
+
+static bool
+gossip_auth_enabled(void)
+{
+	return (g_gossip_key_len > 0);
+}
+
+/* One-shot HMAC-SHA256 of `data[0..len)` into out[GOSSIP_HMAC_LEN]. */
+static int
+gossip_hmac(const unsigned char *data, size_t len,
+    unsigned char out[GOSSIP_HMAC_LEN])
+{
+	unsigned int maclen = 0;
+
+	if (HMAC(EVP_sha256(), g_gossip_key, (int)g_gossip_key_len, data, len,
+	    out, &maclen) == NULL)
+		return (-1);
+	return (maclen == GOSSIP_HMAC_LEN ? 0 : -1);
+}
 
 /* Global cluster state */
 static struct cluster_config cluster_conf;
@@ -188,6 +226,26 @@ cluster_init(struct cluster_config *config)
     
     if (config != NULL) {
         memcpy(&cluster_conf, config, sizeof(struct cluster_config));
+        /*
+         * Derive the gossip/Raft HMAC key from the configured cluster key.
+         * With a key set, forged datagrams are dropped; without one the
+         * cluster is unauthenticated and we say so loudly.
+         */
+        if (cluster_conf.cluster_key != NULL &&
+            cluster_conf.cluster_key[0] != '\0') {
+            size_t kl = strlen(cluster_conf.cluster_key);
+
+            if (kl > sizeof(g_gossip_key))
+                kl = sizeof(g_gossip_key);
+            memcpy(g_gossip_key, cluster_conf.cluster_key, kl);
+            g_gossip_key_len = kl;
+            fprintf(stderr, "cluster: gossip/Raft authenticated "
+                "(HMAC-SHA256)\n");
+        } else {
+            fprintf(stderr, "warning: cluster gossip/Raft is "
+                "UNAUTHENTICATED (no cluster key set); confine the "
+                "cluster port to a trusted network or set a key\n");
+        }
     } else {
         memset(&cluster_conf, 0, sizeof(struct cluster_config));
         cluster_conf.cluster_port = 6789;
@@ -741,6 +799,24 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
     
     inet_ntop(AF_INET, &sender->sin_addr, sender_ip, sizeof(sender_ip));
 
+    /*
+     * Authenticate the datagram before touching any state. When a cluster key
+     * is set, every packet must carry a valid trailing HMAC-SHA256 tag; verify
+     * it in constant time and drop forged or unauthenticated packets. The tag
+     * is excluded from `len` so the rest of the handler sees only the real
+     * message.
+     */
+    if (gossip_auth_enabled()) {
+        unsigned char mac[GOSSIP_HMAC_LEN];
+
+        if (len < GOSSIP_HMAC_LEN)
+            return;
+        len -= GOSSIP_HMAC_LEN;
+        if (gossip_hmac(buf, len, mac) != 0 ||
+            CRYPTO_memcmp(mac, buf + len, GOSSIP_HMAC_LEN) != 0)
+            return;		/* forged or wrong key: drop */
+    }
+
     /* Validate message */
     if (len < offsetof(struct gossip_message, payload))
         return;
@@ -933,21 +1009,49 @@ gossip_send_message(const char *target_id, uint8_t type, const void *payload, si
     addr.sin_port = htons(target->port);
     inet_pton(AF_INET, target->ip, &addr.sin_addr);
     
-    /* Send */
-    iov[0].iov_base = &msg;
-    iov[0].iov_len = offsetof(struct gossip_message, payload);
-    iov[1].iov_base = (void *)payload;
-    iov[1].iov_len = len;
-    
-    memset(&mhdr, 0, sizeof(mhdr));
-    mhdr.msg_name = &addr;
-    mhdr.msg_namelen = sizeof(addr);
-    mhdr.msg_iov = iov;
-    mhdr.msg_iovlen = 2;
-    
-    pthread_mutex_lock(&gossip_lock);
-    sent = sendmsg(gossip_socket, &mhdr, 0);
-    pthread_mutex_unlock(&gossip_lock);
+    /*
+     * Send. When authenticated, serialize the datagram contiguously and
+     * append an HMAC-SHA256 tag over it; otherwise send header+payload as-is
+     * via the scatter/gather path.
+     */
+    if (gossip_auth_enabled()) {
+        size_t hdrlen = offsetof(struct gossip_message, payload);
+        size_t total = hdrlen + len;
+        unsigned char *pkt = malloc(total + GOSSIP_HMAC_LEN);
+
+        if (pkt == NULL) {
+            cluster_node_put(target);
+            return (-1);
+        }
+        memcpy(pkt, &msg, hdrlen);
+        if (len > 0)
+            memcpy(pkt + hdrlen, payload, len);
+        if (gossip_hmac(pkt, total, pkt + total) != 0) {
+            free(pkt);
+            cluster_node_put(target);
+            return (-1);
+        }
+        pthread_mutex_lock(&gossip_lock);
+        sent = sendto(gossip_socket, pkt, total + GOSSIP_HMAC_LEN, 0,
+            (struct sockaddr *)&addr, sizeof(addr));
+        pthread_mutex_unlock(&gossip_lock);
+        free(pkt);
+    } else {
+        iov[0].iov_base = &msg;
+        iov[0].iov_len = offsetof(struct gossip_message, payload);
+        iov[1].iov_base = (void *)payload;
+        iov[1].iov_len = len;
+
+        memset(&mhdr, 0, sizeof(mhdr));
+        mhdr.msg_name = &addr;
+        mhdr.msg_namelen = sizeof(addr);
+        mhdr.msg_iov = iov;
+        mhdr.msg_iovlen = 2;
+
+        pthread_mutex_lock(&gossip_lock);
+        sent = sendmsg(gossip_socket, &mhdr, 0);
+        pthread_mutex_unlock(&gossip_lock);
+    }
 
     cluster_node_put(target);
     return (sent >= 0 ? 0 : -1);

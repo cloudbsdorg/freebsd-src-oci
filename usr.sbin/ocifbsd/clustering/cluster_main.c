@@ -224,6 +224,33 @@ main(int argc, char **argv)
 	cfg.node_timeout = 10000;
 	cfg.max_payload_size = 65000;
 
+	/*
+	 * Optional shared key authenticates gossip/Raft with HMAC-SHA256. Prefer
+	 * a key file (OCIFBSD_CLUSTER_KEYFILE) since it is not visible in ps(1) or
+	 * the environment; fall back to OCIFBSD_CLUSTER_KEY. With neither set, the
+	 * cluster runs unauthenticated and the library warns at startup.
+	 */
+	{
+		static char keybuf[256];
+		const char *keyfile = getenv("OCIFBSD_CLUSTER_KEYFILE");
+		const char *keyenv = getenv("OCIFBSD_CLUSTER_KEY");
+
+		if (keyfile != NULL && keyfile[0] != '\0') {
+			FILE *kf = fopen(keyfile, "r");
+
+			if (kf == NULL)
+				err(1, "cannot open cluster key file %s", keyfile);
+			if (fgets(keybuf, sizeof(keybuf), kf) != NULL) {
+				keybuf[strcspn(keybuf, "\r\n")] = '\0';
+				if (keybuf[0] != '\0')
+					cfg.cluster_key = keybuf;
+			}
+			fclose(kf);
+		} else if (keyenv != NULL && keyenv[0] != '\0') {
+			cfg.cluster_key = (char *)keyenv;
+		}
+	}
+
 	if (cluster_init(&cfg) != 0)
 		errx(1, "cluster_init failed");
 	raft_init();
