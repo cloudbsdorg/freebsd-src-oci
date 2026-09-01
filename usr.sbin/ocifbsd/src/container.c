@@ -240,6 +240,18 @@ container_free(struct ocifbsd_container *c)
 	if (c == NULL)
 		return;
 
+	/*
+	 * Detach from the registry before freeing. container_get_by_id()
+	 * registers any container it loads from disk, so a caller that looks
+	 * one up and then frees it would otherwise leave a dangling pointer in
+	 * container_registry; the next lookup of the same id would return freed
+	 * memory. Unregister first (it matches on c->id, so it must run before
+	 * c->id is freed). A container that was never registered simply matches
+	 * nothing, which is harmless.
+	 */
+	if (c->id != NULL)
+		(void)container_unregister(c->id);
+
 	free(c->id);
 	free(c->name);
 	free(c->rootfs);
