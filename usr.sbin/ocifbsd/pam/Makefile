@@ -17,10 +17,6 @@ MAN=	pam_ocifbsd.8
 # pam, util, crypto, z are in FreeBSD base; md is libmd for SHA256/HMAC/base64
 LIBADD=	 pam util crypto z md
 
-# json-c is a port (not in FreeBSD base). Port path + LDADD.
-# Install on VM with:  sudo pkg install json-c
-LDFLAGS+=	-L/usr/local/lib
-
 CFLAGS+=	-I${SRCDIR}/include
 CFLAGS+=	-I${SRCDIR}/security-daemon
 

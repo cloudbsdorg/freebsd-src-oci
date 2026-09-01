@@ -11,11 +11,6 @@ MAN=		ocifbsd_network.3
 
 # json-c is a port (not in FreeBSD base). cni.c uses json_object_*.
 # Same pattern as main Makefile: CFLAGS/LDFLAGS add the /usr/local
-# paths, LDADD adds . Install on VM with:
-#   sudo pkg install json-c
-CFLAGS+=	-I/usr/local/include
-LDFLAGS+=	-L/usr/local/lib
-
 WARNS?=		3
 
 # json-c is vendored in-tree (contrib/json-c); no port needed.

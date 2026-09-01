@@ -15,10 +15,6 @@ MAN=	ocifbsd-gc.8
 # m, z, crypto, pthread, util are in FreeBSD base
 LIBADD=	 m z crypto pthread util
 
-# json-c is a port (not in FreeBSD base). Port path + LDADD.
-# Install on VM with:  sudo pkg install json-c
-LDFLAGS+=	-L/usr/local/lib
-
 CFLAGS+=	-I${SRCDIR}/include
 
 WARNS?=	3

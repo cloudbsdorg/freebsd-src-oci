@@ -11,13 +11,7 @@ SHLIB_NAME=	ocifbsd_orchestration.so.1
 MAN=	ocifbsd_orchestration.3
 
 # json-c is a port (not in FreeBSD base). The orchestration
-# subdir uses json_object_* in pod.c and stack.c. <sys/json.h>
-# was removed from FreeBSD 16 base, so we use the port path.
-# Install on VM with:
-#   sudo pkg install json-c
-CFLAGS+=	-I/usr/local/include
-LDFLAGS+=	-L/usr/local/lib
-
+# pod.c and stack.c use json_object_* from the vendored json-c (below).
 WARNS?=	3
 
 # json-c is vendored in-tree (contrib/json-c); no port needed.
