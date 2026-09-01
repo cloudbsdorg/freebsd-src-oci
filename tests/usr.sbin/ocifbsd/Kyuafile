@@ -5,6 +5,7 @@ syntax(2)
 test_suite("FreeBSD")
 
 atf_test_program{name="cli_test", }
+atf_test_program{name="cluster_mtls_test", }
 atf_test_program{name="cluster_pki_test", }
 atf_test_program{name="control_plane_test", }
 atf_test_program{name="ensemble_test", }

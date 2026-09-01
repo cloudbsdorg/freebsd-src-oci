@@ -24,7 +24,8 @@ ATF_TESTS_C=	parser_test ensemble_test utils_test oci2jail_test hooks_test \
 		image_ref_test whiteout_test image_parse_test unpack_layer_test \
 		netcfg_test jsonfmt_test logd_forward_test registries_test \
 		lb_test sched_test sched_sync_test \
-		cluster_pki_test control_plane_test
+		cluster_pki_test control_plane_test \
+		cluster_mtls_test
 ATF_TESTS_SH=	cli_test lifecycle_test
 
 # convert/ sources compile at WARNS=3; match for #include tests
@@ -84,5 +85,6 @@ LIBADD.logd_forward_test+=	pthread
 # cluster_pki_test #includes clustering/cluster_pki.c (OpenSSL X509)
 CFLAGS+=	-I${.CURDIR}/../../../usr.sbin/ocifbsd/clustering
 LIBADD.cluster_pki_test+=	crypto ssl
+LIBADD.cluster_mtls_test+=	crypto ssl pthread
 
 .include <bsd.test.mk>
