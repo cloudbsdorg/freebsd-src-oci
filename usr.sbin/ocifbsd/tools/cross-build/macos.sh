@@ -188,11 +188,16 @@ else
 fi
 
 # === Step 4: LLVM toolchain ===
-hdr "Step 4/5: LLVM toolchain (clang, lld, lldb)"
+hdr "Step 4/5: LLVM toolchain (clang, clang++, lld)"
 # In LLVM 19+, lld was split into a separate brew package.
 # So we need to check both $LLVM_PREFIX/bin/ and $BREW_PREFIX/bin/ for lld.
+#
+# Only clang/clang++ (compile) and lld (link) are required to cross-build.
+# lldb is a debugger, not part of the build; some llvm bottles (e.g. on
+# pre-release macOS) omit it, and Xcode CLT ships one anyway, so it is
+# checked warn-only below and never fails the setup.
 LLVM_OK=true
-for tool in clang clang++ lldb; do
+for tool in clang clang++; do
     if [ -x "$LLVM_PREFIX/bin/$tool" ]; then
         log "$tool: $("$LLVM_PREFIX/bin/$tool" --version 2>&1 | head -1)"
     else
@@ -200,6 +205,14 @@ for tool in clang clang++ lldb; do
         LLVM_OK=false
     fi
 done
+# lldb (optional, debug-only): prefer the llvm one, fall back to Xcode CLT.
+if [ -x "$LLVM_PREFIX/bin/lldb" ]; then
+    log "lldb: $("$LLVM_PREFIX/bin/lldb" --version 2>&1 | head -1) (optional)"
+elif xcrun -f lldb >/dev/null 2>&1; then
+    log "lldb: $(xcrun -f lldb) (optional, from Xcode CLT)"
+else
+    warn "lldb: not found (optional; debugging only, not needed to build)"
+fi
 # lld: check both locations
 if [ -x "$LLVM_PREFIX/bin/lld" ]; then
     log "lld: $("$LLVM_PREFIX/bin/lld" --version 2>&1 | head -1) (in llvm prefix)"
@@ -227,9 +240,9 @@ else
             brew install lld
             log "lld: installed"
         fi
-        # Re-verify
+        # Re-verify (only the build tools; lldb is optional, see above).
         MISSING=false
-        for tool in clang clang++ lldb; do
+        for tool in clang clang++; do
             if [ ! -x "$LLVM_PREFIX/bin/$tool" ]; then
                 err "$tool still not found at $LLVM_PREFIX/bin/$tool after install"
                 MISSING=true
