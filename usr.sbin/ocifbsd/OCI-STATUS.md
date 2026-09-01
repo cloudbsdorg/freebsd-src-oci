@@ -735,7 +735,7 @@ of exactly what changed. SSH is fine for things git can't carry
   to Makefile (json-c is a port, not in FreeBSD base; LIBADD
   validates against src.libnames.mk so port libs must go through
   LDADD with explicit path).
-- Fixed `ocifbsd.c` pre-existing Klara-AI bugs: variable shadowed
+- Fixed `ocifbsd.c` pre-existing AI-introduced bugs: variable shadowed
   function (`canonical_name = canonical_name(name)`), missing
   `<strings.h>` for `strncasecmp`, missing `<pthread.h>` in
   `src/container.c`, missing `static` on global `opt` struct
