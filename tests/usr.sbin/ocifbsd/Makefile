@@ -5,7 +5,7 @@
 #
 # Unit (C ATF) — sources #include'd like image_ref_test (no SRCS from
 # outside the test dir; FreeBSD bsd.dep.mk forbids $OBJS under $SRCTOP):
-#   parser_test / k8s_test     — convert module
+#   parser_test / ensemble_test     — convert module
 #   utils_test                 — src/utils.c pure helpers
 #   oci2jail_test / hooks_test — runtime/spec helpers
 #   image_ref_test             — reference + paths (no network)
@@ -20,7 +20,7 @@
 # ocifbsd_test.c.disabled is preserved for history; it referenced
 # APIs that never landed.
 
-ATF_TESTS_C=	parser_test k8s_test utils_test oci2jail_test hooks_test \
+ATF_TESTS_C=	parser_test ensemble_test utils_test oci2jail_test hooks_test \
 		image_ref_test whiteout_test image_parse_test unpack_layer_test \
 		netcfg_test jsonfmt_test logd_forward_test
 ATF_TESTS_SH=	cli_test lifecycle_test

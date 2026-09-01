@@ -41,10 +41,10 @@
  * Conversion source types
  */
 typedef enum {
-	CONVERT_K8S_YAML = 0,
-	CONVERT_K8S_JSON,
-	CONVERT_DOCKER_COMPOSE,
-	CONVERT_DOCKER_STACK
+	CONVERT_ENSEMBLE_YAML = 0,
+	CONVERT_ENSEMBLE_JSON,
+	CONVERT_ENSEMBLE_SERVICES,
+	CONVERT_ENSEMBLE_STACK
 } convert_source_type_t;
 
 /*
@@ -116,35 +116,35 @@ int	convert_buffer(const char *input, size_t len, char **output,
 	    struct convert_options *opts);
 
 /*
- * Kubernetes conversion
+ * Ensemble conversion
  */
-int	k8s_convert_deployment(const char *yaml, char **output,
+int	ensemble_convert_deployment(const char *yaml, char **output,
 	    struct convert_options *opts);
-int	k8s_convert_service(const char *yaml, char **output,
+int	ensemble_convert_service(const char *yaml, char **output,
 	    struct convert_options *opts);
-int	k8s_convert_configmap(const char *yaml, char **output,
+int	ensemble_convert_configmap(const char *yaml, char **output,
 	    struct convert_options *opts);
-int	k8s_convert_secret(const char *yaml, char **output,
+int	ensemble_convert_secret(const char *yaml, char **output,
 	    struct convert_options *opts);
-int	k8s_convert_ingress(const char *yaml, char **output,
+int	ensemble_convert_ingress(const char *yaml, char **output,
 	    struct convert_options *opts);
-int	k8s_convert_persistentvolumeclaim(const char *yaml, char **output,
+int	ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
 	    struct convert_options *opts);
-int	k8s_convert_namespace(const char *yaml, char **output,
+int	ensemble_convert_namespace(const char *yaml, char **output,
 	    struct convert_options *opts);
-int	k8s_convert_multi(const char *yaml, char **output,
+int	ensemble_convert_multi(const char *yaml, char **output,
 	    struct convert_options *opts);
 
 /*
- * Docker Compose conversion
+ * Ensemble conversion
  */
-int	docker_compose_convert(const char *compose, char **output,
+int	ensemble_services_convert(const char *compose, char **output,
 	    struct convert_options *opts);
-int	docker_compose_convert_v1(const char *compose, char **output,
+int	ensemble_services_convert_v1(const char *compose, char **output,
 	    struct convert_options *opts);
-int	docker_compose_convert_v2(const char *compose, char **output,
+int	ensemble_services_convert_v2(const char *compose, char **output,
 	    struct convert_options *opts);
-int	docker_compose_convert_v3(const char *compose, char **output,
+int	ensemble_services_convert_v3(const char *compose, char **output,
 	    struct convert_options *opts);
 
 /*

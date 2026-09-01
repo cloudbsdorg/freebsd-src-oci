@@ -28,7 +28,7 @@
  *
  * $FreeBSD$
  *
- * Kubernetes YAML/JSON to Native format converter
+ * Ensemble YAML/JSON to Native format converter
  */
 
 #include <sys/param.h>
@@ -40,37 +40,37 @@
 #include "convert.h"
 
 /*
- * K8s resource types
+ * Ensemble resource types
  */
 typedef enum {
-	K8S_DEPLOYMENT = 0,
-	K8S_SERVICE,
-	K8S_CONFIGMAP,
-	K8S_SECRET,
-	K8S_INGRESS,
-	K8S_PVC,
-	K8S_NAMESPACE,
-	K8S_POD,
-	K8S_STATEFULSET,
-	K8S_DAEMONSET,
-	K8S_JOB,
-	K8S_CRONJOB,
-	K8S_UNKNOWN
-} k8s_kind_t;
+	ENSEMBLE_DEPLOYMENT = 0,
+	ENSEMBLE_SERVICE,
+	ENSEMBLE_CONFIGMAP,
+	ENSEMBLE_SECRET,
+	ENSEMBLE_INGRESS,
+	ENSEMBLE_PVC,
+	ENSEMBLE_NAMESPACE,
+	ENSEMBLE_POD,
+	ENSEMBLE_STATEFULSET,
+	ENSEMBLE_DAEMONSET,
+	ENSEMBLE_JOB,
+	ENSEMBLE_CRONJOB,
+	ENSEMBLE_UNKNOWN
+} ensemble_kind_t;
 
 /*
- * Detect K8s resource kind
+ * Detect Ensemble resource kind
  */
-static k8s_kind_t
-k8s_detect_kind(const char *yaml)
+static ensemble_kind_t
+ensemble_detect_kind(const char *yaml)
 {
 	if (strstr(yaml, "kind:") == NULL)
-		return (K8S_UNKNOWN);
+		return (ENSEMBLE_UNKNOWN);
 	
 	/* Extract kind value */
 	const char *p = strstr(yaml, "kind:");
 	if (p == NULL)
-		return (K8S_UNKNOWN);
+		return (ENSEMBLE_UNKNOWN);
 	
 	p += 5;
 	while (isspace((unsigned char)*p))
@@ -89,20 +89,20 @@ k8s_detect_kind(const char *yaml)
 		size_t klen;
 		static const struct {
 			const char	*name;
-			k8s_kind_t	 kind;
+			ensemble_kind_t	 kind;
 		} kinds[] = {
-			{ "Deployment", K8S_DEPLOYMENT },
-			{ "Service", K8S_SERVICE },
-			{ "ConfigMap", K8S_CONFIGMAP },
-			{ "Secret", K8S_SECRET },
-			{ "Ingress", K8S_INGRESS },
-			{ "PersistentVolumeClaim", K8S_PVC },
-			{ "Namespace", K8S_NAMESPACE },
-			{ "Pod", K8S_POD },
-			{ "StatefulSet", K8S_STATEFULSET },
-			{ "DaemonSet", K8S_DAEMONSET },
-			{ "Job", K8S_JOB },
-			{ "CronJob", K8S_CRONJOB },
+			{ "Deployment", ENSEMBLE_DEPLOYMENT },
+			{ "Service", ENSEMBLE_SERVICE },
+			{ "ConfigMap", ENSEMBLE_CONFIGMAP },
+			{ "Secret", ENSEMBLE_SECRET },
+			{ "Ingress", ENSEMBLE_INGRESS },
+			{ "PersistentVolumeClaim", ENSEMBLE_PVC },
+			{ "Namespace", ENSEMBLE_NAMESPACE },
+			{ "Pod", ENSEMBLE_POD },
+			{ "StatefulSet", ENSEMBLE_STATEFULSET },
+			{ "DaemonSet", ENSEMBLE_DAEMONSET },
+			{ "Job", ENSEMBLE_JOB },
+			{ "CronJob", ENSEMBLE_CRONJOB },
 		};
 		size_t i;
 
@@ -118,7 +118,7 @@ k8s_detect_kind(const char *yaml)
 		}
 	}
 
-	return (K8S_UNKNOWN);
+	return (ENSEMBLE_UNKNOWN);
 }
 
 /*
@@ -177,10 +177,10 @@ yaml_get_field(const char *yaml, const char *field)
 }
 
 /*
- * Convert K8s Deployment to native format
+ * Convert Ensemble Deployment to native format
  */
 int
-k8s_convert_deployment(const char *yaml, char **output,
+ensemble_convert_deployment(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
@@ -195,7 +195,7 @@ k8s_convert_deployment(const char *yaml, char **output,
 	/* Build simplified output */
 	char *result;
 	asprintf(&result,
-	    "# Converted from Kubernetes Deployment\n"
+	    "# Converted from Ensemble Deployment\n"
 	    "# Original: %s/%s\n"
 	    "\n"
 	    "name: %s\n"
@@ -230,10 +230,10 @@ k8s_convert_deployment(const char *yaml, char **output,
 }
 
 /*
- * Convert K8s Service to native format
+ * Convert Ensemble Service to native format
  */
 int
-k8s_convert_service(const char *yaml, char **output,
+ensemble_convert_service(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
@@ -245,7 +245,7 @@ k8s_convert_service(const char *yaml, char **output,
 	
 	char *result;
 	asprintf(&result,
-	    "# Converted from Kubernetes Service\n"
+	    "# Converted from Ensemble Service\n"
 	    "# Original: %s/%s\n"
 	    "\n"
 	    "# Service definition (referenced by deployment)\n"
@@ -281,10 +281,10 @@ k8s_convert_service(const char *yaml, char **output,
 }
 
 /*
- * Convert K8s ConfigMap to native format
+ * Convert Ensemble ConfigMap to native format
  */
 int
-k8s_convert_configmap(const char *yaml, char **output,
+ensemble_convert_configmap(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
@@ -292,7 +292,7 @@ k8s_convert_configmap(const char *yaml, char **output,
 	
 	char *result;
 	asprintf(&result,
-	    "# Converted from Kubernetes ConfigMap\n"
+	    "# Converted from Ensemble ConfigMap\n"
 	    "# Original: %s/%s\n"
 	    "\n"
 	    "name: %s\n"
@@ -316,10 +316,10 @@ k8s_convert_configmap(const char *yaml, char **output,
 }
 
 /*
- * Convert K8s Secret to native format
+ * Convert Ensemble Secret to native format
  */
 int
-k8s_convert_secret(const char *yaml, char **output,
+ensemble_convert_secret(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
@@ -327,14 +327,14 @@ k8s_convert_secret(const char *yaml, char **output,
 	
 	char *result;
 	asprintf(&result,
-	    "# Converted from Kubernetes Secret\n"
+	    "# Converted from Ensemble Secret\n"
 	    "# Original: %s/%s\n"
 	    "\n"
 	    "name: %s\n"
 	    "namespace: %s\n"
 	    "secrets:\n"
 	    "  # Note: Secret data must be base64 encoded\n"
-	    "  # type: opaque | kubernetes.io/tls | etc.\n"
+	    "  # type: opaque | ensemble.io/tls | etc.\n"
 	    "  # data:\n"
 	    "  #   key: <base64-encoded-value>\n",
 	    namespace ? namespace : "default",
@@ -352,10 +352,10 @@ k8s_convert_secret(const char *yaml, char **output,
 }
 
 /*
- * Convert K8s Ingress to native format
+ * Convert Ensemble Ingress to native format
  */
 int
-k8s_convert_ingress(const char *yaml, char **output,
+ensemble_convert_ingress(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
@@ -363,7 +363,7 @@ k8s_convert_ingress(const char *yaml, char **output,
 	
 	char *result;
 	asprintf(&result,
-	    "# Converted from Kubernetes Ingress\n"
+	    "# Converted from Ensemble Ingress\n"
 	    "# Original: %s/%s\n"
 	    "\n"
 	    "name: %s\n"
@@ -395,10 +395,10 @@ k8s_convert_ingress(const char *yaml, char **output,
 }
 
 /*
- * Convert K8s PVC to native format
+ * Convert Ensemble PVC to native format
  */
 int
-k8s_convert_persistentvolumeclaim(const char *yaml, char **output,
+ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
@@ -407,7 +407,7 @@ k8s_convert_persistentvolumeclaim(const char *yaml, char **output,
 	
 	char *result;
 	asprintf(&result,
-	    "# Converted from Kubernetes PersistentVolumeClaim\n"
+	    "# Converted from Ensemble PersistentVolumeClaim\n"
 	    "# Original: %s/%s\n"
 	    "\n"
 	    "name: %s\n"
@@ -436,17 +436,17 @@ k8s_convert_persistentvolumeclaim(const char *yaml, char **output,
 }
 
 /*
- * Convert K8s Namespace to native format
+ * Convert Ensemble Namespace to native format
  */
 int
-k8s_convert_namespace(const char *yaml, char **output,
+ensemble_convert_namespace(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 	
 	char *result;
 	asprintf(&result,
-	    "# Converted from Kubernetes Namespace\n"
+	    "# Converted from Ensemble Namespace\n"
 	    "\n"
 	    "# Namespace definition\n"
 	    "name: %s\n",
@@ -461,10 +461,10 @@ k8s_convert_namespace(const char *yaml, char **output,
 }
 
 /*
- * Convert multi-document K8s YAML
+ * Convert multi-document Ensemble YAML
  */
 int
-k8s_convert_multi(const char *yaml, char **output,
+ensemble_convert_multi(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *result = NULL;
@@ -475,7 +475,7 @@ k8s_convert_multi(const char *yaml, char **output,
 	/* Add header */
 	asprintf(&result,
 	    "# Native OCI FreeBSD Configuration\n"
-	    "# Converted from Kubernetes YAML\n"
+	    "# Converted from Ensemble YAML\n"
 	    "# Generated by ocifbsd-convert\n"
 	    "\n"
 	    "version: \"1.0\"\n"
@@ -496,7 +496,7 @@ k8s_convert_multi(const char *yaml, char **output,
 		size_t doc_len;
 		const char *doc_start;
 		const char *doc_end;
-		k8s_kind_t kind;
+		ensemble_kind_t kind;
 		char *converted = NULL;
 		int ret;
 
@@ -521,29 +521,29 @@ k8s_convert_multi(const char *yaml, char **output,
 		memcpy(doc, doc_start, doc_len);
 		doc[doc_len] = '\0';
 		
-		kind = k8s_detect_kind(doc);
+		kind = ensemble_detect_kind(doc);
 		
 		switch (kind) {
-		case K8S_DEPLOYMENT:
-			ret = k8s_convert_deployment(doc, &converted, opts);
+		case ENSEMBLE_DEPLOYMENT:
+			ret = ensemble_convert_deployment(doc, &converted, opts);
 			break;
-		case K8S_SERVICE:
-			ret = k8s_convert_service(doc, &converted, opts);
+		case ENSEMBLE_SERVICE:
+			ret = ensemble_convert_service(doc, &converted, opts);
 			break;
-		case K8S_CONFIGMAP:
-			ret = k8s_convert_configmap(doc, &converted, opts);
+		case ENSEMBLE_CONFIGMAP:
+			ret = ensemble_convert_configmap(doc, &converted, opts);
 			break;
-		case K8S_SECRET:
-			ret = k8s_convert_secret(doc, &converted, opts);
+		case ENSEMBLE_SECRET:
+			ret = ensemble_convert_secret(doc, &converted, opts);
 			break;
-		case K8S_INGRESS:
-			ret = k8s_convert_ingress(doc, &converted, opts);
+		case ENSEMBLE_INGRESS:
+			ret = ensemble_convert_ingress(doc, &converted, opts);
 			break;
-		case K8S_PVC:
-			ret = k8s_convert_persistentvolumeclaim(doc, &converted, opts);
+		case ENSEMBLE_PVC:
+			ret = ensemble_convert_persistentvolumeclaim(doc, &converted, opts);
 			break;
-		case K8S_NAMESPACE:
-			ret = k8s_convert_namespace(doc, &converted, opts);
+		case ENSEMBLE_NAMESPACE:
+			ret = ensemble_convert_namespace(doc, &converted, opts);
 			break;
 		default:
 			asprintf(&converted, "# Skipped unknown kind\n");

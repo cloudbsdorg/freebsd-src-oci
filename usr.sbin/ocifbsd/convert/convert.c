@@ -148,26 +148,26 @@ detect_source_type(const char *filename, const char *content)
 		ext = strrchr(filename, '.');
 		if (ext != NULL) {
 			if (strcmp(ext, ".yaml") == 0 || strcmp(ext, ".yml") == 0)
-				return (CONVERT_K8S_YAML);
+				return (CONVERT_ENSEMBLE_YAML);
 			if (strcmp(ext, ".json") == 0) {
-				/* Check if it's k8s or compose */
+				/* Check if it's ensemble or compose */
 				if (strstr(content, "\"apiVersion\"") != NULL)
-					return (CONVERT_K8S_JSON);
+					return (CONVERT_ENSEMBLE_JSON);
 				if (strstr(content, "\"version\"") != NULL &&
 				    strstr(content, "\"services\"") != NULL)
-					return (CONVERT_DOCKER_COMPOSE);
-				return (CONVERT_K8S_JSON);
+					return (CONVERT_ENSEMBLE_SERVICES);
+				return (CONVERT_ENSEMBLE_JSON);
 			}
 		}
 	}
 	
 	/* Try to detect from content */
 	if (strstr(content, "apiVersion:") != NULL)
-		return (CONVERT_K8S_YAML);
+		return (CONVERT_ENSEMBLE_YAML);
 	if (strstr(content, "services:") != NULL)
-		return (CONVERT_DOCKER_COMPOSE);
+		return (CONVERT_ENSEMBLE_SERVICES);
 	
-	return (CONVERT_K8S_YAML);
+	return (CONVERT_ENSEMBLE_YAML);
 }
 
 /*
@@ -252,7 +252,7 @@ convert_stdin(const char *output_path, struct convert_options *opts)
 	/*
 	 * Read all of stdin, growing the buffer as needed. The previous loop
 	 * broke once the fixed 4 KiB buffer filled, silently truncating any
-	 * manifest larger than 4095 bytes (real k8s manifests routinely
+	 * manifest larger than 4095 bytes (real ensemble manifests routinely
 	 * exceed that).
 	 */
 	for (;;) {
@@ -314,12 +314,12 @@ convert_buffer(const char *input, size_t len, char **output,
 	type = detect_source_type(NULL, input);
 	
 	switch (type) {
-	case CONVERT_K8S_YAML:
-	case CONVERT_K8S_JSON:
-		ret = k8s_convert_multi(input, &result, opts);
+	case CONVERT_ENSEMBLE_YAML:
+	case CONVERT_ENSEMBLE_JSON:
+		ret = ensemble_convert_multi(input, &result, opts);
 		break;
-	case CONVERT_DOCKER_COMPOSE:
-		ret = docker_compose_convert(input, &result, opts);
+	case CONVERT_ENSEMBLE_SERVICES:
+		ret = ensemble_services_convert(input, &result, opts);
 		break;
 	default:
 		ret = CONVERT_UNSUPPORTED_FEATURE;
