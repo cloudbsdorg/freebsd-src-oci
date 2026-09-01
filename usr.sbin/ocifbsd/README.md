@@ -11,7 +11,12 @@
 - **Networking**: Bridge, VNET, CNI plugin support
 - **Resource Limits**: Memory, CPU, process limits via RCTL
 - **Security**: MAC labels, RBAC, secrets
-- **Clustering**: Multi-node support with gossip protocol and Raft consensus
+- **Clustering**: Multi-node support with a gossip protocol and full Raft
+  consensus (leader election, log replication, persistence, membership
+  changes, and log compaction/snapshots), exposed via the `ocifbsd-cluster(8)`
+  daemon
+- **Certificates**: Native ACME (RFC 8555) client with ES256/JWS, HTTP-01
+  challenges, rotation and backup — built on base OpenSSL 3
 - **Config Conversion**: Convert Kubernetes YAML and Docker Compose to native format
 
 ## Quick Start
@@ -95,28 +100,34 @@ ocifbsd-convert docker-compose.yml --format native > output.yaml
 
 ## Architecture
 
+All SUBDIRs are active and build clean on FreeBSD 16 (BOOTSTRAP 100% complete):
+
 ```
 ocifbsd
 ├── src/               # Core runtime (container lifecycle, hooks, OCI translation)
-├── api/               # REST API server        [active, builds clean]
-├── clustering/        # Clustering (gossip, Raft)  [active, builds clean]
-├── convert/           # Config conversion (K8s, Compose)  [active, builds clean]
-├── metrics/           # Metrics collection     [active, builds clean]
-├── namespace/         # Namespace isolation    [active, builds clean]
-├── security-daemon/   # Security daemon (RBAC, secrets, TLS)  [active, builds clean]
-│
-# 9 SUBDIRs below are commented out in the Makefile — deferred
-# AI-slop refactor work. See OCI-STATUS.md §5 for details.
-# ├── cert/              # Certificate management
-# ├── export/            # Cloud export (AWS, GCP, Azure)
-# ├── gc/                # Garbage collection
-# ├── image/             # Image management (pull, push, unpack, ZFS storage)
-# ├── logd/              # Logging daemon
-# ├── network/           # Networking (bridge, VNET, CNI)
-# ├── orchestration/     # Orchestration (pods, stacks, services, health checks)
-# ├── pam/               # PAM authentication
-# └── security/          # Security (RCTL, MAC labels)
+├── api/               # REST API server
+├── cert/              # Certificate management (ACME/RFC 8555, rotation, backup)
+├── clustering/        # Clustering (gossip + full Raft consensus)
+├── convert/           # Config conversion (K8s, Compose)
+├── export/            # Cloud export scaffolding (AWS, GCP, Azure)
+├── gc/                # Garbage collection
+├── image/             # Image management (pull, push, unpack, ZFS storage)
+├── logd/              # Logging daemon (+ remote HTTP forwarding)
+├── metrics/           # Metrics collection
+├── namespace/         # Namespace isolation
+├── network/           # Networking (bridge, VNET, CNI)
+├── orchestration/     # Orchestration (pods, stacks, services, health checks)
+├── pam/               # PAM authentication
+├── security/          # Security (RCTL, MAC labels)
+├── security-daemon/   # Security daemon (RBAC, secrets, TLS)
+└── contrib/json-c/    # Vendored json-c 0.18 (MIT) — built in-tree, no port
 ```
+
+**Self-contained build:** the JSON dependency (json-c) is vendored under
+`contrib/json-c` and built as a private static library, so the tree builds
+without the json-c port. The toolchain is entirely FreeBSD base clang/lld +
+bmake, and there is **no GPL/copyleft** dependency anywhere (see
+[LICENSING-DEPS.md](LICENSING-DEPS.md)).
 
 ## Configuration
 
@@ -193,6 +204,7 @@ cluster:
 | `ocifbsd cluster leave` | Leave a cluster |
 | `ocifbsd cluster status` | Show cluster status |
 | `ocifbsd node list` | List cluster nodes |
+| `ocifbsd-cluster` | Run the Raft cluster daemon (see `ocifbsd-cluster(8)`) |
 
 ### Config Conversion
 
