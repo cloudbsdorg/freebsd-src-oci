@@ -4,7 +4,40 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-09-01 — fully self-contained build (libcurl vendored)
+> **Last updated**: 2026-09-01 — full test suite green (209/209), self-contained tests, runtime crash fixed
+
+## ✅ **2026-09-01 — Full suite 209/209 green; self-contained tests; runtime fixes**
+
+The complete ATF suite now passes end to end with **nothing skipped**:
+`209/209 passed (0 broken, 0 failed, 0 skipped)` via `kyua test` in the build
+objdir, including the `cli_test` and `lifecycle_test` integration tests that
+create/start/kill/delete real jails against the runtime binary. Three fixes
+landed to get there:
+
+- **Registry use-after-free (SIGBUS) fixed.** `container_get_by_id()` registers
+  every container it loads from disk, but `container_free()` did not detach it,
+  leaving a dangling pointer in the global registry. `resolve_cid()` (CLI
+  name→id resolution) looks a container up and frees it, so the next lookup —
+  e.g. in `ocifbsd state <id>` — returned freed memory and crashed with
+  SIGBUS. `container_free()` now unregisters before freeing. All CLI commands
+  that resolve by name/id are affected and now safe (verified by running
+  `state` repeatedly plus the full lifecycle test).
+
+- **Real UDP syslog log-forwarder.** `logd`'s `forwarder_send_udp()` was a stub
+  (hardcoded port 514, no endpoint parse, datagrams sent to 0.0.0.0). It now
+  parses the forwarder `host:port` endpoint (bare host → 514; IPv6 literals may
+  be bracketed), resolves it with `getaddrinfo(SOCK_DGRAM)`, and sends. Verified
+  against a loopback UDP listener; the parser is unit-tested across IPv4/IPv6,
+  bracketed, default-port, and error inputs.
+
+- **Test suite is now self-contained too.** The ATF Makefile linked json-c and
+  libcurl from **ports** (`/usr/local`) and pulled the ports `libarchive.so.13`,
+  which broke `image_parse_test`/`unpack_layer_test` on a stock base system. The
+  suite now uses the same vendored `contrib/` json-c and libcurl the product
+  build uses, plus base `libarchive.so.7`/libmd/libjail/OpenSSL — **no
+  `/usr/local` references remain**. Build the suite (and base libs it needs)
+  with `MAKESYSPATH=<tree>/share/mk` so it links base `libprivateatf-c` and
+  writes into the objdir.
 
 ## 📦 **2026-09-01 — Fully self-contained build: libcurl vendored, ZERO ports**
 
