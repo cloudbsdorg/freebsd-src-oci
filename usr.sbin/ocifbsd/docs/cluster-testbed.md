@@ -1,0 +1,65 @@
+# ocifbsd cluster testbed
+
+A virtualized FreeBSD 16 testbed for exercising ocifbsd in both a clustered and
+a standalone configuration. It runs on the FreeBSD host under `vm-bhyve`.
+
+> Addresses below use the RFC 5737 documentation range; the real lab uses a
+> private LAN. Substitute your own static addresses.
+
+## Topology
+
+| Role | Nodes | Example addresses |
+|------|-------|-------------------|
+| **Cluster** | 6 × FreeBSD 16 (`freebsd-16-1` … `freebsd-16-6`) | `192.0.2.11` … `192.0.2.16` |
+| **Standalone** | 1 × FreeBSD 16 (`oci-e2e`) | `192.0.2.10` |
+
+Six nodes give a Raft cluster that tolerates two simultaneous node failures
+(majority of 6 is 4). The standalone node exercises the single-host paths with
+no cluster attached.
+
+## How the VMs are built
+
+Each guest is a `vm-bhyve` clone of a known-good FreeBSD 16 node, using the
+**bhyveload** loader (real serial console over `nmdm`). The LAN has no DHCP, so
+every clone is given a unique **static** address offline before first boot:
+
+```sh
+vm stop freebsd-16-1                 # clone source must be stopped
+vm clone freebsd-16-1 freebsd-16-4
+vm start freebsd-16-1
+
+# offline-edit the clone's disk: unique IP, hostname, fresh SSH host keys
+md=$(mdconfig -f /usr/local/vms/freebsd-16-4/disk0)
+mount /dev/${md}p4 /mnt
+sed -i '' -e 's/freebsd-16-1/freebsd-16-4/g' \
+          -e 's/<old-ip>/<new-ip>/g' /mnt/etc/rc.conf
+rm -f /mnt/etc/ssh/ssh_host_*
+umount /mnt; mdconfig -d -u ${md#md}
+vm start freebsd-16-4
+```
+
+Nodes are reached over SSH as `root` using the keys in `~/.ssh` (the guest
+image already carries the matching public key).
+
+## Offline PKI (self-signed, no internet)
+
+The control plane authenticates nodes with an internally-blessed CA
+(`clustering/cluster_pki.c`) that needs no internet. Verified on FreeBSD 16:
+the CA issues an mTLS identity (serverAuth + clientAuth) for each of the six
+nodes, every certificate chains to the cluster CA, `openssl verify` accepts
+them independently, and a certificate from a different CA is rejected.
+
+```sh
+cluster_pki_init_ca("/var/db/ocifbsd/pki", "my-cluster");
+cluster_pki_issue_node("/var/db/ocifbsd/pki", "freebsd-16-1");
+# ... one per node; each <node>.crt chains to ca.crt
+```
+
+## Status
+
+- **Provisioned and reachable:** 6 cluster nodes + 1 standalone.
+- **Build:** each node builds `ocifbsd` self-contained (no ports; `ldd` shows
+  no `libcurl`/`libjson-c`).
+- **Offline PKI e2e:** green on FreeBSD 16 (CA + 6 node identities + verify).
+- **In progress:** the mTLS control channel, Raft-backed control state, and the
+  node agent that launches replicas remotely.
