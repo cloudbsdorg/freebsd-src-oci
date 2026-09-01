@@ -52,7 +52,31 @@ and the `ocifbsd.c` CLI:
    robust fix is an exclusive `flock`/`lockf` on the per-container state file
    held across the read-check-act sequence in every lifecycle op.
 
-## 🚀 **2026-08-28 — Verified running real FreeBSD OCI images end-to-end**
+## 🧩 **2026-08-31 — Phase 5 boot-time tooling landed (rc.d + ocifbsd.conf)**
+
+Plan tasks 5.1–5.4 (`.plan/005.0`) are now **DONE** and validated on this
+FreeBSD host (build clean, install dry-run correct, rc.subr smoke + mock
+start/stop functional test):
+
+- `libexec/rc/rc.d/ocifbsd` — an `rc.subr(8)` service that creates and
+  starts the containers listed in `ocifbsd_containers` at boot (pulling
+  images on demand) and stops them in **reverse** order at shutdown, each
+  via `ocifbsd stop` + `delete`. Guards on the binary's presence, defaults
+  `ocifbsd_enable=NO`, registered in `libexec/rc/rc.d/Makefile` CONFS.
+- `libexec/rc/rc.conf` — `ocifbsd_enable` / `ocifbsd_config` /
+  `ocifbsd_containers` defaults.
+- `usr.sbin/ocifbsd/etc/ocifbsd.conf` — sample sourced config, installed to
+  `/etc/ocifbsd/ocifbsd.conf` via CONFGROUPS.
+- `ocifbsd.conf.5` — new manual page (mandoc-lint clean), cross-referenced
+  from `ocifbsd.8`; both in `MAN=`.
+
+**Still open (need a design choice or the FreeBSD lab for root e2e):** the
+three design-level limitations below (per-container rootfs isolation,
+TOCTOU-safe path walks, cross-process state locking) and the Phase 0–5
+test-execution tasks (perf/stress/conformance/limits) that require the
+multi-host lab — fredev005/006 are currently unreachable from the build
+host. The greenfield features (real ACME, cloud export, TPM 2.0, full Raft)
+remain deferred pending external credentials/hardware and product decisions.
 
 ## 🚀 **2026-08-28 — Verified running real FreeBSD OCI images end-to-end**
 
