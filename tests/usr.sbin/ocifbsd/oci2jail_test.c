@@ -248,6 +248,57 @@ ATF_TC_BODY(parse_security_defaults_open, tc)
 	oci_free_spec(spec);
 }
 
+ATF_TC(path_is_safe);
+ATF_TC_HEAD(path_is_safe, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "oci_path_is_safe rejects empty and .. traversal, accepts normal paths");
+}
+ATF_TC_BODY(path_is_safe, tc)
+{
+	/* safe */
+	ATF_CHECK(oci_path_is_safe("/etc"));
+	ATF_CHECK(oci_path_is_safe("/var/run/ocifbsd"));
+	ATF_CHECK(oci_path_is_safe("rootfs"));
+	ATF_CHECK(oci_path_is_safe("a/b/c"));
+	ATF_CHECK(oci_path_is_safe("/a/..b/c"));	/* "..b" is not ".." */
+	/* unsafe */
+	ATF_CHECK(!oci_path_is_safe(NULL));
+	ATF_CHECK(!oci_path_is_safe(""));
+	ATF_CHECK(!oci_path_is_safe(".."));
+	ATF_CHECK(!oci_path_is_safe("../etc"));
+	ATF_CHECK(!oci_path_is_safe("/../etc"));
+	ATF_CHECK(!oci_path_is_safe("a/../../etc"));
+	ATF_CHECK(!oci_path_is_safe("/foo/.."));
+}
+
+ATF_TC(validate_rejects_mount_traversal);
+ATF_TC_HEAD(validate_rejects_mount_traversal, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "oci_validate_spec rejects a mount destination that escapes the root");
+}
+ATF_TC_BODY(validate_rejects_mount_traversal, tc)
+{
+	struct oci_runtime_spec *spec;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" },\n"
+	    "  \"mounts\": [\n"
+	    "    { \"destination\": \"../../etc\", \"type\": \"nullfs\",\n"
+	    "      \"source\": \"/tmp\" }\n"
+	    "  ]\n"
+	    "}\n");
+
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_CHECK(oci_validate_spec(spec) != 0);	/* must be rejected */
+	oci_free_spec(spec);
+}
+
 ATF_TC(parse_missing_file);
 ATF_TC_HEAD(parse_missing_file, tc)
 {
@@ -733,6 +784,8 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, parse_freebsd_ext);
 	ATF_TP_ADD_TC(tp, parse_security_context);
 	ATF_TP_ADD_TC(tp, parse_security_defaults_open);
+	ATF_TP_ADD_TC(tp, path_is_safe);
+	ATF_TP_ADD_TC(tp, validate_rejects_mount_traversal);
 	ATF_TP_ADD_TC(tp, parse_missing_file);
 	ATF_TP_ADD_TC(tp, parse_bad_json);
 	ATF_TP_ADD_TC(tp, validate_ok);

@@ -232,6 +232,14 @@ void	netcfg_apply_to_spec(const struct netcfg *nc,
 		    struct oci_runtime_spec *spec);
 int	oci_validate_spec(const struct oci_runtime_spec *spec);
 
+/*
+ * Return true if `path` is safe to join under the container root: non-empty and
+ * free of any ".." component that could escape the rootfs when used as a mount
+ * target or restriction path. Absolute and relative paths are both accepted
+ * (callers join them under the root); only traversal is rejected.
+ */
+bool	oci_path_is_safe(const char *path);
+
 /* State management */
 int	state_init(void);
 int	state_save(const struct ocifbsd_container *c);

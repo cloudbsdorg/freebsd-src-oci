@@ -403,6 +403,19 @@ container_apply_mounts(struct ocifbsd_container *c)
 		if (m->destination == NULL || m->destination[0] == '\0')
 			continue;
 
+		/*
+		 * Defense in depth: oci_validate_spec already rejects a config
+		 * whose destination escapes the root, but a reloaded spec reaches
+		 * here without re-validation, so refuse any ".." traversal rather
+		 * than mount outside the rootfs.
+		 */
+		if (!oci_path_is_safe(m->destination)) {
+			fprintf(stderr, "warning: skipping unsafe mount "
+			    "destination (path traversal): %s\n",
+			    m->destination);
+			continue;
+		}
+
 		fstype = oci_mount_type_to_fbsd(m->type);
 		if (fstype == NULL) {
 			fprintf(stderr,

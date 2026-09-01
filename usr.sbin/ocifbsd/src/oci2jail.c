@@ -1062,11 +1062,38 @@ oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
 }
 
 /*
- * Validate OCI spec for basic requirements
+ * Reject a path that would escape the container root when joined under it
+ * (any ".." component). See oci_path_is_safe() in the header.
+ */
+bool
+oci_path_is_safe(const char *path)
+{
+	const char *p = path;
+
+	if (path == NULL || path[0] == '\0')
+		return (false);
+	while (*p != '\0') {
+		const char *slash = strchr(p, '/');
+		size_t len = (slash != NULL) ? (size_t)(slash - p) : strlen(p);
+
+		if (len == 2 && p[0] == '.' && p[1] == '.')
+			return (false);	/* a ".." component escapes the root */
+		if (slash == NULL)
+			break;
+		p = slash + 1;
+	}
+	return (true);
+}
+
+/*
+ * Validate an OCI spec for basic requirements and reject inputs that would be
+ * unsafe to act on (path traversal in mount/restriction paths).
  */
 int
 oci_validate_spec(const struct oci_runtime_spec *spec)
 {
+	int i;
+
 	if (spec == NULL) {
 		errno = EINVAL;
 		return (-1);
@@ -1092,6 +1119,40 @@ oci_validate_spec(const struct oci_runtime_spec *spec)
 		fprintf(stderr, "error: missing command in OCI config\n");
 		errno = EINVAL;
 		return (-1);
+	}
+
+	/*
+	 * Reject path traversal in any path that ocifbsd later joins under the
+	 * container root. A ".." component in a mount destination, readonlyPath
+	 * or maskedPath would let a host-side mount operation escape the rootfs
+	 * (e.g. "../../etc" mounting over the host's /etc), so fail the whole
+	 * config rather than acting on it.
+	 */
+	for (i = 0; i < spec->n_mounts; i++) {
+		const char *d = spec->mounts[i].destination;
+
+		if (d != NULL && d[0] != '\0' && !oci_path_is_safe(d)) {
+			fprintf(stderr, "error: unsafe mount destination "
+			    "(path traversal): %s\n", d);
+			errno = EINVAL;
+			return (-1);
+		}
+	}
+	for (i = 0; i < spec->n_readonly_paths; i++) {
+		if (!oci_path_is_safe(spec->readonly_paths[i])) {
+			fprintf(stderr, "error: unsafe readonlyPath (path "
+			    "traversal): %s\n", spec->readonly_paths[i]);
+			errno = EINVAL;
+			return (-1);
+		}
+	}
+	for (i = 0; i < spec->n_masked_paths; i++) {
+		if (!oci_path_is_safe(spec->masked_paths[i])) {
+			fprintf(stderr, "error: unsafe maskedPath (path "
+			    "traversal): %s\n", spec->masked_paths[i]);
+			errno = EINVAL;
+			return (-1);
+		}
 	}
 
 	return (0);
