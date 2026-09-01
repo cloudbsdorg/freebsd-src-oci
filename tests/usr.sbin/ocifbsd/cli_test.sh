@@ -177,8 +177,12 @@ rmi_removes_store_body()
 	img="${store}/ghcr.io/cloudbsd/demo/latest"
 	mkdir -p "${img}/rootfs"
 	echo '{}' > "${img}/config.json"
+	# rmi checks container state to refuse removing an in-use image; give it
+	# a readable, test-owned state dir (the default /var/run/ocifbsd is
+	# root-only, and rmi now fails closed when it cannot read state).
+	mkdir -p "$(pwd)/state"
 	atf_check -s exit:0 -o match:"deleted=" \
-	    env OCIFBSD_DATA_DIR="${store}" \
+	    env OCIFBSD_DATA_DIR="${store}" OCIFBSD_STATE_DIR="$(pwd)/state" \
 	    "${bin}" rmi ghcr.io/cloudbsd/demo:latest
 	if [ -d "${img}" ]; then
 		atf_fail "image store still present after rmi"
@@ -436,7 +440,8 @@ rmi_symlink_escape_safe_body()
 	ln -s "${PWD}/victim/keep.txt" \
 	    "${store}/evil.io/x/latest/rootfs/escape_file"
 	atf_check -s exit:0 -o ignore -e ignore \
-	    env OCIFBSD_DATA_DIR="${store}" "${bin}" rmi evil.io/x:latest
+	    env OCIFBSD_DATA_DIR="${store}" OCIFBSD_STATE_DIR="${PWD}/state" \
+	    "${bin}" rmi evil.io/x:latest
 	# The store tree is gone...
 	if [ -e "${store}/evil.io/x/latest" ]; then
 		atf_fail "image store was not removed"

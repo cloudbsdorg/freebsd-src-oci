@@ -395,7 +395,9 @@ rm_rf(const char *path)
 		parent = ".";
 		leaf = dup;
 	}
-	parentfd = open(parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	/* O_NOFOLLOW so a symlink swapped in as the immediate parent cannot
+	 * redirect the subsequent O_NOFOLLOW *at() walk out of the store. */
+	parentfd = open(parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (parentfd < 0) {
 		free(dup);
 		return (-1);
