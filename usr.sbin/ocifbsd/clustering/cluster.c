@@ -1049,14 +1049,108 @@ swim_mark_alive(const char *node_id)
 /*
  * Initialize Raft consensus
  */
+/*
+ * Persistent state. Raft requires currentTerm, votedFor, and the log to
+ * survive a crash (§5); commitIndex/lastApplied are volatile and rebuilt from
+ * the leader after restart. The state file path comes from OCIFBSD_RAFT_STATE;
+ * when unset, persistence is disabled (in-memory only).
+ */
+#define RAFT_PERSIST_MAGIC  0x52414654u   /* "RAFT" */
+static char raft_state_path[1024];
+
+/* Atomically write currentTerm, votedFor, and the log. Call with cluster_lock
+ * held. Best-effort: an I/O failure is not fatal to the running node. */
+static void
+raft_persist(void)
+{
+    char tmp[1088];
+    FILE *f;
+    uint32_t magic = RAFT_PERSIST_MAGIC, ver = 1, n;
+    int i, fd;
+
+    if (raft_state_path[0] == '\0')
+        return;
+    snprintf(tmp, sizeof(tmp), "%s.tmp", raft_state_path);
+    f = fopen(tmp, "wb");
+    if (f == NULL)
+        return;
+    n = (uint32_t)raft.log_size;
+    fwrite(&magic, sizeof(magic), 1, f);
+    fwrite(&ver, sizeof(ver), 1, f);
+    fwrite(&raft.current_term, sizeof(raft.current_term), 1, f);
+    fwrite(raft.voted_for, sizeof(raft.voted_for), 1, f);
+    fwrite(&n, sizeof(n), 1, f);
+    for (i = 0; i < raft.log_size; i++) {
+        fwrite(&raft.log[i].term, sizeof(uint64_t), 1, f);
+        fwrite(&raft.log[i].index, sizeof(uint64_t), 1, f);
+        fwrite(raft.log[i].command, sizeof(raft.log[i].command), 1, f);
+    }
+    fflush(f);
+    fd = fileno(f);
+    if (fd >= 0)
+        fsync(fd);
+    fclose(f);
+    rename(tmp, raft_state_path);   /* atomic replace */
+}
+
+/* Load persisted state at startup (no lock needed — pre-thread). */
+static void
+raft_load(void)
+{
+    FILE *f;
+    uint32_t magic = 0, ver = 0, n = 0, i;
+
+    if (raft_state_path[0] == '\0')
+        return;
+    f = fopen(raft_state_path, "rb");
+    if (f == NULL)
+        return;
+    if (fread(&magic, sizeof(magic), 1, f) != 1 ||
+        magic != RAFT_PERSIST_MAGIC) {
+        fclose(f);
+        return;
+    }
+    if (fread(&ver, sizeof(ver), 1, f) != 1 ||
+        fread(&raft.current_term, sizeof(raft.current_term), 1, f) != 1 ||
+        fread(raft.voted_for, sizeof(raft.voted_for), 1, f) != 1 ||
+        fread(&n, sizeof(n), 1, f) != 1) {
+        fclose(f);
+        return;
+    }
+    raft.voted_for[sizeof(raft.voted_for) - 1] = '\0';
+    if (n > 0 && n < 1000000) {
+        raft.log = calloc(n, sizeof(struct raft_log_entry));
+        if (raft.log != NULL) {
+            raft.log_capacity = (int)n;
+            for (i = 0; i < n; i++) {
+                if (fread(&raft.log[i].term, sizeof(uint64_t), 1, f) != 1 ||
+                    fread(&raft.log[i].index, sizeof(uint64_t), 1, f) != 1 ||
+                    fread(raft.log[i].command,
+                        sizeof(raft.log[i].command), 1, f) != 1)
+                    break;
+                raft.log[i].command[sizeof(raft.log[i].command) - 1] = '\0';
+                raft.log_size++;
+            }
+        }
+    }
+    fclose(f);
+}
+
 int
 raft_init(void)
 {
+    const char *p;
+
     memset(&raft, 0, sizeof(raft));
     raft.state = RAFT_FOLLOWER;
     raft.current_term = 0;
-    raft.commit_index = 0;
+    raft.commit_index = 0;      /* volatile: relearned from the leader */
     raft.last_applied = 0;
+
+    p = getenv("OCIFBSD_RAFT_STATE");
+    if (p != NULL && p[0] != '\0')
+        strlcpy(raft_state_path, p, sizeof(raft_state_path));
+    raft_load();                /* restore currentTerm/votedFor/log if present */
 
     return (0);
 }
@@ -1152,6 +1246,7 @@ raft_loop(void *arg)
             vreq.term = raft.current_term;
             vreq.last_log_index = raft_last_log_index();
             vreq.last_log_term = raft_last_log_term();
+            raft_persist();     /* term++ and self-vote before soliciting */
             do_vote = 1;
         }
         pthread_mutex_unlock(&cluster_lock);
@@ -1191,6 +1286,7 @@ raft_on_vote_req(const char *from, const struct raft_vote_req *r)
     }
     resp.term = raft.current_term;
     resp.granted = grant;
+    raft_persist();     /* durable currentTerm/votedFor before replying */
     pthread_mutex_unlock(&cluster_lock);
 
     gossip_send_message(from, GOSSIP_MSG_VOTE_RESP, &resp, sizeof(resp));
@@ -1210,6 +1306,7 @@ raft_on_vote_resp(const char *from, const struct raft_vote_resp *r)
         raft.state = RAFT_FOLLOWER;
         raft.voted_for[0] = '\0';
         raft_reset_election_timer();
+        raft_persist();
     } else if (raft.state == RAFT_CANDIDATE && r->term == raft.current_term &&
         r->granted) {
         raft_votes_granted++;
@@ -1279,6 +1376,7 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
         resp.term = raft.current_term;
         resp.success = 0;
         resp.match_index = raft_last_log_index();
+        raft_persist();     /* currentTerm may have advanced above */
         goto out;
     }
 
@@ -1318,6 +1416,7 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
             raft.last_applied = raft.commit_index;
     }
 
+    raft_persist();     /* durable currentTerm + log before acking success */
     resp.term = raft.current_term;
     resp.success = 1;
     resp.match_index = raft_last_log_index();
@@ -1340,6 +1439,7 @@ raft_on_append_resp(const char *from, const struct raft_append_resp *r)
         raft.state = RAFT_FOLLOWER;
         raft.voted_for[0] = '\0';
         raft_reset_election_timer();
+        raft_persist();
         stepped_down = 1;
     }
     if (stepped_down || raft.state != RAFT_LEADER ||
@@ -1613,11 +1713,12 @@ raft_append_entry(const char *command, size_t len)
     entry->index = raft.log_size + 1;
     strlcpy(entry->command, command, sizeof(entry->command));
     entry->timestamp = time(NULL);
-    
+
     raft.log_size++;
-    
+    raft_persist();     /* durable log before the entry is replicated */
+
     pthread_mutex_unlock(&cluster_lock);
-    
+
     return (0);
 }
 

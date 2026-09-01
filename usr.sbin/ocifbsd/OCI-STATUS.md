@@ -71,6 +71,25 @@ and the `ocifbsd.c` CLI:
    completes once released) and pinned by two ATF regression cases
    (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
+## 💾 **2026-09-01 — Raft persistence (stage 3) implemented + validated on a 3-node cluster**
+
+Made Raft state durable (§5): `currentTerm`, `votedFor`, and the log are
+written atomically (temp file + `fsync` + `rename`) at every point they change
+— before granting a vote, before acking AppendEntries, on term++/step-down,
+and on a leader append. `commitIndex`/`lastApplied` are intentionally *not*
+persisted (volatile; relearned from the leader). State loads at startup from
+`OCIFBSD_RAFT_STATE` (persistence is off when unset, e.g. for the earlier
+stages' tests).
+
+Validated on the real 3-node FreeBSD 16 cluster with a full-cluster crash:
+after killing **all** nodes and restarting, each reloaded its **log from disk**
+(log=13, not 0 — no backfill needed) with **currentTerm preserved** (so the
+next election advanced to term 2 rather than restarting from 0→1) while
+`commitIndex` correctly reset to 0 and was rebuilt from the new leader
+(reconverged at commit=16). Core Raft — election, log replication, commit
+advancement, and persistence — is now functional. Remaining Raft work is the
+advanced layer: cluster-membership changes and log compaction / snapshots.
+
 ## 🧾 **2026-09-01 — Raft log replication (stage 2) implemented + validated on a 3-node cluster**
 
 Built log replication on top of the election foundation: AppendEntries now
