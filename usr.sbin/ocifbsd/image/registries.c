@@ -25,6 +25,7 @@ struct alias_entry {
 
 static struct alias_entry	*g_head;
 static int			 g_loaded;
+static char			*g_default_registry;	/* for short names */
 
 /*
  * Built-in defaults, applied before the configuration file so a file entry of
@@ -191,6 +192,17 @@ parse_line(char *line)
 		return;
 
 	name = next_token(&p);
+
+	/* Directive: "default-registry <name>" sets the short-name default. */
+	if (name != NULL && strcmp(name, "default-registry") == 0) {
+		char *val = next_token(&p);
+		if (val != NULL && val[0] != '\0') {
+			free(g_default_registry);
+			g_default_registry = strdup(val);
+		}
+		return;
+	}
+
 	host = next_token(&p);
 	realm = next_token(&p);
 	service = next_token(&p);
@@ -275,6 +287,13 @@ registry_alias_by_host(const char *host)
 		if (e->a.api_host != NULL && strcmp(e->a.api_host, host) == 0)
 			return (&e->a);
 	return (NULL);
+}
+
+const char *
+registry_default_name(void)
+{
+	load_once();
+	return (g_default_registry != NULL ? g_default_registry : "docker.io");
 }
 
 int

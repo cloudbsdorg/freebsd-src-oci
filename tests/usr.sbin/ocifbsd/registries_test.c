@@ -131,9 +131,37 @@ ATF_TC_BODY(config_insecure_override, tc)
 	unsetenv("OCIFBSD_REGISTRIES_CONF");
 }
 
+/* The default registry for unqualified names is docker.io out of the box. */
+ATF_TC_WITHOUT_HEAD(default_registry_builtin);
+ATF_TC_BODY(default_registry_builtin, tc)
+{
+	unsetenv("OCIFBSD_REGISTRIES_CONF");
+	ATF_CHECK_STREQ("docker.io", registry_default_name());
+}
+
+/* The default registry can be redirected in the config file. */
+ATF_TC_WITHOUT_HEAD(default_registry_configured);
+ATF_TC_BODY(default_registry_configured, tc)
+{
+	FILE *f;
+
+	f = fopen("default.conf", "w");
+	ATF_REQUIRE(f != NULL);
+	fputs("default-registry   registry.internal.example\n"
+	      "registry.internal.example   registry.internal.example   -   -   https\n",
+	    f);
+	fclose(f);
+	setenv("OCIFBSD_REGISTRIES_CONF", "default.conf", 1);
+
+	ATF_CHECK_STREQ("registry.internal.example", registry_default_name());
+	unsetenv("OCIFBSD_REGISTRIES_CONF");
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, default_docker_hub);
+	ATF_TP_ADD_TC(tp, default_registry_builtin);
+	ATF_TP_ADD_TC(tp, default_registry_configured);
 	ATF_TP_ADD_TC(tp, default_index_alias);
 	ATF_TP_ADD_TC(tp, lookup_by_host);
 	ATF_TP_ADD_TC(tp, unknown_registry);

@@ -69,4 +69,15 @@ const struct registry_alias	*registry_alias_by_host(const char *host);
  */
 int				 registry_alias_insecure(const char *name);
 
+/*
+ * The registry used for unqualified image references (a short name like
+ * "nginx" with no registry host). Defaults to "docker.io"; override in the
+ * configuration file with a line:
+ *
+ *   default-registry   registry.example.com
+ *
+ * Returns a pointer into internal storage -- do not free.
+ */
+const char			*registry_default_name(void);
+
 #endif /* OCIFBSD_IMAGE_REGISTRIES_H */

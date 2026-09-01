@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "pull.h"
+#include "registries.h"
 
 /*
  * True if the first path component looks like a registry host
@@ -72,7 +73,8 @@ parse_reference(const char *ref, char **registry, char **repo,
 		*registry = strndup(p, slash - p);
 		repo_start = slash + 1;
 	} else {
-		*registry = strdup("docker.io");
+		/* Unqualified name: use the configured default registry. */
+		*registry = strdup(registry_default_name());
 		repo_start = p;
 	}
 	if (*registry == NULL)

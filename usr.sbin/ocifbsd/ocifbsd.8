@@ -256,8 +256,12 @@ Per-container network configuration
 Configuration directory
 .It Pa /usr/local/etc/ocifbsd/registries.conf , Pa /etc/ocifbsd/registries.conf
 Registry alias table: maps a registry reference name to its API host and token
-endpoint and selects the transport (TLS by default; plain HTTP for registries
-marked insecure and for localhost).
+endpoint, selects the transport (TLS by default; plain HTTP for registries
+marked insecure and for localhost), and sets the default registry for
+unqualified image references via a
+.Ic default-registry
+directive
+.Pq default Li docker.io .
 Built-in defaults cover Docker Hub, so this file is optional.
 See the shipped example for the format.
 .El

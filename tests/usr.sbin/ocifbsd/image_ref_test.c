@@ -15,6 +15,7 @@
 
 #include "image/pull.h"
 #include "image/zfs_store.h"
+#include "image/registries.c"
 #include "image/reference.c"
 #include "image/paths.c"
 
