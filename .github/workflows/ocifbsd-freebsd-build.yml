@@ -1,0 +1,82 @@
+name: ocifbsd FreeBSD Build & Test
+
+# Builds ocifbsd self-contained on a real FreeBSD VM and runs the ATF suite.
+# Complements ocifbsd-inspection.yml (static checks on macOS): this one is the
+# authoritative "does it actually build and pass tests on FreeBSD" gate.
+#
+# The build is self-contained — json-c and libcurl are vendored under
+# usr.sbin/ocifbsd/contrib/, so no ports are needed to compile the product.
+# The tree's share/mk is used via MAKESYSPATH so the build resolves the same
+# src.opts.mk / bsd.test.mk the FreeBSD base tree uses (base /usr/share/mk on a
+# release does not wire the private ATF test libraries the suite links against).
+
+on:
+  push:
+    branches: [ main, 'feature/**', 'stable/[1-9][0-9]' ]
+  pull_request:
+    branches: [ main, 'feature/**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: ocifbsd build + ATF suite (FreeBSD)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and test on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          # kyua/atf drive the ATF suite; the compiler toolchain is in base.
+          # 16.0-CURRENT snapshots are validated on the CloudBSD lab; CI pins a
+          # supported release image for reproducibility.
+          release: "14.2"
+          usesh: true
+          prepare: |
+            pkg install -y kyua
+          run: |
+            set -e
+            export MAKESYSPATH="$PWD/share/mk"
+
+            echo "=== Build the self-contained product (all SUBDIRs) ==="
+            make -C usr.sbin/ocifbsd
+
+            # With the tree's share/mk, the product builds into its objdir.
+            PROG_OBJ=$(make -C usr.sbin/ocifbsd -V .OBJDIR)
+            BIN="$PROG_OBJ/ocifbsd"
+
+            echo "=== Confirm the build pulls in no ports (/usr/local) ==="
+            if ldd "$BIN" 2>/dev/null | grep -q /usr/local; then
+              echo "FAIL: ocifbsd links a port from /usr/local" >&2
+              ldd "$BIN" | grep /usr/local >&2
+              exit 1
+            fi
+
+            echo "=== Smoke: version and help ==="
+            "$BIN" --version
+            "$BIN" --help >/dev/null
+
+            echo "=== Build the ATF suite ==="
+            make -C tests/usr.sbin/ocifbsd
+
+            # The cli_test / lifecycle_test integration cases resolve the runtime
+            # binary at the SOURCE-tree path usr.sbin/ocifbsd/ocifbsd (via
+            # atf_get_srcdir); place the objdir binary there so they run rather
+            # than skip.
+            cp "$BIN" usr.sbin/ocifbsd/ocifbsd
+
+            echo "=== Run the ATF suite ==="
+            TEST_OBJ=$(make -C tests/usr.sbin/ocifbsd -V .OBJDIR)
+            cd "$TEST_OBJ"
+            kyua test || true
+            kyua report
+            # Fail the job if anything is broken or failed.
+            if kyua report --results-filter=broken,failed | grep -qE 'broken:|failed:'; then
+              echo "FAIL: broken or failed test cases" >&2
+              exit 1
+            fi

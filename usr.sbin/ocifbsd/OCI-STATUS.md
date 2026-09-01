@@ -1156,16 +1156,29 @@ kyua test -k tests/usr.sbin/ocifbsd/Kyuafile
 
 After the refactor, the build must pass:
 
-- [ ] `bmake -C usr.sbin/ocifbsd` produces `ocifbsd` binary on FreeBSD VM
-- [ ] `bmake -C usr.sbin/ocifbsd SUBDIR` builds all 15 modules
-- [ ] `sudo bmake install` installs to `/usr/sbin/ocifbsd` and
-      `/usr/share/man/man8/ocifbsd.8`
-- [ ] `ocifbsd --version` runs and prints version
-- [ ] All `ocifbsd` subcommands show in `--help`
+- [x] `bmake -C usr.sbin/ocifbsd` produces `ocifbsd` binary on FreeBSD VM
+      (2026-09-01, self-contained, exit 0)
+- [x] `bmake -C usr.sbin/ocifbsd SUBDIR` builds all modules (all SUBDIRs, exit 0)
+- [x] `bmake install` installs the tooling and man pages (2026-09-01, staged
+      DESTDIR install exit 0: 7 binaries — `ocifbsd`, `ocifbsd-cert`,
+      `ocifbsd-cluster`, `ocifbsd-export`, `ocifbsd-gc`, `ocifbsd-logd`,
+      `ocifbsd_convert` — and 12 man pages: `ocifbsd.8`, `ocifbsd.conf.5`,
+      the six other tool pages incl. `pam_ocifbsd.8`, and four `man3` library
+      pages. `PROG=ocifbsd` with no explicit `BINDIR` matches the
+      `usr.sbin/jail` / `usr.sbin/jls` idiom, so installworld places it in
+      `/usr/sbin`.)
+- [x] `ocifbsd --version` runs and prints version (`ocifbsd version 0.1.0`)
+- [x] All `ocifbsd` subcommands show in `--help`
 - [ ] `tools/cross-build/macos.sh --check` works on a macOS host
 - [ ] `make cross-build` (from repo root) cross-builds to FreeBSD amd64
       from macOS
-- [ ] CI workflow builds on FreeBSD 16.0-CURRENT (GitHub Actions)
+- [~] CI workflow builds + tests on FreeBSD (GitHub Actions): authored as
+      `.github/workflows/ocifbsd-freebsd-build.yml` — spins up a FreeBSD VM
+      (`vmactions/freebsd-vm`), builds the self-contained product, asserts no
+      `/usr/local` linkage, and runs the full ATF suite via kyua (fails on any
+      broken/failed case). Every command is verified on the CloudBSD lab; the
+      pinned release is a supported image (16.0-CURRENT is validated on the
+      lab, not yet available as a CI image). Pending its first Actions run.
 
 ### 6.7 PR readiness
 
