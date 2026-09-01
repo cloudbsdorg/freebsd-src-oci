@@ -234,6 +234,7 @@ int     cert_status_json(char **json_out);
 int     acme_init(struct acme_config *config);
 int     acme_account_register(const char *email);
 int     acme_account_status(void);
+const char *acme_account_kid(void);
 int     acme_certificate_request(const char *domain, const char *challenge_dir);
 int     acme_certificate_renew(const char *domain);
 int     acme_certificate_revoke(const char *domain);

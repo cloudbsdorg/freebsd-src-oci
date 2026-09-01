@@ -185,13 +185,25 @@ JSON-formatted entry to their endpoint instead of returning a no-op stub (a
 pre-existing `line` leak in `forwarder_send` was fixed too). Validated against
 an in-process HTTP sink and pinned by `logd_forward_test` (3 cases).
 
+**ACME (RFC 8555) — account foundation IMPLEMENTED 2026-08-31; order flow in
+progress.** `cert/acme.c` is now a real native ACME client on libcurl +
+OpenSSL 3: base64url, EC P-256 account key (generated + persisted 0600 or
+loaded), directory discovery, replay-nonce handling with a single badNonce
+retry, RFC 7638 JWK/thumbprint, and **ES256 JWS signing**, driving
+`acme_account_register` (new-account with the `jwk` header). Validated against
+a live local **step-ca** ACME server: account registration returns the
+account URL, and a second run reuses the persisted key to bind the *same*
+account (idempotent JWK identity). Set `OCIFBSD_ACME_CAINFO` to a PEM root to
+trust a test CA; production Let's Encrypt uses the system trust store. The
+remaining order -> authorization -> HTTP-01 challenge -> finalize -> download
+steps (`acme_certificate_request`) build on this foundation and currently
+return `ENOSYS` rather than a false success — next up.
+
 **Remaining greenfield (need external resources / product decisions):**
-real ACME/Let's Encrypt (`cert/acme.c`, needs an ACME account + reachable
-domain or a local Pebble server), cloud export for AWS/GCP/Azure
-(`export/*.c`, needs cloud credentials), and full Raft (`clustering/`). These
-need external endpoints/credentials to implement *and validate*, so they are
-the natural next targets once that infrastructure is available. (TPM support
-was **removed** from the project on 2026-08-31 — see the removal note below.)
+cloud export for AWS/GCP/Azure (`export/*.c`, needs cloud credentials) and
+full Raft (`clustering/`). These need external endpoints/credentials to
+implement *and validate*. (TPM support was **removed** from the project on
+2026-08-31 — see the removal note below.)
 
 ## 🎉🎉🎉 **ALL 15 SUBDIRs RE-ENABLED — BOOTSTRAP 100% COMPLETE!**
 
