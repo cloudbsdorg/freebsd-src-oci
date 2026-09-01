@@ -808,17 +808,49 @@ ns_check_volume_access(struct namespace *ns, const char *dataset)
 /*
  * Set MAC label for namespace
  */
+/*
+ * Validate a MAC label before it is stored and later interpolated into a
+ * jail(8) command line. ns_apply_mac_label() runs "jail -m label=<label> ..."
+ * via system(3), so a label containing shell metacharacters (e.g.
+ * "x; touch /pwned") would be command injection running as root. Accept only
+ * the characters real MAC labels use — alphanumerics and / - _ . : , — which
+ * excludes every shell metacharacter, whitespace, and quoting.
+ */
+static bool
+ns_mac_label_is_valid(const char *label)
+{
+    size_t i, len;
+
+    if (label == NULL)
+        return (false);
+    len = strlen(label);
+    if (len == 0 || len >= 128)
+        return (false);
+    for (i = 0; i < len; i++) {
+        char c = label[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '/' || c == '-' ||
+            c == '_' || c == '.' || c == ':' || c == ','))
+            return (false);
+    }
+    return (true);
+}
+
 int
 ns_set_mac_label(struct namespace *ns, const char *label)
 {
     if (ns == NULL || label == NULL)
         return (-1);
-    
+    if (!ns_mac_label_is_valid(label)) {
+        errno = EINVAL;
+        return (-1);
+    }
+
     pthread_mutex_lock(&ns->lock);
     strlcpy(ns->mac_label, label, sizeof(ns->mac_label));
     ns->updated = time(NULL);
     pthread_mutex_unlock(&ns->lock);
-    
+
     return (ns_update(ns));
 }
 
