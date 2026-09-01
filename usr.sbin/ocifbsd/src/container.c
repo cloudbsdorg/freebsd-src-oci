@@ -342,6 +342,37 @@ record_applied_mount(struct ocifbsd_container *c, const char *target)
 }
 
 /*
+ * Warn about OCI security-context restrictions this bundle requests but that
+ * ocifbsd does not enforce yet, so an operator is never misled into believing a
+ * container is hardened when it is not. Parsing these fields is intentionally a
+ * no-op today (FreeBSD nullfs cannot self-overlay a path read-only/nosuid; the
+ * enforcement needs the rootfs-mount rework — see docs/security-restrictions.md).
+ * Fields that ARE enforced (process.rlimits, freebsd.rctl_rules, freebsd.vnet)
+ * are deliberately not warned about.
+ */
+static void
+warn_unenforced_security(const struct oci_runtime_spec *spec)
+{
+	if (spec == NULL)
+		return;
+	if (spec->process.no_new_privileges)
+		fprintf(stderr, "warning: process.noNewPrivileges is recorded "
+		    "but NOT yet enforced on FreeBSD; the container is not "
+		    "hardened by it\n");
+	if (spec->root.readonly)
+		fprintf(stderr, "warning: root.readonly is recorded but NOT yet "
+		    "enforced; the container root remains writable\n");
+	if (spec->n_readonly_paths > 0)
+		fprintf(stderr, "warning: linux.readonlyPaths (%d) recorded but "
+		    "NOT yet enforced; those paths remain writable\n",
+		    spec->n_readonly_paths);
+	if (spec->n_masked_paths > 0)
+		fprintf(stderr, "warning: linux.maskedPaths (%d) recorded but "
+		    "NOT yet enforced; those paths are not masked\n",
+		    spec->n_masked_paths);
+}
+
+/*
  * Apply OCI mounts into the container rootfs (host-side, before start).
  * Unsupported Linux types are skipped with a warning.
  */
@@ -939,6 +970,12 @@ container_start(struct ocifbsd_container *c)
 		    c->id);
 		return (-1);
 	}
+
+	/*
+	 * Make any requested-but-unenforced security restriction visible, so an
+	 * operator is never misled into thinking the container is hardened.
+	 */
+	warn_unenforced_security(c->spec);
 
 	/*
 	 * Host-side mounts into rootfs before the init process attaches.
