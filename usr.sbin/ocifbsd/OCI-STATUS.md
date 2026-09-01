@@ -71,6 +71,28 @@ and the `ocifbsd.c` CLI:
    completes once released) and pinned by two ATF regression cases
    (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
+## ✅ **2026-09-01 — Validated on FreeBSD 16.0-CURRENT (tier-1 target)**
+
+This session's whole runtime was rebuilt and exercised on a FreeBSD
+16.0-CURRENT guest (a `vm-bhyve` VM cloned from the working `oci-e2e` image,
+bhyveload + serial, reached over SSH), not just the 15.1-STABLE build host:
+
+- **Builds clean** on FreeBSD 16.0-CURRENT with clang 21 (`make ocifbsd`,
+  rc=0; binary runs).
+- **Live e2e 19/19** (`e2e-verify.sh`, as root): real jail lifecycle,
+  hostname default, state-liveness reconciliation, VNET isolation, non-VNET
+  address application, the running-container guard, the root/`ocifbsd`-group
+  permission model, and on-disk file modes — all pass against genuine jails.
+- **Unit suites pass** (run directly against `libprivateatf-c`, since the
+  offline VM has no kyua): jsonfmt, netcfg, **logd_forward** (the new HTTP
+  forwarder, validated with its in-process sink on 16 too), utils, whiteout —
+  0 failures.
+
+So the OCI runtime plus this session's changes (per-container flock,
+symlink-safe tree removal, rmi in-use guard, HTTP log forwarding, ACME, and
+the TPM removal) are confirmed on the plan's primary platform, not only the
+build host.
+
 ## 🗑️ **2026-08-31 — TPM support removed from the project**
 
 Per an explicit product decision, **TPM support has been removed entirely**.
