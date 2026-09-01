@@ -4,7 +4,49 @@
 > current systems go offline for any reason, this document is sufficient to
 > resume work from any other machine.
 >
-> **Last updated**: 2026-08-30 — Grok-assisted audit loop on the new code
+> **Last updated**: 2026-09-01 — fully self-contained build (libcurl vendored)
+
+## 📦 **2026-09-01 — Fully self-contained build: libcurl vendored, ZERO ports**
+
+The tree now builds with **no ports at all**. libcurl was the last remaining
+port dependency (json-c was already vendored); it is now vendored under
+`contrib/curl` and built as a private static library.
+
+- **Source**: curl 8.21.0, the exact FreeBSD port distfile
+  (SHA256 `aa1b66a7…`, verified against the ports `distinfo`).
+- **Minimal config**: curl's own `./configure`, pointed at **base** OpenSSL
+  (`--with-openssl=/usr`) and the base CA bundle (`/etc/ssl/cert.pem`),
+  HTTP/HTTPS only, every third-party backend disabled (no nghttp2/nghttp3/
+  ngtcp2, idn2/psl/rtmp, brotli/zstd/zlib, libssh2/libssh, gnutls/wolfssl/
+  mbedtls, gssapi, and all non-HTTP protocols). Generated `curl_config.h` is
+  committed under `lib/`.
+- **Wiring**: new `curl.inc.mk` (mirrors `jsonc.inc.mk`) builds
+  `libocifbsd_curl.a` on demand, prepends the header path, links it, and pulls
+  curl's base deps (OpenSSL, pthread) via `LIBADD` — the src build rejects raw
+  `-lssl`/`-lcrypto`, and `LIBADD` expansion lands after the archive on the
+  link line. The four consumers (cert/acme, logd/forward, image/pull+push) and
+  the top-level `ocifbsd` link use the vendored copy; all `-lcurl` /
+  `-I/usr/local/include` / `-L/usr/local/lib` are gone. `contrib/curl` is a new
+  SUBDIR. Decision recorded in LICENSING-DEPS: vendoring (vs base libfetch) was
+  chosen to keep battle-tested TLS with zero behavior change.
+
+**Portability fix found while validating without `/usr/src`**: five leaf-module
+Makefiles (api, metrics, security-daemon, namespace, clustering) carried an
+unused bare `.include <src.opts.mk>` that aborts on a minimal FreeBSD where
+src.opts.mk is not installed. Removed — the top-level Makefile already guards
+its own include with an `exists()` fallback.
+
+**Validated:**
+- **Host (FreeBSD 15.1)**: full tree builds; `ocifbsd` (847 KB) links only base
+  libs (`ldd` shows no `libcurl`/`libjson-c`); curl symbols statically embedded;
+  kyua suite 156/160 (4 root-only lifecycle tests skipped as non-root, 0 fail).
+- **FreeBSD 16.0-CURRENT VM (no `/usr/src`)**: full tree builds self-contained
+  (`ldd` shows no port libs **even though both ports are installed**); a
+  standalone TLS check completes a full HTTPS handshake with custom-CA
+  verification (the ACME/registry path) against base OpenSSL 3.5; e2e-verify
+  **19/19**. External registry pull was not exercised there (the VM has no
+  external DNS), but the TLS + HTTP + custom-CA code paths registries and ACME
+  use are proven.
 
 ## 🔁 **2026-08-30 — Grok-4.6 audit loop (grok-analyze skill)**
 

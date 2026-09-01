@@ -120,14 +120,17 @@ ocifbsd
 ├── pam/               # PAM authentication
 ├── security/          # Security (RCTL, MAC labels)
 ├── security-daemon/   # Security daemon (RBAC, secrets, TLS)
-└── contrib/json-c/    # Vendored json-c 0.18 (MIT) — built in-tree, no port
+├── contrib/json-c/    # Vendored json-c 0.18 (MIT) — built in-tree, no port
+└── contrib/curl/      # Vendored libcurl 8.21.0 (curl license) — built in-tree, no port
 ```
 
-**Self-contained build:** the JSON dependency (json-c) is vendored under
-`contrib/json-c` and built as a private static library, so the tree builds
-without the json-c port. The toolchain is entirely FreeBSD base clang/lld +
-bmake, and there is **no GPL/copyleft** dependency anywhere (see
-[LICENSING-DEPS.md](LICENSING-DEPS.md)).
+**Self-contained build — no ports required.** Both third-party dependencies,
+json-c and libcurl, are vendored under `contrib/` and built as private static
+libraries, so the whole tree builds with **zero ports**. libcurl is configured
+minimally (HTTP/HTTPS only, TLS via FreeBSD **base** OpenSSL, every other
+backend disabled). The toolchain is entirely FreeBSD base clang/lld + bmake,
+and there is **no GPL/copyleft** dependency anywhere. `ldd` on the resulting
+`ocifbsd` shows only base libraries. See [LICENSING-DEPS.md](LICENSING-DEPS.md).
 
 ## Configuration
 
