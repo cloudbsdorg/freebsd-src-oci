@@ -29,8 +29,10 @@ command -v mandoc >/dev/null 2>&1 || {
 
 mkdir -p "$out"
 
-# Curated, hand-authored front page, stylesheet, and hero banner.
-cp "$here/index.html" "$out/index.html"
+# Curated, hand-authored front page, stylesheet, and hero banner. Stamp the
+# landing page with the build time (UTC) so it is clear when it was generated.
+stamp=$(date -u '+%Y-%m-%d %H:%M UTC')
+sed "s/@@GENERATED@@/$stamp/" "$here/index.html" > "$out/index.html"
 cp "$here/man.css"    "$out/man.css"
 [ -f "$here/hero.png" ] && cp "$here/hero.png" "$out/hero.png"
 
