@@ -17,6 +17,7 @@ struct cp_service {
 	char	name[128];
 	int	replicas;
 	char	image[512];
+	char	vip[64];
 };
 
 struct cp_placement {
@@ -240,6 +241,19 @@ cp_apply(struct cp_state *st, const char *cmd)
 			return (-1);
 		return (placement_unassign(st, a1, rid));
 	}
+	if (strcmp(op, "VIP") == 0) {
+		struct cp_service *sv;
+
+		a1 = strtok_r(NULL, " \t", &save);	/* service */
+		a2 = strtok_r(NULL, " \t", &save);	/* vip */
+		if (a1 == NULL || a2 == NULL)
+			return (-1);
+		sv = find_service(st, a1);
+		if (sv == NULL)
+			return (-1);
+		strlcpy(sv->vip, a2, sizeof(sv->vip));
+		return (0);
+	}
 	if (strcmp(op, "ENDPOINT") == 0) {
 		struct cp_placement *p;
 
@@ -306,6 +320,17 @@ cp_service_image(const struct cp_state *st, const char *svc)
 		return (NULL);
 	s = find_service(st, svc);
 	return (s != NULL ? s->image : NULL);
+}
+
+const char *
+cp_service_vip(const struct cp_state *st, const char *svc)
+{
+	struct cp_service *s;
+
+	if (st == NULL)
+		return (NULL);
+	s = find_service(st, svc);
+	return ((s != NULL && s->vip[0] != '\0') ? s->vip : NULL);
 }
 
 const char *

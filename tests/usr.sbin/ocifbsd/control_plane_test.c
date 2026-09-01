@@ -207,9 +207,28 @@ ATF_TC_BODY(cp_endpoints, tc)
 	cp_free(s);
 }
 
+/* VIP assigns a service's virtual IP (the load-balancer front). */
+ATF_TC_WITHOUT_HEAD(cp_service_vip);
+ATF_TC_BODY(cp_service_vip, tc)
+{
+	struct cp_state *s = cp_new();
+
+	ATF_REQUIRE(s != NULL);
+	ATF_REQUIRE_EQ(0, cp_apply(s, "CREATE web 3 nginx"));
+	ATF_CHECK(cp_service_vip(s, "web") == NULL);	/* none yet */
+
+	ATF_REQUIRE_EQ(0, cp_apply(s, "VIP web 203.0.113.100"));
+	ATF_CHECK_STREQ("203.0.113.100", cp_service_vip(s, "web"));
+
+	/* VIP for an unknown service is rejected. */
+	ATF_CHECK(cp_apply(s, "VIP nope 203.0.113.1") != 0);
+	cp_free(s);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, cp_service_lifecycle);
+	ATF_TP_ADD_TC(tp, cp_service_vip);
 	ATF_TP_ADD_TC(tp, cp_endpoints);
 	ATF_TP_ADD_TC(tp, cp_stress_scale);
 	ATF_TP_ADD_TC(tp, cp_placement);

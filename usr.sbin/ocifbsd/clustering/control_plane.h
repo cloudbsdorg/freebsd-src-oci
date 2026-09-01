@@ -59,6 +59,9 @@ int		 cp_service_replicas(const struct cp_state *st, const char *svc);
 /* The image for a service, or NULL if it does not exist. */
 const char	*cp_service_image(const struct cp_state *st, const char *svc);
 
+/* The service's virtual IP (load-balancer front), or NULL if unset. */
+const char	*cp_service_vip(const struct cp_state *st, const char *svc);
+
 /* The node a replica is placed on, or NULL if unplaced/unknown. */
 const char	*cp_replica_node(const struct cp_state *st, const char *svc,
 		    int replica_id);
