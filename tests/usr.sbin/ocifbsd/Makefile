@@ -26,6 +26,8 @@
 # libraries. No ports (/usr/local) are referenced, so the suite builds and
 # runs on a stock base system.
 
+TESTSDIR=	${TESTSBASE}/usr.sbin/ocifbsd
+
 ATF_TESTS_C=	parser_test ensemble_test utils_test oci2jail_test hooks_test \
 		image_ref_test whiteout_test image_parse_test unpack_layer_test \
 		netcfg_test jsonfmt_test logd_forward_test registries_test \
