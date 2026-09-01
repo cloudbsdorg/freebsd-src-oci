@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "cluster.h"
+#include "node_agent.h"
 
 #define OCLUSTER_VERSION "0.1.0"
 
@@ -86,7 +87,9 @@ main(int argc, char **argv)
 	const char *state = NULL, *name = NULL, *propose = NULL;
 	char propose_svc[128] = "";
 	char *peers[64];
-	int npeers = 0, interval = 0, ch;
+	const char *node_names[65];
+	int nnodes = 0;
+	int npeers = 0, interval = 0, ch, controller = 0;
 	int port = 6789;
 
 	static struct option lo[] = {
@@ -96,12 +99,13 @@ main(int argc, char **argv)
 		{ "name",	required_argument,	NULL, 'n' },
 		{ "interval",	required_argument,	NULL, 'i' },
 		{ "propose",	required_argument,	NULL, 'c' },
+		{ "controller",	no_argument,		NULL, 'C' },
 		{ "help",	no_argument,		NULL, 'h' },
 		{ "version",	no_argument,		NULL, 'v' },
 		{ NULL,		0,			NULL, 0 }
 	};
 
-	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:c:hv", lo, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:c:Chv", lo, NULL)) != -1) {
 		switch (ch) {
 		case 'p': port = atoi(optarg); break;
 		case 'P':
@@ -112,6 +116,7 @@ main(int argc, char **argv)
 		case 'n': name = optarg; break;
 		case 'i': interval = atoi(optarg); break;
 		case 'c': propose = optarg; break;
+		case 'C': controller = 1; break;
 		case 'v': printf("ocifbsd-cluster %s\n", OCLUSTER_VERSION);
 			return (0);
 		case 'h': usage(argv[0]); return (0);
@@ -165,6 +170,16 @@ main(int argc, char **argv)
 		*at = '\0';
 		cluster_node_add(peers[i], at + 1, (uint16_t)port);
 	}
+
+	/*
+	 * Node names for the controller: this node plus each peer name (the
+	 * peer strings are now just the name, the '@ip' having been split off
+	 * above). The leader plans replica placement across this set.
+	 */
+	gethostname(hn, sizeof(hn));
+	node_names[nnodes++] = name ? name : hn;
+	for (int i = 0; i < npeers && nnodes < 65; i++)
+		node_names[nnodes++] = peers[i];
 	if (gossip_start() != 0)
 		errx(1, "gossip_start failed (port %d in use?)", port);
 	if (raft_start() != 0)
@@ -213,6 +228,23 @@ main(int argc, char **argv)
 				printf("applied: service=%s replicas=%d\n",
 				    propose_svc,
 				    cluster_service_replicas(propose_svc));
+			}
+
+			/*
+			 * Controller: when leader, plan placements for the
+			 * desired state and propose them. Report the total
+			 * placements and this node's own assignment count.
+			 */
+			if (controller) {
+				struct agent_replica mine[64];
+				int nmine = 0;
+
+				(void)cluster_controller_tick(node_names,
+				    nnodes);
+				if (cluster_node_assignments(
+				    name ? name : hn, mine, 64, &nmine) == 0)
+					printf("placements: total=%d mine=%d\n",
+					    cluster_placement_count(), nmine);
 			}
 			if (status_requested) {
 				status_requested = 0;

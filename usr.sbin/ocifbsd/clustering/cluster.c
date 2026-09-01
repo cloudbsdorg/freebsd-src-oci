@@ -52,6 +52,8 @@
 
 #include "cluster.h"
 #include "control_plane.h"
+#include "controller.h"
+#include "node_agent.h"
 #include "../include/ocifbsd.h"
 
 /* Global cluster state */
@@ -1885,6 +1887,60 @@ cluster_cp_propose(const char *command)
     if (!is_leader)
         return (-1);
     return (raft_append_entry(command, strlen(command) + 1));
+}
+
+/*
+ * Leader controller tick: plan placements for the desired state across the
+ * given nodes and propose the resulting ASSIGN/UNASSIGN commands into the log.
+ * A no-op on a follower. Returns the number of commands proposed. Idempotent:
+ * once placements match the desired state the plan is empty.
+ */
+int
+cluster_controller_tick(const char *const *nodes, int nnodes)
+{
+    char plan[64][256];
+    int nplan = 0, proposed = 0, is_leader;
+
+    pthread_mutex_lock(&cluster_lock);
+    is_leader = (raft.state == RAFT_LEADER);
+    if (is_leader && raft.cp != NULL)
+        (void)controller_plan(raft.cp, nodes, nnodes, plan, 64, &nplan);
+    pthread_mutex_unlock(&cluster_lock);
+
+    if (!is_leader)
+        return (0);
+    for (int i = 0; i < nplan; i++)
+        if (cluster_cp_propose(plan[i]) == 0)
+            proposed++;
+    return (proposed);
+}
+
+/* Total placements in the replicated state (thread-safe). */
+int
+cluster_placement_count(void)
+{
+    int n;
+
+    pthread_mutex_lock(&cluster_lock);
+    n = cp_placement_count(raft.cp);
+    pthread_mutex_unlock(&cluster_lock);
+    return (n);
+}
+
+/*
+ * The assignment set for a node: the replicas the replicated state places on
+ * it, ready for that node's agent. Thread-safe. Returns 0 on success.
+ */
+int
+cluster_node_assignments(const char *node, struct agent_replica *out, int max,
+    int *nout)
+{
+    int rc;
+
+    pthread_mutex_lock(&cluster_lock);
+    rc = controller_node_assignments(raft.cp, node, out, max, nout);
+    pthread_mutex_unlock(&cluster_lock);
+    return (rc);
 }
 
 int

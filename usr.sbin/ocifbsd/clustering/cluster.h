@@ -255,6 +255,16 @@ int raft_append_entry(const char *command, size_t len);
  */
 int cluster_cp_propose(const char *command);
 int cluster_service_replicas(const char *service);
+
+/*
+ * Distributed-services glue over Raft: the leader plans placements each tick;
+ * every node reads the assignment set the replicated state gives it.
+ */
+struct agent_replica;	/* node_agent.h */
+int cluster_controller_tick(const char *const *nodes, int nnodes);
+int cluster_placement_count(void);
+int cluster_node_assignments(const char *node, struct agent_replica *out,
+    int max, int *nout);
 int raft_replicate_log(const char *target_id);
 int raft_commit_log(uint64_t index);
 int raft_get_leader(char *leader_id, size_t len);
