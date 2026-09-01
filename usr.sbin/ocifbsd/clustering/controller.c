@@ -60,6 +60,44 @@ controller_lb_ruleset(const struct cp_state *st, const char *service,
 }
 
 int
+controller_endpoint_commands(const struct cp_state *st,
+    const char *const *names, const char *const *addrs, int nnodes,
+    char (*out)[256], int max, int *nout)
+{
+	int k = 0, npl;
+
+	if (st == NULL || names == NULL || addrs == NULL || out == NULL ||
+	    nout == NULL)
+		return (-1);
+
+	npl = cp_placement_count(st);
+	for (int i = 0; i < npl; i++) {
+		char svc[128], node[256];
+		const char *addr = NULL;
+		int id;
+
+		if (cp_placement_at(st, i, svc, sizeof(svc), &id, node,
+		    sizeof(node)) != 0)
+			continue;
+		if (cp_replica_endpoint(st, svc, id) != NULL)
+			continue;		/* already has an endpoint */
+		for (int j = 0; j < nnodes; j++)
+			if (strcmp(names[j], node) == 0) {
+				addr = addrs[j];
+				break;
+			}
+		if (addr == NULL)
+			continue;		/* node address unknown */
+		if (k >= max)
+			return (-1);
+		snprintf(out[k], 256, "ENDPOINT %s %d %s", svc, id, addr);
+		k++;
+	}
+	*nout = k;
+	return (0);
+}
+
+int
 controller_node_assignments(const struct cp_state *st, const char *node,
     struct agent_replica *out, int max, int *nout)
 {

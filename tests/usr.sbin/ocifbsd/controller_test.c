@@ -178,8 +178,44 @@ ATF_TC_BODY(controller_lb_from_endpoints, tc)
 	cp_free(st);
 }
 
+/* The leader derives endpoints from placements + node addresses. */
+ATF_TC_WITHOUT_HEAD(controller_endpoints_from_placement);
+ATF_TC_BODY(controller_endpoints_from_placement, tc)
+{
+	const char *names[2] = { "n1", "n2" };
+	const char *addrs[2] = { "192.0.2.10", "192.0.2.11" };
+	struct cp_state *st = cp_new();
+	char cmds[16][256];
+	int n = 0;
+
+	ATF_REQUIRE(st != NULL);
+	ATF_REQUIRE_EQ(0, cp_apply(st, "CREATE web 2 nginx"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ASSIGN web 0 n1"));
+	ATF_REQUIRE_EQ(0, cp_apply(st, "ASSIGN web 1 n2"));
+
+	/* Two placements with no endpoint yet -> two ENDPOINT commands. */
+	ATF_REQUIRE_EQ(0, controller_endpoint_commands(st, names, addrs, 2,
+	    cmds, 16, &n));
+	ATF_CHECK_EQ_MSG(2, n, "expected 2 ENDPOINT commands, got %d", n);
+	for (int i = 0; i < n; i++) {
+		ATF_CHECK(strncmp(cmds[i], "ENDPOINT web", 12) == 0);
+		ATF_REQUIRE_EQ(0, cp_apply(st, cmds[i]));	/* replicate */
+	}
+
+	/* Endpoints now resolve to the node addresses. */
+	ATF_CHECK_STREQ("192.0.2.10", cp_replica_endpoint(st, "web", 0));
+	ATF_CHECK_STREQ("192.0.2.11", cp_replica_endpoint(st, "web", 1));
+
+	/* Converged: a second pass emits nothing. */
+	ATF_REQUIRE_EQ(0, controller_endpoint_commands(st, names, addrs, 2,
+	    cmds, 16, &n));
+	ATF_CHECK_EQ(0, n);
+	cp_free(st);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
+	ATF_TP_ADD_TC(tp, controller_endpoints_from_placement);
 	ATF_TP_ADD_TC(tp, controller_lb_from_endpoints);
 	ATF_TP_ADD_TC(tp, controller_node_assignments_slice);
 	ATF_TP_ADD_TC(tp, controller_initial_spread);

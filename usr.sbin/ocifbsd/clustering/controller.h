@@ -42,6 +42,17 @@ int	controller_lb_ruleset(const struct cp_state *st, const char *service,
 	    size_t outlen);
 
 /*
+ * Derive ENDPOINT commands from placements: for each placed replica that has
+ * no endpoint yet, emit "ENDPOINT <service> <id> <node-address>" using the
+ * names[]/addrs[] node map. The leader proposes these so the load-balancer
+ * pool is populated from placement without any agent round-trip (host-reachable
+ * replicas answer at their node address). Idempotent. Returns 0 on success.
+ */
+int	controller_endpoint_commands(const struct cp_state *st,
+	    const char *const *names, const char *const *addrs, int nnodes,
+	    char (*out)[256], int max, int *nout);
+
+/*
  * Compute the placement commands to converge st toward its desired replica
  * counts across nodes[0..nnodes-1]. Each command (a control-plane command line
  * such as "ASSIGN web 0 node1") is written to out[k] (each at least 256 bytes);
