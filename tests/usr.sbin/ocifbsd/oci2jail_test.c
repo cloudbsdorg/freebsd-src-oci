@@ -183,6 +183,71 @@ ATF_TC_BODY(parse_freebsd_ext, tc)
 	oci_free_spec(spec);
 }
 
+ATF_TC(parse_security_context);
+ATF_TC_HEAD(parse_security_context, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "parse process.noNewPrivileges, root.readonly, "
+	    "linux.readonlyPaths/maskedPaths");
+}
+ATF_TC_BODY(parse_security_context, tc)
+{
+	struct oci_runtime_spec *spec;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": {\n"
+	    "    \"args\": [ \"/bin/true\" ],\n"
+	    "    \"noNewPrivileges\": true\n"
+	    "  },\n"
+	    "  \"root\": { \"path\": \"rootfs\", \"readonly\": true },\n"
+	    "  \"linux\": {\n"
+	    "    \"readonlyPaths\": [ \"/proc\", \"/sys\" ],\n"
+	    "    \"maskedPaths\": [ \"/proc/kcore\" ]\n"
+	    "  }\n"
+	    "}\n");
+
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_CHECK(spec->process.no_new_privileges);
+	ATF_CHECK(spec->root.readonly);
+	ATF_REQUIRE_EQ(2, spec->n_readonly_paths);
+	ATF_CHECK_STREQ("/proc", spec->readonly_paths[0]);
+	ATF_CHECK_STREQ("/sys", spec->readonly_paths[1]);
+	ATF_REQUIRE_EQ(1, spec->n_masked_paths);
+	ATF_CHECK_STREQ("/proc/kcore", spec->masked_paths[0]);
+	oci_free_spec(spec);
+}
+
+ATF_TC(parse_security_defaults_open);
+ATF_TC_HEAD(parse_security_defaults_open, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "security context defaults are open: nothing restricted when absent");
+}
+ATF_TC_BODY(parse_security_defaults_open, tc)
+{
+	struct oci_runtime_spec *spec;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" }\n"
+	    "}\n");
+
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_CHECK(!spec->process.no_new_privileges);
+	ATF_CHECK(!spec->root.readonly);
+	ATF_CHECK_EQ(0, spec->n_readonly_paths);
+	ATF_CHECK_EQ(0, spec->n_masked_paths);
+	ATF_CHECK(spec->readonly_paths == NULL);
+	ATF_CHECK(spec->masked_paths == NULL);
+	oci_free_spec(spec);
+}
+
 ATF_TC(parse_missing_file);
 ATF_TC_HEAD(parse_missing_file, tc)
 {
@@ -666,6 +731,8 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, parse_user_int);
 	ATF_TP_ADD_TC(tp, parse_mounts);
 	ATF_TP_ADD_TC(tp, parse_freebsd_ext);
+	ATF_TP_ADD_TC(tp, parse_security_context);
+	ATF_TP_ADD_TC(tp, parse_security_defaults_open);
 	ATF_TP_ADD_TC(tp, parse_missing_file);
 	ATF_TP_ADD_TC(tp, parse_bad_json);
 	ATF_TP_ADD_TC(tp, validate_ok);

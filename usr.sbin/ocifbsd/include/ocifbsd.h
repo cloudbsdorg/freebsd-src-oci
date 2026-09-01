@@ -118,6 +118,13 @@ struct oci_process {
 	char	*rlimits_no_reset; /* Rlimits not to reset */
 	struct oci_rlimit *rlimits;
 	int	n_rlimits;
+	/*
+	 * process.noNewPrivileges (OCI). Default false = open/permissive: the
+	 * container may gain privileges via set-user-ID binaries as usual. When
+	 * true, ocifbsd mounts the container root nosuid so set-user-ID and
+	 * set-group-ID bits cannot raise privilege. Restriction is opt-in.
+	 */
+	bool	no_new_privileges;
 };
 
 struct oci_mount {
@@ -179,6 +186,17 @@ struct oci_runtime_spec {
 	char			*domainname;
 	char			**additional_gids;
 	char			*oom_score_adj;
+	/*
+	 * linux.readonlyPaths / linux.maskedPaths (OCI). Both default empty =
+	 * open/permissive: no path is forced read-only or masked. When set,
+	 * ocifbsd remounts each readonly path read-only (nullfs -o ro over
+	 * itself) and masks each masked path with an empty read-only overlay,
+	 * inside the container root. Restriction is opt-in.
+	 */
+	char			**readonly_paths;
+	int			n_readonly_paths;
+	char			**masked_paths;
+	int			n_masked_paths;
 };
 
 /* Container lifecycle operations */

@@ -552,6 +552,13 @@ oci_parse_config(const char *config_path)
 				}
 			}
 		}
+		/*
+		 * process.noNewPrivileges. Default false (open): the container
+		 * may gain privileges via set-user-ID binaries. When true it is
+		 * enforced later by mounting the root nosuid.
+		 */
+		spec->process.no_new_privileges =
+		    json_get_bool(proc_val, "noNewPrivileges", 0);
 		(void)nargs;
 		(void)nenv;
 	}
@@ -562,6 +569,24 @@ oci_parse_config(const char *config_path)
 
 	/* Parse mounts */
 	spec->mounts = parse_mounts(root, &spec->n_mounts);
+
+	/*
+	 * linux.readonlyPaths / linux.maskedPaths. Both default empty (open):
+	 * nothing is forced read-only or masked unless the bundle asks for it.
+	 * Enforced later in the container root (see container_apply_paths).
+	 */
+	{
+		struct json_object *lx;
+
+		lx = json_object_object_get(root, "linux");
+		if (lx != NULL &&
+		    json_object_get_type(lx) == json_type_object) {
+			spec->readonly_paths = json_get_string_array(lx,
+			    "readonlyPaths", &spec->n_readonly_paths);
+			spec->masked_paths = json_get_string_array(lx,
+			    "maskedPaths", &spec->n_masked_paths);
+		}
+	}
 
 	/* Parse hooks */
 	spec->hooks = parse_hooks(root);
@@ -615,6 +640,18 @@ oci_free_spec(struct oci_runtime_spec *spec)
 			free(spec->mounts[i].options);
 		}
 		free(spec->mounts);
+	}
+
+	if (spec->readonly_paths) {
+		for (i = 0; i < spec->n_readonly_paths; i++)
+			free(spec->readonly_paths[i]);
+		free(spec->readonly_paths);
+	}
+
+	if (spec->masked_paths) {
+		for (i = 0; i < spec->n_masked_paths; i++)
+			free(spec->masked_paths[i]);
+		free(spec->masked_paths);
 	}
 
 #define FREE_HOOKS(arr, count) do {						\
