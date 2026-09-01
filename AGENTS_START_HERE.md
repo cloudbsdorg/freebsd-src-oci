@@ -50,7 +50,7 @@ All plan documents are in the `.plan/` directory, numbered using the `<Major>.<M
 | `9.0` | [`009.0-Clustering-Infrastructure.md`](.plan/009.0-Clustering-Infrastructure.md) | Multi-node clustering, gossip, Raft |
 | `10.0` | [`010.0-Security-Credentials-WebUI.md`](.plan/010.0-Security-Credentials-WebUI.md) | Security, RBAC, secrets, Web UI |
 | `11.0` | [`011.0-Node-Authentication.md`](.plan/011.0-Node-Authentication.md) | Node auth, mTLS, bootstrap tokens |
-| `12.0` | [`012.0-TPM-UX-Common-Sense.md`](.plan/012.0-TPM-UX-Common-Sense.md) | TPM management, simplified UX |
+| `12.0` | [`012.0-Cluster-UX.md`](.plan/012.0-Cluster-UX.md) | TPM management, simplified UX |
 | `13.0` | [`013.0-PAM-System-Credentials.md`](.plan/013.0-PAM-System-Credentials.md) | PAM integration, system credentials |
 | `14.0` | [`014.0-Observability-Logging.md`](.plan/014.0-Observability-Logging.md) | Structured logging, alerting, events |
 | `15.0` | [`015.0-API-Specification.md`](.plan/015.0-API-Specification.md) | REST/gRPC API spec |
@@ -209,7 +209,7 @@ Then dive into the specific phase you're working on.
 | 9 | Clustering Infrastructure | 9.1-9.20 | ✅ DONE |
 | 10 | Security/Credentials/WebUI | 10.1-10.18 | ✅ DONE |
 | 11 | Node Authentication | 11.1-11.20 | ✅ DONE |
-| 12 | TPM/UX Common Sense | 12.1-12.20 | ✅ DONE |
+| 12 | Cluster UX (TPM removed) | 12.9-12.20 | ✅ DONE |
 | 13 | PAM/System Credentials | 13.1-13.18 | ✅ DONE |
 | 14 | Observability/Logging | 14.1-14.20 | ✅ DONE |
 | 15 | API Specification | 15.1-15.20 | ✅ DONE |

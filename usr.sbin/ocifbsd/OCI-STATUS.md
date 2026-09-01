@@ -58,6 +58,22 @@ and the `ocifbsd.c` CLI:
    completes once released) and pinned by two ATF regression cases
    (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
+## 🗑️ **2026-08-31 — TPM support removed from the project**
+
+Per an explicit product decision, **TPM support has been removed entirely**.
+The `usr.sbin/ocifbsd/tpm/` subdirectory (`tpm.c`/`tpm.h`/`Makefile`) is
+deleted, the `tpm` SUBDIR is dropped from the main Makefile, `cert/` no
+longer includes the tpm headers, the unused `use_tpm` field is gone from
+`cert/cert.h`, and the "use TPM/HSM" comments in `security-daemon/auth.c`
+have been reworded. The `tpm/` code was already dead (nothing outside it
+called any `tpm_*` function, no `ocifbsd tpm` CLI verb was ever wired, and no
+test referenced it), so removal is behavior-preserving. Cluster security
+relies on its software paths only: the CA private key is protected by
+filesystem permissions rather than TPM sealing, and node join uses the
+token/CSR flow rather than TPM attestation. TPM must not be reintroduced.
+Historical dated log entries below that mention `tpm` are left as the record
+of what the tree looked like before this removal.
+
 ## 🧩 **2026-08-31 — Phase 5 boot-time tooling landed (rc.d + ocifbsd.conf)**
 
 Plan tasks 5.1–5.4 (`.plan/005.0`) are now **DONE** and validated on this
@@ -81,8 +97,9 @@ three design-level limitations below (per-container rootfs isolation,
 TOCTOU-safe path walks, cross-process state locking) and the Phase 0–5
 test-execution tasks (perf/stress/conformance/limits) that require the
 multi-host lab — fredev005/006 are currently unreachable from the build
-host. The greenfield features (real ACME, cloud export, TPM 2.0, full Raft)
-remain deferred pending external credentials/hardware and product decisions.
+host. The greenfield features (real ACME, cloud export, full Raft) remain
+deferred pending external credentials/endpoints and product decisions. (TPM
+was removed from the project on 2026-08-31.)
 
 ## 🚀 **2026-08-28 — Verified running real FreeBSD OCI images end-to-end**
 
@@ -149,11 +166,11 @@ run under sudo). New CLI verbs landed: `exec`, `stop`, `pause`, `resume`,
 
 **Remaining (feature work, not bugs — mostly comment-only stub files):**
 real ACME/Let's Encrypt (`cert/acme.c`), cloud export for AWS/GCP/Azure
-(`export/*.c`), HTTP log forwarding (`logd/forward.c`), real TPM 2.0
-operations (software fallback only today), and full Raft. These are
-greenfield implementations that need external resources (credentials,
-registry/cloud endpoints, TPM hardware) and product decisions; they are the
-natural next targets once prioritized.
+(`export/*.c`), HTTP log forwarding (`logd/forward.c`), and full Raft. These
+are greenfield implementations that need external resources (credentials,
+registry/cloud endpoints) and product decisions; they are the natural next
+targets once prioritized. (TPM support was **removed** from the project on
+2026-08-31 — see the removal note below.)
 
 ## 🎉🎉🎉 **ALL 15 SUBDIRs RE-ENABLED — BOOTSTRAP 100% COMPLETE!**
 
@@ -164,9 +181,10 @@ been fixed and committed. The end-to-end build of
 FreeBSD 16.0-CURRENT.
 
 - **Main binary**: `ocifbsd` (50K) builds, links, and runs.
-- **15 active SUBDIRs build clean**: api, cert, clustering,
+- **14 active SUBDIRs build clean**: api, cert, clustering,
   convert, export, gc, image, logd, metrics, namespace,
-  network, orchestration, pam, security, security-daemon, tpm.
+  network, orchestration, pam, security, security-daemon.
+  (The `tpm` SUBDIR was removed on 2026-08-31.)
 - **0 SUBDIRs commented out** — full coverage.
 
 **Phase 1 commits (all pushed to origin)**:
@@ -332,7 +350,6 @@ freebsd-src-oci/
 │   ├── cert/                      # Certificate management
 │   ├── logd/                      # Logging daemon
 │   ├── gc/                        # Garbage collection
-│   ├── tpm/                       # TPM (optional)
 │   ├── export/                    # Cloud export (AWS/GCP/Azure)
 │   ├── include/                   # Public headers
 │   └── ocifbsd.c                  # CLI entry point
@@ -663,7 +680,6 @@ Zero remaining deferred refactor work.
 | pam               | `pam_ocifbsd.so.1` (41K, PAM module)  | Active |
 | security          | `libocifbsd_security.a` (70K) + `.so.1` | Active |
 | security-daemon   | (linked into main)                    | Active |
-| tpm               | (linked into main)                    | Active |
 
 **Phase 1 COMPLETE** (2026-06-05 13:40 UTC) — cert, export, gc,
 logd, and pam all fixed, committed, and pushed. Each one
@@ -861,7 +877,7 @@ Still to do:
 - Run `make -C subdir` for each of the 15 module subdirs
   (api, cert, clustering, convert, export, gc, image, logd,
   metrics, namespace, network, orchestration, pam, security,
-  security-daemon, tpm) — each has its own Makefile and may have
+  security-daemon) — each has its own Makefile and may have
   similar issues to the main SRCS files
 - `sudo make install` end-to-end
 - `ocifbsd --version` smoke test

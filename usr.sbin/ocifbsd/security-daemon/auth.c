@@ -98,7 +98,7 @@ static struct {
     { ROLE_OPERATOR, PERM_READ | PERM_WRITE },
 };
 
-/* Encryption key (in production, use TPM or HSM) */
+/* Encryption key (in production, load from secure key storage) */
 static uint8_t encryption_key[32];
 static int encryption_key_initialized = 0;
 
@@ -175,7 +175,7 @@ auth_init(void)
     
     /* Initialize encryption key */
     if (!encryption_key_initialized) {
-        /* In production, derive from TPM or read from secure storage */
+        /* In production, read from secure key storage */
         arc4random_buf(encryption_key, sizeof(encryption_key));
         encryption_key_initialized = 1;
     }

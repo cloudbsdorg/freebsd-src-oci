@@ -25,7 +25,6 @@ LDFLAGS+=	-L/usr/local/lib
 LDADD+=		-ljson-c
 
 CFLAGS+=	-I${SRCDIR}/include
-CFLAGS+=	-I${SRCDIR}/tpm
 
 WARNS?=	3
 

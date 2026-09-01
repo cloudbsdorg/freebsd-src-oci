@@ -88,7 +88,6 @@ struct rotation_config {
     int             warning_days;          /* Days before expiry to warn */
     int             critical_days;          /* Days before expiry for critical */
     bool            auto_rotate;
-    bool            use_tpm;
     bool            dual_cert_mode;         /* During rotation */
 };
 

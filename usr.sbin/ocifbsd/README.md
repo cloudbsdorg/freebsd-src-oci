@@ -10,7 +10,7 @@
 - **Image Management**: Pull/push images from OCI and Docker registries
 - **Networking**: Bridge, VNET, CNI plugin support
 - **Resource Limits**: Memory, CPU, process limits via RCTL
-- **Security**: MAC labels, RBAC, secrets, TPM support (optional)
+- **Security**: MAC labels, RBAC, secrets
 - **Clustering**: Multi-node support with gossip protocol and Raft consensus
 - **Config Conversion**: Convert Kubernetes YAML and Docker Compose to native format
 
@@ -104,7 +104,6 @@ ocifbsd
 ├── metrics/           # Metrics collection     [active, builds clean]
 ├── namespace/         # Namespace isolation    [active, builds clean]
 ├── security-daemon/   # Security daemon (RBAC, secrets, TLS)  [active, builds clean]
-├── tpm/               # TPM support (optional) [active, builds clean]
 │
 # 9 SUBDIRs below are commented out in the Makefile — deferred
 # AI-slop refactor work. See OCI-STATUS.md §5 for details.

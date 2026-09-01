@@ -95,7 +95,6 @@ SUBDIR+=	orchestration
 SUBDIR+=	pam
 SUBDIR+=	security
 SUBDIR+=	security-daemon
-SUBDIR+=	tpm
 
 CFLAGS+=	-I${.CURDIR}/include
 CFLAGS+=	-I${.CURDIR}

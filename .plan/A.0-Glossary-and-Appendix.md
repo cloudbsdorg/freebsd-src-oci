@@ -39,7 +39,6 @@
     - [A.5.5 Jails vs Linux Containers](#a55-jails-vs-linux-containers)
   - [A.6 Hardware and Virtualization Terms](#a6-hardware-and-virtualization-terms)
     - [A.6.1 HSM](#a61-hsm)
-    - [A.6.2 TPM](#a62-tpm)
     - [A.6.3 SR-IOV](#a63-sr-iov)
     - [A.6.4 DPDK](#a64-dpdk)
   - [A.7 Protocol and Data Format Terms](#a7-protocol-and-data-format-terms)
@@ -973,20 +972,6 @@ Traffic continues via Host B
 - Signed data
 
 **In our system:** HSM support is optional but recommended for production.
-
----
-
-### A.6.2 TPM
-
-**TPM (Trusted Platform Module)** is a hardware chip that provides cryptographic functions and secure storage.
-
-**Capabilities:**
-- Secure key storage
-- Platform attestation (proving system integrity)
-- Random number generation
-- Sealed storage (data bound to system state)
-
-**In our system:** TPM can be used for node attestation during bootstrap.
 
 ---
 
