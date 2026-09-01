@@ -48,7 +48,7 @@ The default is 6789.
 All nodes in a cluster must use the same port.
 .It Fl P , Fl Fl peer Ar host@ip
 A seed peer, given as its node name and reachable IP address
-.Pq for example Ar db1@192.168.1.241 .
+.Pq for example Ar db1@192.0.2.11 .
 Repeat for each seed peer.
 A newly started node announces itself to its seed peers, so a running cluster
 learns of it automatically.
@@ -81,17 +81,17 @@ prints the node's current status on demand.
 Start a three-node cluster, one command per host, all on the default port with
 persistent state:
 .Bd -literal -offset indent
-# on n1 (192.168.1.240)
+# on n1 (192.0.2.10)
 ocifbsd-cluster -s /var/db/ocifbsd/raft \e
-    -P n2@192.168.1.241 -P n3@192.168.1.242 run
+    -P n2@192.0.2.11 -P n3@192.0.2.12 run
 
-# on n2 (192.168.1.241)
+# on n2 (192.0.2.11)
 ocifbsd-cluster -s /var/db/ocifbsd/raft \e
-    -P n1@192.168.1.240 -P n3@192.168.1.242 run
+    -P n1@192.0.2.10 -P n3@192.0.2.12 run
 
-# on n3 (192.168.1.242)
+# on n3 (192.0.2.12)
 ocifbsd-cluster -s /var/db/ocifbsd/raft \e
-    -P n1@192.168.1.240 -P n2@192.168.1.241 run
+    -P n1@192.0.2.10 -P n2@192.0.2.11 run
 .Ed
 .Sh SEE ALSO
 .Xr ocifbsd 8
