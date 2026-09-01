@@ -261,8 +261,10 @@ int cluster_service_replicas(const char *service);
  * every node reads the assignment set the replicated state gives it.
  */
 struct agent_replica;	/* node_agent.h */
-int cluster_controller_tick(const char *const *nodes, int nnodes);
+int cluster_controller_tick(const char *const *names, const char *const *addrs,
+    int nnodes);
 int cluster_placement_count(void);
+int cluster_service_endpoint_count(const char *service);
 int cluster_node_assignments(const char *node, struct agent_replica *out,
     int max, int *nout);
 int raft_replicate_log(const char *target_id);

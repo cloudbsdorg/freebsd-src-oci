@@ -10,14 +10,41 @@
  */
 
 #include <sys/types.h>
+#include <sys/socket.h>
 
+#include <arpa/inet.h>
 #include <err.h>
 #include <getopt.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* Best-effort primary IPv4 of this host (first non-loopback), into buf. */
+static void
+primary_ipv4(char *buf, size_t buflen)
+{
+	struct ifaddrs *ifa, *p;
+
+	strlcpy(buf, "127.0.0.1", buflen);
+	if (getifaddrs(&ifa) != 0)
+		return;
+	for (p = ifa; p != NULL; p = p->ifa_next) {
+		struct sockaddr_in *sin;
+
+		if (p->ifa_addr == NULL || p->ifa_addr->sa_family != AF_INET)
+			continue;
+		sin = (struct sockaddr_in *)(void *)p->ifa_addr;
+		if (ntohl(sin->sin_addr.s_addr) == INADDR_LOOPBACK)
+			continue;
+		inet_ntop(AF_INET, &sin->sin_addr, buf, (socklen_t)buflen);
+		break;
+	}
+	freeifaddrs(ifa);
+}
 
 #include "cluster.h"
 #include "node_agent.h"
@@ -88,7 +115,9 @@ main(int argc, char **argv)
 	const char *agent_path = NULL;
 	char propose_svc[128] = "";
 	char *peers[64];
-	const char *node_names[65];
+	const char *peer_ips[64];
+	const char *node_names[65], *node_addrs[65];
+	char self_ip[64];
 	int nnodes = 0;
 	int npeers = 0, interval = 0, ch, controller = 0;
 	int port = 6789;
@@ -171,18 +200,25 @@ main(int argc, char **argv)
 		if (at == NULL)
 			errx(2, "bad --peer '%s' (want hostname@ip)", peers[i]);
 		*at = '\0';
+		peer_ips[i] = at + 1;			/* ip half, kept */
 		cluster_node_add(peers[i], at + 1, (uint16_t)port);
 	}
 
 	/*
-	 * Node names for the controller: this node plus each peer name (the
-	 * peer strings are now just the name, the '@ip' having been split off
-	 * above). The leader plans replica placement across this set.
+	 * Node name/address map for the controller: this node plus each peer.
+	 * The leader plans replica placement across the names and derives
+	 * load-balancer endpoints from the addresses.
 	 */
 	gethostname(hn, sizeof(hn));
-	node_names[nnodes++] = name ? name : hn;
-	for (int i = 0; i < npeers && nnodes < 65; i++)
-		node_names[nnodes++] = peers[i];
+	primary_ipv4(self_ip, sizeof(self_ip));
+	node_names[nnodes] = name ? name : hn;
+	node_addrs[nnodes] = self_ip;
+	nnodes++;
+	for (int i = 0; i < npeers && nnodes < 65; i++) {
+		node_names[nnodes] = peers[i];
+		node_addrs[nnodes] = peer_ips[i];
+		nnodes++;
+	}
 	if (gossip_start() != 0)
 		errx(1, "gossip_start failed (port %d in use?)", port);
 	if (raft_start() != 0)
@@ -245,11 +281,15 @@ main(int argc, char **argv)
 				int nmine = 0;
 
 				(void)cluster_controller_tick(node_names,
-				    nnodes);
+				    node_addrs, nnodes);
 				if (cluster_node_assignments(
 				    name ? name : hn, mine, 64, &nmine) == 0)
-					printf("placements: total=%d mine=%d\n",
-					    cluster_placement_count(), nmine);
+					printf("placements: total=%d mine=%d"
+					    " endpoints=%d\n",
+					    cluster_placement_count(), nmine,
+					    propose_svc[0] ?
+					    cluster_service_endpoint_count(
+					    propose_svc) : 0);
 			}
 
 			/*

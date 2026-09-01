@@ -1896,21 +1896,30 @@ cluster_cp_propose(const char *command)
  * once placements match the desired state the plan is empty.
  */
 int
-cluster_controller_tick(const char *const *nodes, int nnodes)
+cluster_controller_tick(const char *const *names, const char *const *addrs,
+    int nnodes)
 {
     char plan[64][256];
-    int nplan = 0, proposed = 0, is_leader;
+    char eps[64][256];
+    int nplan = 0, neps = 0, proposed = 0, is_leader;
 
     pthread_mutex_lock(&cluster_lock);
     is_leader = (raft.state == RAFT_LEADER);
-    if (is_leader && raft.cp != NULL)
-        (void)controller_plan(raft.cp, nodes, nnodes, plan, 64, &nplan);
+    if (is_leader && raft.cp != NULL) {
+        (void)controller_plan(raft.cp, names, nnodes, plan, 64, &nplan);
+        if (addrs != NULL)
+            (void)controller_endpoint_commands(raft.cp, names, addrs,
+                nnodes, eps, 64, &neps);
+    }
     pthread_mutex_unlock(&cluster_lock);
 
     if (!is_leader)
         return (0);
     for (int i = 0; i < nplan; i++)
         if (cluster_cp_propose(plan[i]) == 0)
+            proposed++;
+    for (int i = 0; i < neps; i++)
+        if (cluster_cp_propose(eps[i]) == 0)
             proposed++;
     return (proposed);
 }
@@ -1923,6 +1932,19 @@ cluster_placement_count(void)
 
     pthread_mutex_lock(&cluster_lock);
     n = cp_placement_count(raft.cp);
+    pthread_mutex_unlock(&cluster_lock);
+    return (n);
+}
+
+/* Number of reported endpoints (load-balancer backends) for a service. */
+int
+cluster_service_endpoint_count(const char *service)
+{
+    char ips[256][64];
+    int n;
+
+    pthread_mutex_lock(&cluster_lock);
+    n = cp_service_endpoints(raft.cp, service, ips, 256);
     pthread_mutex_unlock(&cluster_lock);
     return (n);
 }
