@@ -79,69 +79,72 @@ ensemble_services_get_services(const char *compose, int *count)
 	
 	const char *p = compose;
 	
-	while ((p = strstr(p, "services:")) != NULL) {
-		p += 9;
-		
-		/* Find next top-level key or end */
-		const char *end = p;
-		while (*end && *end != '\n') {
-			if (!isspace(*end) && *end != '#') {
-				/* Check for top-level key */
-				if (*end == 'x' && end[1] == ':') break;
-				if (*end == 'v' && strncmp(end, "version:", 8) == 0) break;
-				if (*end == 'n' && strncmp(end, "networks:", 9) == 0) break;
-				if (*end == 'v' && strncmp(end, "volumes:", 8) == 0) break;
-				if (*end == 's' && strncmp(end, "services:", 9) == 0) break;
+	if ((p = strstr(p, "services:")) != NULL) {
+		const char *nl = strchr(p, '\n');
+		int svc_indent = -1;
+
+		/* Start scanning at the line after "services:". */
+		const char *line = (nl != NULL) ? nl + 1 : p + strlen(p);
+
+		/*
+		 * The services block runs until the first non-blank line at
+		 * indentation 0 (the next top-level key) or end of input.
+		 * Service names sit at the first indentation level inside the
+		 * block; more-deeply-indented lines (image:, ports:, ...) are
+		 * service properties and must not be picked up.
+		 */
+		while (*line != '\0') {
+			const char *q = line;
+			int indent = 0;
+			const char *line_end;
+
+			while (*q == ' ' || *q == '\t') {
+				indent++;
+				q++;
 			}
-			end++;
-		}
-		
-		/* Parse service names (lines that start with a word followed by colon at indent) */
-		const char *line_start = p;
-		while (line_start < end) {
-			const char *line_end = strchr(line_start, '\n');
-			if (line_end == NULL)
-				line_end = end;
-			
-			/* Check if this looks like a service name */
-			const char *name_start = line_start;
-			while (isspace(*name_start) && name_start < line_end)
-				name_start++;
-			
-			if (name_start < line_end && !isspace(*name_start) &&
-			    *name_start != '#' && *name_start != '-' &&
-			    isalpha(*name_start)) {
-				const char *name_end = name_start;
-				while (isalnum(*name_end) || *name_end == '_' || *name_end == '-')
-					name_end++;
-				
-				if (name_end > name_start && *name_end == ':') {
-					/* Found a service name */
-					size_t name_len = name_end - name_start;
-					char *name = malloc(name_len + 1);
-					if (name != NULL) {
-						memcpy(name, name_start, name_len);
-						name[name_len] = '\0';
-						
-						if (*count >= services_cap) {
-							services_cap = services_cap ? services_cap * 2 : 16;
-							services = realloc(services,
-							    services_cap * sizeof(char *));
-						}
-						if (services != NULL) {
+			line_end = strchr(line, '\n');
+
+			if (*q == '\n' || *q == '\0' || *q == '#') {
+				/* blank or comment line: skip */
+			} else if (indent == 0) {
+				break;			/* next top-level key */
+			} else {
+				if (svc_indent < 0)
+					svc_indent = indent;
+				if (indent == svc_indent && isalpha((unsigned char)*q)) {
+					const char *ne = q;
+					while (isalnum((unsigned char)*ne) ||
+					    *ne == '_' || *ne == '-' || *ne == '.')
+						ne++;
+					if (ne > q && *ne == ':') {
+						size_t name_len = (size_t)(ne - q);
+						char *name = malloc(name_len + 1);
+						if (name != NULL) {
+							memcpy(name, q, name_len);
+							name[name_len] = '\0';
+							if (*count >= services_cap) {
+								char **grown;
+								services_cap = services_cap ?
+								    services_cap * 2 : 16;
+								grown = realloc(services,
+								    services_cap * sizeof(char *));
+								if (grown == NULL) {
+									free(name);
+									return (services);
+								}
+								services = grown;
+							}
 							services[*count] = name;
 							(*count)++;
-						} else {
-							free(name);
 						}
 					}
 				}
 			}
-			
-			line_start = line_end + 1;
+
+			if (line_end == NULL)
+				break;
+			line = line_end + 1;
 		}
-		
-		break;  /* Only process first "services:" block */
 	}
 	
 	return (services);
@@ -154,24 +157,38 @@ static char *
 ensemble_services_get_value(const char *service_block, const char *key)
 {
 	const char *p;
-	char search[64];
 	char *result = NULL;
-	
-	snprintf(search, sizeof(search), "\n%s:", key);
-	
-	p = strstr(service_block, search);
-	if (p == NULL) {
-		/* Try at start of block */
-		snprintf(search, sizeof(search), "%s:", key);
-		if (strncmp(service_block, search, strlen(search)) == 0)
-			p = service_block;
+	size_t keylen = strlen(key);
+
+	/*
+	 * Find "<indent>key:" at the start of some line within the block. YAML
+	 * service properties are indented, so match the key after any leading
+	 * whitespace rather than only at column 0. Returns the first match,
+	 * which for a well-formed block is this service's value for the key.
+	 */
+	p = NULL;
+	{
+		const char *line = service_block;
+		/* allow a match on the very first line of the block too */
+		for (;;) {
+			const char *q = line;
+			while (*q == ' ' || *q == '\t')
+				q++;
+			if (strncmp(q, key, keylen) == 0 && q[keylen] == ':') {
+				p = q + keylen + 1;
+				break;
+			}
+			line = strchr(line, '\n');
+			if (line == NULL)
+				break;
+			line++;
+		}
 	}
-	
+
 	if (p == NULL)
 		return (NULL);
-	
-	p += strlen(search);
-	while (isspace(*p))
+
+	while (*p == ' ' || *p == '\t')
 		p++;
 	
 	/* Check for inline array/list */
@@ -232,6 +249,34 @@ ensemble_services_get_value(const char *service_block, const char *key)
 }
 
 /*
+ * Locate a service's block: the line "<indent><name>:" (indented under the
+ * services: map). Returns a pointer to the start of the name, or NULL.
+ */
+static const char *
+ensemble_services_find_block(const char *compose, const char *name)
+{
+	char needle[128];
+	size_t nlen;
+	const char *sp = compose;
+
+	nlen = (size_t)snprintf(needle, sizeof(needle), "%s:", name);
+	while ((sp = strstr(sp, needle)) != NULL) {
+		const char *bol = sp;
+
+		while (bol > compose && bol[-1] != '\n')
+			bol--;
+		/* Accept only when just indentation precedes the name. */
+		const char *w = bol;
+		while (w < sp && (*w == ' ' || *w == '\t'))
+			w++;
+		if (w == sp)
+			return (sp);
+		sp += nlen;
+	}
+	return (NULL);
+}
+
+/*
  * Convert Ensemble to native format
  */
 int
@@ -262,7 +307,7 @@ ensemble_services_convert_v2(const char *compose, char **output,
 	
 	services = ensemble_services_get_services(compose, &count);
 	if (services == NULL || count == 0) {
-		*output = strdup("# No services found in compose file\n");
+		*output = strdup("# No services found in the stack file\n");
 		return (CONVERT_SUCCESS);
 	}
 	
@@ -274,24 +319,20 @@ ensemble_services_convert_v2(const char *compose, char **output,
 	    "\n"
 	    "version: \"1.0\"\n"
 	    "\n"
-	    "name: compose-project\n"
+	    "name: ensemble-stack\n"
 	    "namespace: default\n"
 	    "\n");
 	
 	for (int i = 0; i < count; i++) {
-		char *service_block;
+		const char *service_block;
 		char *image, *command, *ports, *volumes, *environment;
 		char *networks, *depends_on;
-		char *entry;
-		
-		/* Extract service block */
-		asprintf(&entry, "\n%s:", services[i]);
-		service_block = strstr(compose, entry);
-		free(entry);
-		
+
+		/* Extract service block (indented under services:) */
+		service_block = ensemble_services_find_block(compose, services[i]);
 		if (service_block == NULL)
 			continue;
-		
+
 		/* Extract values */
 		image = ensemble_services_get_value(service_block, "image");
 		command = ensemble_services_get_value(service_block, "command");
@@ -303,11 +344,11 @@ ensemble_services_convert_v2(const char *compose, char **output,
 		
 		char *new_result;
 		asprintf(&new_result,
-		    "%sservices:\n"
-		    "  - name: %s\n"
+		    "%s%s  - name: %s\n"
 		    "    image: %s\n"
 		    "%s%s%s%s%s%s%s%s\n",
 		    result,
+		    i == 0 ? "services:\n" : "",
 		    services[i],
 		    image ? image : services[i],
 		    command ? "    command: " : "",
@@ -352,7 +393,7 @@ ensemble_services_convert_v3(const char *compose, char **output,
 	
 	services = ensemble_services_get_services(compose, &count);
 	if (services == NULL || count == 0) {
-		*output = strdup("# No services found in compose file\n");
+		*output = strdup("# No services found in the stack file\n");
 		return (CONVERT_SUCCESS);
 	}
 	
@@ -364,23 +405,19 @@ ensemble_services_convert_v3(const char *compose, char **output,
 	    "\n"
 	    "version: \"1.0\"\n"
 	    "\n"
-	    "name: compose-project\n"
+	    "name: ensemble-stack\n"
 	    "namespace: default\n"
 	    "\n");
 	
 	for (int i = 0; i < count; i++) {
-		char *service_block;
+		const char *service_block;
 		char *image, *command, *ports, *volumes, *environment;
 		char *networks, *depends_on, *deploy_replicas;
-		char *entry;
-		
-		asprintf(&entry, "\n%s:", services[i]);
-		service_block = strstr(compose, entry);
-		free(entry);
-		
+
+		service_block = ensemble_services_find_block(compose, services[i]);
 		if (service_block == NULL)
 			continue;
-		
+
 		image = ensemble_services_get_value(service_block, "image");
 		command = ensemble_services_get_value(service_block, "command");
 		ports = ensemble_services_get_value(service_block, "ports");
@@ -400,12 +437,12 @@ ensemble_services_convert_v3(const char *compose, char **output,
 		
 		char *new_result;
 		asprintf(&new_result,
-		    "%sservices:\n"
-		    "  - name: %s\n"
+		    "%s%s  - name: %s\n"
 		    "    image: %s\n"
 		    "    replicas: %d\n"
 		    "%s%s%s%s%s%s%s%s%s%s\n",
 		    result,
+		    i == 0 ? "services:\n" : "",
 		    services[i],
 		    image ? image : services[i],
 		    replicas,

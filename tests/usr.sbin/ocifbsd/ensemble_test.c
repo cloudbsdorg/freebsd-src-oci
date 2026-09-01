@@ -19,6 +19,7 @@
 
 #include "convert.h"
 #include "convert/ensemble.c"
+#include "convert/ensemble_services.c"
 
 /* ----- ensemble_detect_kind (static) ----- */
 
@@ -368,8 +369,55 @@ ATF_TC_BODY(ensemble_convert_multi_skips_unknown, tc)
 	free(out);
 }
 
+/* A multi-service stack file converts and names each service (not "compose"). */
+ATF_TC_WITHOUT_HEAD(ensemble_services_two_services);
+ATF_TC_BODY(ensemble_services_two_services, tc)
+{
+	const char *in =
+	    "version: \"3\"\n"
+	    "services:\n"
+	    "  web:\n"
+	    "    image: nginx:1.27\n"
+	    "  db:\n"
+	    "    image: postgres:16\n";
+	char *out = NULL;
+	struct convert_options opts;
+	int r;
+
+	memset(&opts, 0, sizeof(opts));
+	r = ensemble_services_convert(in, &out, &opts);
+	ATF_REQUIRE_EQ(0, r);
+	ATF_REQUIRE(out != NULL);
+	ATF_CHECK_MSG(strstr(out, "No services found") == NULL,
+	    "converter reported no services for a valid stack file");
+	ATF_CHECK_MSG(strstr(out, "web") != NULL, "service 'web' missing from output");
+	ATF_CHECK_MSG(strstr(out, "db") != NULL, "service 'db' missing from output");
+	/* nested keys must not be treated as services */
+	ATF_CHECK_MSG(strstr(out, "name: image") == NULL,
+	    "a nested key was mistaken for a service");
+	free(out);
+}
+
+/* No stray "compose" branding in the converter's output. */
+ATF_TC_WITHOUT_HEAD(ensemble_services_no_compose_branding);
+ATF_TC_BODY(ensemble_services_no_compose_branding, tc)
+{
+	const char *in = "services:\n  app:\n    image: alpine:3.20\n";
+	char *out = NULL;
+	struct convert_options opts;
+
+	memset(&opts, 0, sizeof(opts));
+	ATF_REQUIRE_EQ(0, ensemble_services_convert(in, &out, &opts));
+	ATF_REQUIRE(out != NULL);
+	ATF_CHECK_MSG(strstr(out, "compose") == NULL,
+	    "output still contains the word 'compose'");
+	free(out);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
+	ATF_TP_ADD_TC(tp, ensemble_services_two_services);
+	ATF_TP_ADD_TC(tp, ensemble_services_no_compose_branding);
 	ATF_TP_ADD_TC(tp, ensemble_detect_kind_deployment);
 	ATF_TP_ADD_TC(tp, ensemble_detect_kind_service);
 	ATF_TP_ADD_TC(tp, ensemble_detect_kind_service_account_not_service);
