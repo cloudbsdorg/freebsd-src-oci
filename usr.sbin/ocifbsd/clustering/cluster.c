@@ -51,6 +51,7 @@
 #include <sha256.h>
 
 #include "cluster.h"
+#include "control_plane.h"
 #include "../include/ocifbsd.h"
 
 /* Global cluster state */
@@ -140,6 +141,7 @@ static void raft_on_install_snap(const char *from,
     const struct raft_snap_req *r);
 static void raft_replicate_to_peers(void);
 static void raft_advance_commit(void);
+static void raft_apply_committed(void);
 static void raft_maybe_compact(void);
 
 /* Event callback */
@@ -1209,6 +1211,7 @@ raft_init(void)
     raft.current_term = 0;
     raft.commit_index = 0;      /* volatile: relearned from the leader */
     raft.last_applied = 0;
+    raft.cp = cp_new();         /* replicated control-plane state */
 
     p = getenv("OCIFBSD_RAFT_STATE");
     if (p != NULL && p[0] != '\0')
@@ -1536,8 +1539,7 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
         uint64_t last = raft_last_log_index();
 
         raft.commit_index = r->leader_commit < last ? r->leader_commit : last;
-        if (raft.last_applied < raft.commit_index)
-            raft.last_applied = raft.commit_index;
+        raft_apply_committed();
     }
 
     /* Persist only when the term advanced or the log changed — a bare
@@ -1680,6 +1682,33 @@ raft_replicate_to_peers(void)
 }
 
 /*
+ * Apply newly-committed log entries to the control-plane state machine, in
+ * order, advancing last_applied. Idempotent and deterministic: every node
+ * applies the same committed command sequence and converges. The caller must
+ * hold cluster_lock. Non-control-plane commands are simply ignored by
+ * cp_apply(), so ordinary Raft traffic is unaffected.
+ */
+static void
+raft_apply_committed(void)
+{
+    while (raft.last_applied < raft.commit_index) {
+        uint64_t idx = raft.last_applied + 1;
+        int pos;
+
+        if (idx <= raft.snapshot_index) {       /* compacted away */
+            raft.last_applied = idx;
+            continue;
+        }
+        pos = (int)(idx - raft.snapshot_index - 1);
+        if (pos < 0 || pos >= raft.log_size)
+            break;                              /* not present yet */
+        if (raft.cp != NULL)
+            (void)cp_apply(raft.cp, raft.log[pos].command);
+        raft.last_applied = idx;
+    }
+}
+
+/*
  * Leader: advance commit index to the highest N replicated on a majority,
  * restricted to entries from the current term (Raft §5.4.2).
  */
@@ -1706,8 +1735,7 @@ raft_advance_commit(void)
                     cnt++;
             if (cnt >= majority) {
                 raft.commit_index = N;
-                if (raft.last_applied < raft.commit_index)
-                    raft.last_applied = raft.commit_index;
+                raft_apply_committed();
                 break;
             }
         }
@@ -1818,7 +1846,45 @@ raft_stop(void)
         return (0);
     __sync_fetch_and_and(&raft_running, 0);
     pthread_join(raft_thread, NULL);
+    cp_free(raft.cp);
+    raft.cp = NULL;
     return (0);
+}
+
+/*
+ * Query the replicated control-plane state. Returns the desired replica count
+ * for a service, or -1 if unknown. Thread-safe.
+ */
+int
+cluster_service_replicas(const char *service)
+{
+    int r;
+
+    pthread_mutex_lock(&cluster_lock);
+    r = cp_service_replicas(raft.cp, service);
+    pthread_mutex_unlock(&cluster_lock);
+    return (r);
+}
+
+/*
+ * Propose a control-plane command (CREATE/SCALE/DELETE/ASSIGN/UNASSIGN) to the
+ * cluster. Only the leader may propose; the command is appended to the Raft
+ * log, replicated, and applied on every node once committed. Returns 0 on
+ * success, -1 if not the leader or on error.
+ */
+int
+cluster_cp_propose(const char *command)
+{
+    int is_leader;
+
+    if (command == NULL || command[0] == '\0')
+        return (-1);
+    pthread_mutex_lock(&cluster_lock);
+    is_leader = (raft.state == RAFT_LEADER);
+    pthread_mutex_unlock(&cluster_lock);
+    if (!is_leader)
+        return (-1);
+    return (raft_append_entry(command, strlen(command) + 1));
 }
 
 int

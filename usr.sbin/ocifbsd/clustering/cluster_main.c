@@ -83,7 +83,8 @@ main(int argc, char **argv)
 {
 	struct cluster_config cfg;
 	char hn[256];
-	const char *state = NULL, *name = NULL;
+	const char *state = NULL, *name = NULL, *propose = NULL;
+	char propose_svc[128] = "";
 	char *peers[64];
 	int npeers = 0, interval = 0, ch;
 	int port = 6789;
@@ -94,12 +95,13 @@ main(int argc, char **argv)
 		{ "state",	required_argument,	NULL, 's' },
 		{ "name",	required_argument,	NULL, 'n' },
 		{ "interval",	required_argument,	NULL, 'i' },
+		{ "propose",	required_argument,	NULL, 'c' },
 		{ "help",	no_argument,		NULL, 'h' },
 		{ "version",	no_argument,		NULL, 'v' },
 		{ NULL,		0,			NULL, 0 }
 	};
 
-	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:hv", lo, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "p:P:s:n:i:c:hv", lo, NULL)) != -1) {
 		switch (ch) {
 		case 'p': port = atoi(optarg); break;
 		case 'P':
@@ -109,6 +111,7 @@ main(int argc, char **argv)
 		case 's': state = optarg; break;
 		case 'n': name = optarg; break;
 		case 'i': interval = atoi(optarg); break;
+		case 'c': propose = optarg; break;
 		case 'v': printf("ocifbsd-cluster %s\n", OCLUSTER_VERSION);
 			return (0);
 		case 'h': usage(argv[0]); return (0);
@@ -123,6 +126,17 @@ main(int argc, char **argv)
 	}
 	if (port <= 0 || port > 65535)
 		errx(2, "invalid port %d", port);
+
+	/* For -c/--propose, remember the service name (2nd token) to observe. */
+	if (propose != NULL) {
+		char tmp[256], *sv = NULL, *tok;
+
+		strlcpy(tmp, propose, sizeof(tmp));
+		(void)strtok_r(tmp, " \t", &sv);	/* verb */
+		tok = strtok_r(NULL, " \t", &sv);	/* service */
+		if (tok != NULL)
+			strlcpy(propose_svc, tok, sizeof(propose_svc));
+	}
 
 	/* State file and node-id/ip overrides are read from the environment by
 	 * the clustering library; set them from the flags before init. */
@@ -167,7 +181,7 @@ main(int argc, char **argv)
 	print_status(name ? name : hn);
 
 	{
-		int last_role = -1, secs = 0;
+		int last_role = -1, secs = 0, proposed = 0;
 		uint64_t last_term = 0;
 		char last_leader[256] = "";
 
@@ -184,6 +198,21 @@ main(int argc, char **argv)
 				last_role = role;
 				last_term = term;
 				strlcpy(last_leader, leader, sizeof(last_leader));
+			}
+
+			/* --propose: once leader, submit the command; then report
+			 * the replicated, applied desired state each tick. */
+			if (propose != NULL && !proposed &&
+			    role == RAFT_LEADER) {
+				if (cluster_cp_propose(propose) == 0) {
+					proposed = 1;
+					printf("proposed: %s\n", propose);
+				}
+			}
+			if (propose_svc[0] != '\0') {
+				printf("applied: service=%s replicas=%d\n",
+				    propose_svc,
+				    cluster_service_replicas(propose_svc));
 			}
 			if (status_requested) {
 				status_requested = 0;

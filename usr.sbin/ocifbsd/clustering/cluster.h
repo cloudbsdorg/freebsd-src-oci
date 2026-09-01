@@ -161,6 +161,9 @@ struct cluster_event {
     char details[512];
 };
 
+/* Control-plane state machine (opaque; see control_plane.h). */
+struct cp_state;
+
 /* Raft consensus state */
 struct raft_state {
     enum {
@@ -196,6 +199,10 @@ struct raft_state {
     } *log;
     int log_size;
     int log_capacity;
+
+    /* Replicated control-plane state, rebuilt by applying committed log
+     * entries in order (see raft_apply_committed / control_plane.c). */
+    struct cp_state *cp;
 };
 
 /* Cluster management functions */
@@ -241,6 +248,13 @@ int raft_become_leader(void);
 int raft_become_follower(const char *leader_id);
 int raft_become_candidate(void);
 int raft_append_entry(const char *command, size_t len);
+
+/*
+ * Control-plane over Raft: propose a command (leader only) that is replicated
+ * and applied on every node, and query the replicated desired state.
+ */
+int cluster_cp_propose(const char *command);
+int cluster_service_replicas(const char *service);
 int raft_replicate_log(const char *target_id);
 int raft_commit_log(uint64_t index);
 int raft_get_leader(char *leader_id, size_t len);
