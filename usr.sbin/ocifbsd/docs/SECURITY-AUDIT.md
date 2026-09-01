@@ -22,20 +22,25 @@ so a symlink that escapes the root fails with `ENOTCAPABLE`; in-rootfs symlinks
 `unpack_rejects_symlink_escape` builds the exploit layer and asserts the
 through-symlink write is blocked; all 7 unpack tests pass.
 
-### 🔴 2. Cluster consensus over unauthenticated UDP → cluster-wide RCE — OPEN (top follow-up)
-`clustering/cluster.c`. The gossip + Raft transport is a plain UDP socket with
-no authentication, HMAC, or mTLS. Any host that can reach the port can inject a
-`JOIN` (rogue membership) or a forged `APPEND_REQ` carrying a Raft log command
-(`CREATE <svc> <n> <image>`, `ASSIGN`, …); committed commands are applied by
-`cp_apply()` and schedule/run containers, so an unauthenticated packet becomes
-**code execution on every node**. Wire fields are correctly bounds-checked
-(no over-read) — the defect is the missing authentication. The `cluster_mtls`
-module already exists (`clustering/cluster_mtls.c`, correct `SSL_VERIFY_PEER` +
-`FAIL_IF_NO_PEER_CERT`) but is **not wired into this path**. **Fix (planned):**
-carry gossip/Raft over the mTLS channel, or at minimum authenticate every
-datagram with an HMAC keyed by a cluster join secret, and drop unauthenticated
-packets before any state mutation. Until then, the clustering ports must be
-confined to a trusted network by deployment (documented operational control).
+### 🔴 2. Cluster consensus over unauthenticated UDP → cluster-wide RCE — FIXED (opt-in auth)
+`clustering/cluster.c`. The gossip + Raft transport is a plain UDP socket; a
+forged `APPEND_REQ` carrying a Raft command (`CREATE <svc> <n> <image>`, …) was
+applied by `cp_apply()` and ran the attacker's container **on every node** —
+network-unauthenticated cluster-wide code execution. **Fix:** every gossip/Raft
+datagram now carries a trailing HMAC-SHA256 tag keyed by the configured cluster
+key, computed at the single send choke point (`gossip_send_message`) and
+verified in constant time (`CRYPTO_memcmp`) at the single receive choke point
+(`gossip_handle_message`) **before any state is touched**; forged, tampered,
+wrong-key and untagged (raw-injection) packets are dropped. Consistent with the
+project's open-default posture, authentication is **opt-in via the cluster key**
+(`OCIFBSD_CLUSTER_KEYFILE`, or `OCIFBSD_CLUSTER_KEY`) — with a key the cluster is
+authenticated; with none it runs unauthenticated and **warns loudly at startup**
+to confine the port or set a key. Verified: keyed vs unkeyed startup messages,
+and a deterministic test showing valid packets accepted while
+tampered/wrong-key/raw-injection are rejected. See
+`docs/security-restrictions.md` for how to set the key. (The `cluster_mtls`
+module remains available for a future full-mTLS transport; HMAC is the bounded
+fix appropriate to a UDP protocol.)
 
 ### 🟠 3. MAC-label command injection in namespace apply — FIXED
 `namespace/namespace.c`. `ns_apply_mac_label()` runs `system("jail -m label=%s …")`
@@ -89,8 +94,9 @@ symlink-safe resolver at mount time.
   memory safety).
 - **Hooks** (`src/hooks.c`): `execve` with explicit argv/envp (no shell).
 
-## Priority
+## Remaining
 
-Finding **#2 (unauthenticated consensus)** is the top remaining item — it is a
-design change (wire `cluster_mtls`/HMAC into the gossip/Raft path) and until it
-lands the clustering ports must be network-confined by deployment.
+Both critical findings are fixed. Open items are the lower-severity `system()`
+builders: **#4** (latent, no caller) and **#5** (operator self-injection) — both
+should move to `fork`/`execv` with argv arrays. **#6** is residual and low. None
+are remotely triggerable.

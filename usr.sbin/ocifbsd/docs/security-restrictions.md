@@ -103,6 +103,29 @@ run the container in its own VNET so it has an independent network stack.
   "freebsd": { "vnet": true, "ip4": ["192.0.2.10"] } }
 ```
 
+## Cluster authentication (works today, opt-in)
+
+The gossip/Raft control channel authenticates every datagram with HMAC-SHA256
+when a shared cluster key is configured. Without a key the cluster runs
+unauthenticated (open default) and warns at startup — set a key so a host that
+can merely reach the port cannot inject Raft commands (which schedule and run
+containers) into the cluster.
+
+Prefer a key file (not visible in `ps(1)` or the environment); all nodes must
+share the same key:
+
+```sh
+# once, on a trusted host — generate a random key and distribute it
+openssl rand -hex 32 > /etc/ocifbsd/cluster.key
+chmod 600 /etc/ocifbsd/cluster.key
+
+# start each node pointing at the shared key
+OCIFBSD_CLUSTER_KEYFILE=/etc/ocifbsd/cluster.key ocifbsd-cluster -n node1 run
+```
+
+`OCIFBSD_CLUSTER_KEY=<secret>` is also honored as a fallback. Nodes with
+mismatched keys cannot exchange messages, so the whole cluster must use one key.
+
 ## Summary
 
 | Restriction | Field | FreeBSD status |
