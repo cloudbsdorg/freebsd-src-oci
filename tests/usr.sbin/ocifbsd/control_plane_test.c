@@ -8,6 +8,7 @@
  */
 
 #include <atf-c.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -118,9 +119,67 @@ ATF_TC_BODY(cp_deterministic_convergence, tc)
 	cp_free(b);
 }
 
+/*
+ * Stress: many services and placements. Exercises the state machine's growth
+ * and lookups at scale and confirms it stays correct under load.
+ */
+ATF_TC_WITHOUT_HEAD(cp_stress_scale);
+ATF_TC_BODY(cp_stress_scale, tc)
+{
+	const int NSVC = 500;
+	const int NNODE = 6;
+	struct cp_state *s = cp_new();
+	char cmd[256];
+
+	ATF_REQUIRE(s != NULL);
+
+	/* Create NSVC services, each with 4 replicas spread over NNODE nodes. */
+	for (int i = 0; i < NSVC; i++) {
+		snprintf(cmd, sizeof(cmd), "CREATE svc%d 4 img:%d", i, i);
+		ATF_REQUIRE_EQ(0, cp_apply(s, cmd));
+		for (int r = 0; r < 4; r++) {
+			snprintf(cmd, sizeof(cmd), "ASSIGN svc%d %d node%d",
+			    i, r, (i * 4 + r) % NNODE);
+			ATF_REQUIRE_EQ(0, cp_apply(s, cmd));
+		}
+	}
+
+	ATF_CHECK_EQ(NSVC, cp_service_count(s));
+
+	/* Every placement landed: 4*NSVC replicas across NNODE nodes evenly. */
+	int total = 0;
+	for (int n = 0; n < NNODE; n++) {
+		char node[32];
+		snprintf(node, sizeof(node), "node%d", n);
+		total += cp_node_replica_count(s, node);
+	}
+	ATF_CHECK_EQ(NSVC * 4, total);
+
+	/* Spot-check a few services survived intact. */
+	ATF_CHECK_EQ(4, cp_service_replicas(s, "svc0"));
+	ATF_CHECK_EQ(4, cp_service_replicas(s, "svc499"));
+	ATF_CHECK(cp_service_image(s, "svc250") != NULL);
+
+	/* Scale and delete half, verify consistency. */
+	for (int i = 0; i < NSVC; i += 2) {
+		snprintf(cmd, sizeof(cmd), "DELETE svc%d", i);
+		ATF_REQUIRE_EQ(0, cp_apply(s, cmd));
+	}
+	ATF_CHECK_EQ(NSVC / 2, cp_service_count(s));
+	total = 0;
+	for (int n = 0; n < NNODE; n++) {
+		char node[32];
+		snprintf(node, sizeof(node), "node%d", n);
+		total += cp_node_replica_count(s, node);
+	}
+	ATF_CHECK_EQ((NSVC / 2) * 4, total);	/* deleted services' placements gone */
+	cp_free(s);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, cp_service_lifecycle);
+	ATF_TP_ADD_TC(tp, cp_stress_scale);
 	ATF_TP_ADD_TC(tp, cp_placement);
 	ATF_TP_ADD_TC(tp, cp_delete_drops_placements);
 	ATF_TP_ADD_TC(tp, cp_rejects_bad_commands);
