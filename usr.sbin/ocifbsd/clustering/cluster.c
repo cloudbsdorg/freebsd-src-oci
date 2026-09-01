@@ -1331,10 +1331,36 @@ raft_loop(void *arg)
         }
         pthread_mutex_unlock(&cluster_lock);
 
-        if (do_replicate)
+        if (do_replicate) {
             raft_replicate_to_peers();
-        if (do_vote)
+            /* Re-evaluate commit each tick so a leader that is itself a
+             * majority (e.g. a single-node cluster, where no AppendEntries
+             * replies arrive) still advances its commit index. */
+            raft_advance_commit();
+        }
+        if (do_vote) {
             gossip_broadcast(GOSSIP_MSG_VOTE_REQ, &vreq, sizeof(vreq));
+            /*
+             * A candidate's self-vote may already be a majority (e.g. a
+             * single-node cluster), in which case no vote responses will ever
+             * arrive to trigger promotion — so check for a win right here.
+             */
+            int majority = raft_cluster_size() / 2 + 1;
+            int won = 0;
+
+            pthread_mutex_lock(&cluster_lock);
+            if (raft.state == RAFT_CANDIDATE &&
+                raft_votes_granted >= majority) {
+                raft.state = RAFT_LEADER;
+                strlcpy(raft.leader_id, local_node->node_id,
+                    sizeof(raft.leader_id));
+                raft_last_hb_ms = 0;
+                won = 1;
+            }
+            pthread_mutex_unlock(&cluster_lock);
+            if (won)
+                cluster_emit_event(6, local_node->node_id, "became leader");
+        }
 
         usleep(RAFT_TICK_MS * 1000);
     }
@@ -1347,9 +1373,11 @@ raft_on_vote_req(const char *from, const struct raft_vote_req *r)
 {
     struct raft_vote_resp resp;
     uint8_t grant = 0;
+    uint64_t t0;
 
     memset(&resp, 0, sizeof(resp));
     pthread_mutex_lock(&cluster_lock);
+    t0 = raft.current_term;
     if (r->term > raft.current_term) {      /* newer term: step down */
         raft.current_term = r->term;
         raft.state = RAFT_FOLLOWER;
@@ -1366,7 +1394,10 @@ raft_on_vote_req(const char *from, const struct raft_vote_req *r)
     }
     resp.term = raft.current_term;
     resp.granted = grant;
-    raft_persist();     /* durable currentTerm/votedFor before replying */
+    /* Persist only when currentTerm or votedFor actually changed — avoids an
+     * fsync on every rejected/duplicate RequestVote. */
+    if (grant || raft.current_term != t0)
+        raft_persist();
     pthread_mutex_unlock(&cluster_lock);
 
     gossip_send_message(from, GOSSIP_MSG_VOTE_RESP, &resp, sizeof(resp));
@@ -1433,9 +1464,12 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
         (const struct raft_wire_entry *)((const uint8_t *)r + sizeof(*r));
     struct raft_append_resp resp;
     uint32_t k;
+    uint64_t t0;
+    int appended = 0;
 
     memset(&resp, 0, sizeof(resp));
     pthread_mutex_lock(&cluster_lock);
+    t0 = raft.current_term;
 
     if (r->term < raft.current_term) {          /* stale leader: reject */
         resp.term = raft.current_term;
@@ -1460,7 +1494,8 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
         resp.term = raft.current_term;
         resp.success = 0;
         resp.match_index = raft_last_log_index();
-        raft_persist();     /* currentTerm may have advanced above */
+        if (raft.current_term != t0)
+            raft_persist();     /* only if currentTerm advanced above */
         goto out;
     }
 
@@ -1477,6 +1512,7 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
             if (raft.log[pos].term == we[k].term)
                 continue;                      /* already present */
             raft.log_size = (int)pos;          /* conflict: truncate */
+            appended = 1;
         }
         if (raft.log_size >= raft.log_capacity) {
             int nc = raft.log_capacity ? raft.log_capacity * 2 : 16;
@@ -1494,6 +1530,7 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
             sizeof(raft.log[raft.log_size].command));
         raft.log[raft.log_size].timestamp = time(NULL);
         raft.log_size++;
+        appended = 1;
     }
 
     /* Advance commit index toward the leader's, bounded by our log. */
@@ -1505,7 +1542,10 @@ raft_on_append_req(const char *from, const struct raft_append_req *r)
             raft.last_applied = raft.commit_index;
     }
 
-    raft_persist();     /* durable currentTerm + log before acking success */
+    /* Persist only when the term advanced or the log changed — a bare
+     * heartbeat (no new entries, same term) needs no fsync. */
+    if (appended || raft.current_term != t0)
+        raft_persist();
     resp.term = raft.current_term;
     resp.success = 1;
     resp.match_index = raft_last_log_index();
