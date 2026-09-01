@@ -103,6 +103,16 @@ struct raft_append_resp {
     uint8_t  success;
     uint64_t match_index;
 };
+/* One replicated log entry on the wire (fixed-size; command is bounded by the
+ * raft_log_entry command field). AppendEntries carries n_entries of these
+ * immediately after the struct raft_append_req header. */
+struct raft_wire_entry {
+    uint64_t term;
+    uint64_t index;
+    char     command[256];
+};
+#define RAFT_MAX_BATCH  16   /* entries per AppendEntries */
+
 /* Gossip transport internals, used before their definitions below. */
 static void *gossip_loop(void *arg);
 static void gossip_handle_message(uint8_t *buf, size_t len,
@@ -115,6 +125,8 @@ static void raft_on_vote_resp(const char *from, const struct raft_vote_resp *r);
 static void raft_on_append_req(const char *from, const struct raft_append_req *r);
 static void raft_on_append_resp(const char *from,
     const struct raft_append_resp *r);
+static void raft_replicate_to_peers(void);
+static void raft_advance_commit(void);
 
 /* Event callback */
 static cluster_event_cb event_callback;
@@ -768,11 +780,19 @@ gossip_handle_message(uint8_t *buf, size_t len, struct sockaddr_in *sender)
                     (const struct raft_vote_resp *)msg->payload);
             break;
 
-        case GOSSIP_MSG_APPEND_REQ:
-            if (msg->length >= sizeof(struct raft_append_req))
-                raft_on_append_req(msg->source_id,
-                    (const struct raft_append_req *)msg->payload);
+        case GOSSIP_MSG_APPEND_REQ: {
+            const struct raft_append_req *ar =
+                (const struct raft_append_req *)msg->payload;
+
+            /* Bound n_entries and require the payload actually carry them,
+             * so the handler never reads past the received bytes. */
+            if (msg->length >= sizeof(*ar) &&
+                ar->n_entries <= RAFT_MAX_BATCH &&
+                (size_t)msg->length >= sizeof(*ar) +
+                (size_t)ar->n_entries * sizeof(struct raft_wire_entry))
+                raft_on_append_req(msg->source_id, ar);
             break;
+        }
 
         case GOSSIP_MSG_APPEND_RESP:
             if (msg->length >= sizeof(struct raft_append_resp))
@@ -1110,23 +1130,16 @@ raft_loop(void *arg)
     (void)arg;
     while (__sync_fetch_and_add(&raft_running, 0) != 0) {
         int64_t now = raft_now_ms();
-        int do_vote = 0, do_hb = 0;
+        int do_vote = 0, do_replicate = 0;
         struct raft_vote_req vreq;
-        struct raft_append_req areq;
 
         memset(&vreq, 0, sizeof(vreq));
-        memset(&areq, 0, sizeof(areq));
 
         pthread_mutex_lock(&cluster_lock);
         if (raft.state == RAFT_LEADER) {
             if (now - raft_last_hb_ms >= RAFT_HEARTBEAT_MS) {
                 raft_last_hb_ms = now;
-                areq.term = raft.current_term;
-                areq.prev_log_index = raft_last_log_index();
-                areq.prev_log_term = raft_last_log_term();
-                areq.leader_commit = raft.commit_index;
-                areq.n_entries = 0;
-                do_hb = 1;
+                do_replicate = 1;
             }
         } else if (now >= raft_election_deadline_ms) {
             /* Election timeout — start a new election. */
@@ -1143,8 +1156,8 @@ raft_loop(void *arg)
         }
         pthread_mutex_unlock(&cluster_lock);
 
-        if (do_hb)
-            gossip_broadcast(GOSSIP_MSG_APPEND_REQ, &areq, sizeof(areq));
+        if (do_replicate)
+            raft_replicate_to_peers();
         if (do_vote)
             gossip_broadcast(GOSSIP_MSG_VOTE_REQ, &vreq, sizeof(vreq));
 
@@ -1210,56 +1223,244 @@ raft_on_vote_resp(const char *from, const struct raft_vote_resp *r)
     }
     pthread_mutex_unlock(&cluster_lock);
 
-    if (became)
+    if (became) {
+        /* Initialize per-peer replication cursors: nextIndex = leader's
+         * last log index + 1, matchIndex = 0 (Raft §5.3). */
+        struct cluster_node **peers;
+        int count, i;
+
+        peers = cluster_nodes_list(&count);
+        if (peers != NULL) {
+            pthread_mutex_lock(&cluster_lock);
+            for (i = 0; i < count; i++) {
+                peers[i]->raft_next_index = raft_last_log_index() + 1;
+                peers[i]->raft_match_index = 0;
+            }
+            pthread_mutex_unlock(&cluster_lock);
+            free(peers);
+        }
         cluster_emit_event(6, local_node->node_id, "became leader");
+    }
 }
 
-/* Handle an inbound AppendEntries (heartbeat in this stage). */
+/*
+ * Handle an inbound AppendEntries: term check, log-consistency check against
+ * (prev_log_index, prev_log_term), append/overwrite the carried entries, and
+ * advance the follower commit index to leader_commit. The caller has already
+ * bounded n_entries and verified the payload carries that many wire entries.
+ */
 static void
 raft_on_append_req(const char *from, const struct raft_append_req *r)
 {
+    const struct raft_wire_entry *we =
+        (const struct raft_wire_entry *)((const uint8_t *)r + sizeof(*r));
     struct raft_append_resp resp;
+    uint32_t k;
 
     memset(&resp, 0, sizeof(resp));
     pthread_mutex_lock(&cluster_lock);
+
     if (r->term < raft.current_term) {          /* stale leader: reject */
         resp.term = raft.current_term;
         resp.success = 0;
         resp.match_index = raft_last_log_index();
-        pthread_mutex_unlock(&cluster_lock);
-        gossip_send_message(from, GOSSIP_MSG_APPEND_RESP, &resp,
-            sizeof(resp));
-        return;
+        goto out;
     }
     /* Valid leader for this term: (re)establish follower state. */
     raft.current_term = r->term;
     raft.state = RAFT_FOLLOWER;
     strlcpy(raft.leader_id, from, sizeof(raft.leader_id));
     raft_reset_election_timer();
-    /* Log consistency check + entry append arrive in the next stage;
-     * a heartbeat (n_entries == 0) is acknowledged as success here. */
+
+    /* Log matching: the entry preceding the new ones must agree. */
+    if (r->prev_log_index > 0 &&
+        (r->prev_log_index > (uint64_t)raft.log_size ||
+         raft.log[r->prev_log_index - 1].term != r->prev_log_term)) {
+        resp.term = raft.current_term;
+        resp.success = 0;
+        resp.match_index = raft_last_log_index();
+        goto out;
+    }
+
+    /* Append entries, truncating on the first conflicting term (Raft §5.3). */
+    for (k = 0; k < r->n_entries; k++) {
+        uint64_t idx = r->prev_log_index + 1 + k;
+
+        if (idx <= (uint64_t)raft.log_size) {
+            if (raft.log[idx - 1].term == we[k].term)
+                continue;                      /* already present */
+            raft.log_size = (int)(idx - 1);    /* conflict: truncate */
+        }
+        if (raft.log_size >= raft.log_capacity) {
+            int nc = raft.log_capacity ? raft.log_capacity * 2 : 16;
+            struct raft_log_entry *g = realloc(raft.log,
+                nc * sizeof(struct raft_log_entry));
+
+            if (g == NULL)
+                break;
+            raft.log = g;
+            raft.log_capacity = nc;
+        }
+        raft.log[raft.log_size].term = we[k].term;
+        raft.log[raft.log_size].index = idx;
+        strlcpy(raft.log[raft.log_size].command, we[k].command,
+            sizeof(raft.log[raft.log_size].command));
+        raft.log[raft.log_size].timestamp = time(NULL);
+        raft.log_size++;
+    }
+
+    /* Advance commit index toward the leader's, bounded by our log. */
+    if (r->leader_commit > raft.commit_index) {
+        uint64_t last = raft_last_log_index();
+
+        raft.commit_index = r->leader_commit < last ? r->leader_commit : last;
+        if (raft.last_applied < raft.commit_index)
+            raft.last_applied = raft.commit_index;
+    }
+
     resp.term = raft.current_term;
     resp.success = 1;
     resp.match_index = raft_last_log_index();
+out:
     pthread_mutex_unlock(&cluster_lock);
-
     gossip_send_message(from, GOSSIP_MSG_APPEND_RESP, &resp, sizeof(resp));
 }
 
-/* Handle an AppendEntries reply. */
+/* Handle an AppendEntries reply: update the peer's next/match cursors and try
+ * to advance the commit index. */
 static void
 raft_on_append_resp(const char *from, const struct raft_append_resp *r)
 {
-    (void)from;
+    struct cluster_node *p;
+    int stepped_down = 0;
+
     pthread_mutex_lock(&cluster_lock);
     if (r->term > raft.current_term) {          /* newer term: step down */
         raft.current_term = r->term;
         raft.state = RAFT_FOLLOWER;
         raft.voted_for[0] = '\0';
         raft_reset_election_timer();
+        stepped_down = 1;
     }
-    /* match/next-index bookkeeping is added with log replication. */
+    if (stepped_down || raft.state != RAFT_LEADER ||
+        r->term != raft.current_term) {
+        pthread_mutex_unlock(&cluster_lock);
+        return;
+    }
     pthread_mutex_unlock(&cluster_lock);
+
+    p = cluster_node_get(from);
+    if (p == NULL)
+        return;
+    pthread_mutex_lock(&cluster_lock);
+    if (r->success) {
+        if (r->match_index + 1 > p->raft_next_index)
+            p->raft_next_index = r->match_index + 1;
+        if (r->match_index > p->raft_match_index)
+            p->raft_match_index = r->match_index;
+    } else if (p->raft_next_index > 1) {
+        p->raft_next_index--;                   /* back off, retry next tick */
+    }
+    pthread_mutex_unlock(&cluster_lock);
+    cluster_node_put(p);
+
+    raft_advance_commit();
+}
+
+/*
+ * Leader: replicate to each peer. For every peer, send the entries starting at
+ * its nextIndex (capped to RAFT_MAX_BATCH), with the preceding (index, term)
+ * for the consistency check and the current commit index. A peer with nothing
+ * outstanding still gets a zero-entry AppendEntries, which serves as the
+ * heartbeat.
+ */
+static void
+raft_replicate_to_peers(void)
+{
+    struct cluster_node **peers;
+    int count, i;
+
+    peers = cluster_nodes_list(&count);
+    if (peers == NULL)
+        return;
+    for (i = 0; i < count; i++) {
+        uint8_t buf[sizeof(struct raft_append_req) +
+            RAFT_MAX_BATCH * sizeof(struct raft_wire_entry)];
+        struct raft_append_req *req = (struct raft_append_req *)buf;
+        struct raft_wire_entry *we =
+            (struct raft_wire_entry *)(buf + sizeof(*req));
+        char target[256];
+        uint32_t nsent = 0;
+        uint64_t ni, prev_index, idx;
+        size_t len;
+
+        pthread_mutex_lock(&cluster_lock);
+        if (raft.state != RAFT_LEADER) {
+            pthread_mutex_unlock(&cluster_lock);
+            break;
+        }
+        strlcpy(target, peers[i]->node_id, sizeof(target));
+        ni = peers[i]->raft_next_index;
+        if (ni < 1)
+            ni = 1;
+        prev_index = ni - 1;
+        req->term = raft.current_term;
+        req->prev_log_index = prev_index;
+        req->prev_log_term = (prev_index >= 1 &&
+            prev_index <= (uint64_t)raft.log_size) ?
+            raft.log[prev_index - 1].term : 0;
+        req->leader_commit = raft.commit_index;
+        for (idx = ni; idx <= (uint64_t)raft.log_size &&
+            nsent < RAFT_MAX_BATCH; idx++) {
+            we[nsent].term = raft.log[idx - 1].term;
+            we[nsent].index = raft.log[idx - 1].index;
+            strlcpy(we[nsent].command, raft.log[idx - 1].command,
+                sizeof(we[nsent].command));
+            nsent++;
+        }
+        req->n_entries = nsent;
+        pthread_mutex_unlock(&cluster_lock);
+
+        len = sizeof(*req) + (size_t)nsent * sizeof(struct raft_wire_entry);
+        gossip_send_message(target, GOSSIP_MSG_APPEND_REQ, buf, len);
+    }
+    free(peers);
+}
+
+/*
+ * Leader: advance commit index to the highest N replicated on a majority,
+ * restricted to entries from the current term (Raft §5.4.2).
+ */
+static void
+raft_advance_commit(void)
+{
+    struct cluster_node **peers;
+    int count, i;
+
+    peers = cluster_nodes_list(&count);
+    pthread_mutex_lock(&cluster_lock);
+    if (raft.state == RAFT_LEADER) {
+        int majority = (count + 1) / 2 + 1;     /* +1 for the leader */
+        uint64_t N;
+
+        for (N = (uint64_t)raft.log_size; N > raft.commit_index; N--) {
+            int cnt = 1;                        /* leader has entry N */
+
+            if (raft.log[N - 1].term != raft.current_term)
+                continue;
+            for (i = 0; peers != NULL && i < count; i++)
+                if (peers[i]->raft_match_index >= N)
+                    cnt++;
+            if (cnt >= majority) {
+                raft.commit_index = N;
+                if (raft.last_applied < raft.commit_index)
+                    raft.last_applied = raft.commit_index;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&cluster_lock);
+    free(peers);
 }
 
 int
@@ -1311,6 +1512,28 @@ raft_term(void)
     t = raft.current_term;
     pthread_mutex_unlock(&cluster_lock);
     return (t);
+}
+
+uint64_t
+raft_commit_index(void)
+{
+    uint64_t c;
+
+    pthread_mutex_lock(&cluster_lock);
+    c = raft.commit_index;
+    pthread_mutex_unlock(&cluster_lock);
+    return (c);
+}
+
+int
+raft_log_len(void)
+{
+    int n;
+
+    pthread_mutex_lock(&cluster_lock);
+    n = raft.log_size;
+    pthread_mutex_unlock(&cluster_lock);
+    return (n);
 }
 
 /*

@@ -71,6 +71,29 @@ and the `ocifbsd.c` CLI:
    completes once released) and pinned by two ATF regression cases
    (`cli_test:lock_file_created`, `cli_test:lock_excludes_concurrent`).
 
+## 🧾 **2026-09-01 — Raft log replication (stage 2) implemented + validated on a 3-node cluster**
+
+Built log replication on top of the election foundation: AppendEntries now
+carries log entries (fixed-size wire entries, up to RAFT_MAX_BATCH per RPC);
+followers run the (prev_log_index, prev_log_term) consistency check and
+append/truncate-on-conflict (Raft §5.3); the leader keeps per-peer
+`nextIndex`/`matchIndex` (added to `struct cluster_node`), backs `nextIndex`
+off on rejection to find the match point, and advances `commit_index` to the
+highest index replicated on a majority for the current term (§5.4.2);
+followers advance their commit index from `leader_commit`. The dispatch bounds
+`n_entries` against the received length. New getters `raft_commit_index`/
+`raft_log_len`; the `raft-test` harness now proposes a command every ~3s while
+leader.
+
+Validated on the real 3-node FreeBSD 16 cluster: entries proposed on the
+leader replicate to both followers with all three converging in lockstep
+(e.g. log=15/commit=15 everywhere); with one follower down the remaining
+majority keeps committing (log=18/commit=18); and a restarted follower
+(starting from an empty log, since persistence is stage 3) is **backfilled**
+by the leader's nextIndex back-off all the way to log=22/commit=22, matching
+the cluster. Next: persistence of (currentTerm, votedFor, log) + crash
+recovery.
+
 ## 🗳️ **2026-09-01 — Raft leader election (stage 1) implemented + validated on a 3-node cluster**
 
 The `clustering/` scaffold had the Raft *structs* and trivial state-setters

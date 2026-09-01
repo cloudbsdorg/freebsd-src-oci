@@ -108,6 +108,12 @@ struct cluster_node {
     /* Gossip state */
     uint32_t suspicion_count;     /* number of suspicion rounds */
     time_t suspicion_started;
+
+    /* Raft leader-side replication cursors for this peer (valid while this
+     * node is leader): next log index to send, and highest index known
+     * replicated on the peer. */
+    uint64_t raft_next_index;
+    uint64_t raft_match_index;
     
     /* Tree entry */
     RB_ENTRY(cluster_node) entry;
@@ -216,6 +222,8 @@ int raft_start(void);   /* start the election/heartbeat ticker thread */
 int raft_stop(void);    /* stop the ticker thread */
 int raft_role(void);    /* 0=follower, 1=candidate, 2=leader */
 uint64_t raft_term(void);
+uint64_t raft_commit_index(void);
+int raft_log_len(void);
 int raft_become_leader(void);
 int raft_become_follower(const char *leader_id);
 int raft_become_candidate(void);

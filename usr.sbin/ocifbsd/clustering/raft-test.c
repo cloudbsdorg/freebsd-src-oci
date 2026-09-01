@@ -64,17 +64,30 @@ main(int argc, char **argv)
 	}
 
 	gethostname(hn, sizeof(hn));
+	int tick = 0, proposed = 0;
 	for (;;) {
 		char leader[256] = "";
 		int role = raft_role();
 		const char *rs = role == 2 ? "LEADER" :
 		    role == 1 ? "CANDIDATE" : "FOLLOWER";
 
+		/* As leader, propose a new command every ~3s so replication and
+		 * commit advancement can be observed across the cluster. */
+		if (role == 2 && (tick % 3) == 0) {
+			char cmd[64];
+
+			snprintf(cmd, sizeof(cmd), "set x=%d", ++proposed);
+			raft_append_entry(cmd, strlen(cmd));
+		}
+
 		raft_get_leader(leader, sizeof(leader));
-		printf("[%s] role=%-9s term=%llu leader=%s\n", hn, rs,
+		printf("[%s] role=%-9s term=%llu leader=%-12s "
+		    "log=%d commit=%llu\n", hn, rs,
 		    (unsigned long long)raft_term(),
-		    leader[0] ? leader : "(none)");
+		    leader[0] ? leader : "(none)",
+		    raft_log_len(), (unsigned long long)raft_commit_index());
 		fflush(stdout);
+		tick++;
 		sleep(1);
 	}
 	return (0);
