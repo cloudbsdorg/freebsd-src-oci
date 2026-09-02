@@ -156,38 +156,39 @@ ringbuf_write(struct log_ringbuf *rb, struct log_entry *entry)
 /*
  * Read entry by ID
  */
-struct log_entry *
-ringbuf_read(struct log_ringbuf *rb, uint64_t id)
+int
+ringbuf_read(struct log_ringbuf *rb, uint64_t id, struct log_entry *out)
 {
-    if (rb == NULL)
-        return (NULL);
+    if (rb == NULL || out == NULL)
+        return (-1);
 
     pthread_mutex_lock(&rb->lock);
 
-    /* Search for ID */
+    /* Search for ID; copy the entry out under the lock. */
     for (uint64_t i = 0; i < rb->size; i++) {
         if (rb->ids[i] == id) {
+            *out = rb->entries[i];
             pthread_mutex_unlock(&rb->lock);
-            return (&rb->entries[i]);
+            return (0);
         }
     }
 
     pthread_mutex_unlock(&rb->lock);
 
-    return (NULL);
+    return (-1);
 }
 
 /*
  * Iterate through buffer
  */
-struct log_entry *
-ringbuf_iterate(struct log_ringbuf *rb, uint64_t *cursor)
+int
+ringbuf_iterate(struct log_ringbuf *rb, uint64_t *cursor,
+    struct log_entry *out)
 {
     uint64_t slot;
-    struct log_entry *entry;
 
-    if (rb == NULL || cursor == NULL)
-        return (NULL);
+    if (rb == NULL || cursor == NULL || out == NULL)
+        return (-1);
 
     pthread_mutex_lock(&rb->lock);
 
@@ -199,16 +200,16 @@ ringbuf_iterate(struct log_ringbuf *rb, uint64_t *cursor)
      */
     if (*cursor >= rb->count) {
         pthread_mutex_unlock(&rb->lock);
-        return (NULL);
+        return (-1);
     }
 
     slot = (rb->tail + *cursor) % rb->size;
     (*cursor)++;
-    entry = &rb->entries[slot];
+    *out = rb->entries[slot];		/* copy out under the lock */
 
     pthread_mutex_unlock(&rb->lock);
 
-    return (entry);
+    return (0);
 }
 
 /*
@@ -221,7 +222,7 @@ ringbuf_query(struct log_ringbuf *rb, struct log_query *query,
     struct log_entry **res = NULL;
     uint64_t n = 0;
     uint64_t cursor = 0;
-    struct log_entry *entry;
+    struct log_entry e;
 
     if (rb == NULL || query == NULL || results == NULL || count == NULL)
         return (-1);
@@ -229,22 +230,33 @@ ringbuf_query(struct log_ringbuf *rb, struct log_query *query,
     *results = NULL;
     *count = 0;
 
-    while ((entry = ringbuf_iterate(rb, &cursor)) != NULL) {
+    /*
+     * Each result is a heap-allocated COPY of the entry (ringbuf_iterate
+     * copies out under the lock), so the caller owns them: free every
+     * results[i] and then the array.
+     */
+    while (ringbuf_iterate(rb, &cursor, &e) == 0) {
+        struct log_entry *copy;
+
         /* Apply filters */
-        if (query->start_time && entry->timestamp < query->start_time)
+        if (query->start_time && e.timestamp < query->start_time)
             continue;
-        if (query->end_time && entry->timestamp > query->end_time)
+        if (query->end_time && e.timestamp > query->end_time)
             continue;
-        if (query->severity_min && entry->severity < query->severity_min)
+        if (query->severity_min && e.severity < query->severity_min)
             continue;
-        if (query->severity_max && entry->severity > query->severity_max)
+        if (query->severity_max && e.severity > query->severity_max)
             continue;
 
         void *_new = realloc(res, (n + 1) * sizeof(*res));
         if (_new == NULL)
             break;
         res = _new;
-        res[n++] = entry;
+        copy = malloc(sizeof(*copy));
+        if (copy == NULL)
+            break;
+        *copy = e;
+        res[n++] = copy;
 
         if (query->limit && n >= query->limit)
             break;

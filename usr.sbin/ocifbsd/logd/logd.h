@@ -253,8 +253,16 @@ struct logd_config *logd_get_config(void);
 struct log_ringbuf *ringbuf_create(uint64_t size);
 void    ringbuf_destroy(struct log_ringbuf *rb);
 int     ringbuf_write(struct log_ringbuf *rb, struct log_entry *entry);
-struct log_entry *ringbuf_read(struct log_ringbuf *rb, uint64_t id);
-struct log_entry *ringbuf_iterate(struct log_ringbuf *rb, uint64_t *cursor);
+/*
+ * ringbuf_read/iterate copy the entry into the caller-supplied *out under the
+ * buffer lock and return 0 (or -1 when not found / iteration end). They no
+ * longer return interior pointers into the ring — a concurrent ringbuf_write
+ * could overwrite that slot while the caller still dereferenced it (UAF/torn
+ * read).
+ */
+int ringbuf_read(struct log_ringbuf *rb, uint64_t id, struct log_entry *out);
+int ringbuf_iterate(struct log_ringbuf *rb, uint64_t *cursor,
+    struct log_entry *out);
 int     ringbuf_query(struct log_ringbuf *rb, struct log_query *query,
             struct log_entry ***results, uint64_t *count);
 uint64_t ringbuf_oldest_id(struct log_ringbuf *rb);

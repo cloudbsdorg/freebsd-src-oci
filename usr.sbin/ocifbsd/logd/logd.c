@@ -446,7 +446,7 @@ log_query_exec(struct log_query *query, uint64_t *count)
     struct log_entry **results = NULL;
     uint64_t n = 0;
     uint64_t cursor = 0;
-    struct log_entry *entry;
+    struct log_entry e;
 
     if (query == NULL || count == NULL)
         return (NULL);
@@ -456,21 +456,30 @@ log_query_exec(struct log_query *query, uint64_t *count)
     if (main_ringbuf == NULL)
         return (NULL);
 
-    while ((entry = ringbuf_iterate(main_ringbuf, &cursor)) != NULL) {
+    /* Results are heap COPIES (ringbuf_iterate copies out under the lock);
+     * the caller owns them and must free every results[i] then the array. */
+    while (ringbuf_iterate(main_ringbuf, &cursor, &e) == 0) {
+        struct log_entry *copy;
+
         /* Apply filters */
-        if (query->start_time && entry->timestamp < query->start_time)
+        if (query->start_time && e.timestamp < query->start_time)
             continue;
-        if (query->end_time && entry->timestamp > query->end_time)
+        if (query->end_time && e.timestamp > query->end_time)
             continue;
-        if (query->severity_min && entry->severity < query->severity_min)
+        if (query->severity_min && e.severity < query->severity_min)
             continue;
-        if (query->severity_max && entry->severity > query->severity_max)
+        if (query->severity_max && e.severity > query->severity_max)
             continue;
-        if (query->source_name && fnmatch(query->source_name, entry->source_name, 0) != 0)
+        if (query->source_name &&
+            fnmatch(query->source_name, e.source_name, 0) != 0)
             continue;
 
         REALLOC_SAFE(results, (n + 1) * sizeof(*results), realloc_fail);
-        results[n++] = entry;
+        copy = malloc(sizeof(*copy));
+        if (copy == NULL)
+            goto realloc_fail;
+        *copy = e;
+        results[n++] = copy;
 
         if (query->limit && n >= query->limit)
             break;
@@ -480,6 +489,8 @@ log_query_exec(struct log_query *query, uint64_t *count)
     return (results);
 
 realloc_fail:
+    for (uint64_t i = 0; i < n; i++)
+        free(results[i]);
     free(results);
     *count = 0;
     return (NULL);
@@ -707,10 +718,10 @@ log_rotate(void)
     fp = fopen(path, "w");
     if (fp) {
         uint64_t cursor = 0;
-        struct log_entry *entry;
+        struct log_entry entry;
 
-        while ((entry = ringbuf_iterate(main_ringbuf, &cursor)) != NULL) {
-            fprintf(fp, "%s\n", log_format_entry(entry, LOG_FORMAT_TEXT));
+        while (ringbuf_iterate(main_ringbuf, &cursor, &entry) == 0) {
+            fprintf(fp, "%s\n", log_format_entry(&entry, LOG_FORMAT_TEXT));
         }
 
         fclose(fp);
@@ -1303,7 +1314,7 @@ int
 forwarder_flush(void)
 {
     uint64_t cursor = 0;
-    struct log_entry *entry;
+    struct log_entry entry;
 
     if (main_ringbuf == NULL)
         return (0);
@@ -1316,8 +1327,8 @@ forwarder_flush(void)
      */
     uint64_t count = 0;
     cursor = 0;
-    while ((entry = ringbuf_iterate(main_ringbuf, &cursor)) != NULL) {
-        forwarder_send(entry);
+    while (ringbuf_iterate(main_ringbuf, &cursor, &entry) == 0) {
+        forwarder_send(&entry);
         count++;
 
         /* Batch limit */
