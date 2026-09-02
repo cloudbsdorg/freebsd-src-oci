@@ -49,6 +49,11 @@
 
 #include "include/ocifbsd.h"
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/mman.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <poll.h>
 #include <inttypes.h>
 
 #include "image/pull.h"
@@ -1097,6 +1102,377 @@ cmd_state(int argc, char **argv)
 	}
 
 	container_free(c);
+	return (0);
+}
+
+/*
+ * ocifbsd proxy — a small L4 (TCP) round-robin load balancer with failover, so
+ * a service's replicas can be fronted by a single endpoint without pulling in
+ * an external proxy. Connections are distributed across the --backend targets
+ * in round-robin order; a backend that will not accept a connection is skipped
+ * and the next tried, giving health-based failover. Each accepted connection is
+ * handled by a forked child that splices bytes in both directions.
+ */
+struct proxy_backend {
+	char	*host;
+	char	*port;
+};
+
+/* Load-balancing algorithms. */
+enum proxy_algo {
+	ALGO_ROUNDROBIN,	/* even rotation (default) */
+	ALGO_RANDOM,		/* uniformly random backend */
+	ALGO_SOURCEHASH,	/* hash(client IP) -> sticky affinity */
+	ALGO_LEASTCONN		/* fewest active connections */
+};
+
+static enum proxy_algo
+proxy_algo_parse(const char *s)
+{
+	if (strcmp(s, "random") == 0)
+		return (ALGO_RANDOM);
+	if (strcmp(s, "source-hash") == 0 || strcmp(s, "source") == 0 ||
+	    strcmp(s, "iphash") == 0)
+		return (ALGO_SOURCEHASH);
+	if (strcmp(s, "least-conn") == 0 || strcmp(s, "leastconn") == 0)
+		return (ALGO_LEASTCONN);
+	return (ALGO_ROUNDROBIN);
+}
+
+/*
+ * FNV-1a hash of a client's IP address (NOT the port), for source-hash
+ * affinity: every connection from the same client sticks to the same backend,
+ * which is how a stateful session survives without a shared store.
+ */
+static unsigned long
+proxy_addr_hash(const struct sockaddr *sa, socklen_t slen)
+{
+	const unsigned char *p;
+	size_t n;
+	unsigned long h = 1469598103934665603UL;
+	size_t i;
+
+	if (sa->sa_family == AF_INET) {
+		p = (const unsigned char *)
+		    &((const struct sockaddr_in *)(const void *)sa)->sin_addr;
+		n = sizeof(struct in_addr);
+	} else if (sa->sa_family == AF_INET6) {
+		p = (const unsigned char *)
+		    &((const struct sockaddr_in6 *)(const void *)sa)->sin6_addr;
+		n = sizeof(struct in6_addr);
+	} else {
+		p = (const unsigned char *)sa;
+		n = slen;
+	}
+	for (i = 0; i < n; i++) {
+		h ^= p[i];
+		h *= 1099511628211UL;
+	}
+	return (h);
+}
+
+/* Connect to host:port with a bounded timeout; returns a blocking fd or -1. */
+static int
+proxy_dial(const char *host, const char *port, int timeout_ms)
+{
+	struct addrinfo hints, *res, *ai;
+	int fd = -1;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	if (getaddrinfo(host, port, &hints, &res) != 0)
+		return (-1);
+	for (ai = res; ai != NULL; ai = ai->ai_next) {
+		int fl;
+
+		fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (fd < 0)
+			continue;
+		fl = fcntl(fd, F_GETFL, 0);
+		(void)fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+		if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
+			(void)fcntl(fd, F_SETFL, fl);
+			break;
+		}
+		if (errno == EINPROGRESS) {
+			struct pollfd pfd = { fd, POLLOUT, 0 };
+			int e = 0;
+			socklen_t el = sizeof(e);
+
+			if (poll(&pfd, 1, timeout_ms) == 1 &&
+			    getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &el) == 0 &&
+			    e == 0) {
+				(void)fcntl(fd, F_SETFL, fl);
+				break;
+			}
+		}
+		close(fd);
+		fd = -1;
+	}
+	freeaddrinfo(res);
+	return (fd);
+}
+
+/* Splice bytes both ways until either side closes. */
+static void
+proxy_pump(int a, int b)
+{
+	struct pollfd pfd[2];
+	char buf[65536];
+
+	pfd[0].fd = a;
+	pfd[1].fd = b;
+	for (;;) {
+		pfd[0].events = pfd[1].events = POLLIN;
+		pfd[0].revents = pfd[1].revents = 0;
+		if (poll(pfd, 2, -1) < 0) {
+			if (errno == EINTR)
+				continue;
+			return;
+		}
+		for (int i = 0; i < 2; i++) {
+			if (pfd[i].revents & (POLLIN | POLLHUP | POLLERR)) {
+				int from = pfd[i].fd, to = pfd[1 - i].fd;
+				ssize_t n = read(from, buf, sizeof(buf));
+				ssize_t off = 0;
+
+				if (n <= 0)
+					return;
+				while (off < n) {
+					ssize_t w = write(to, buf + off,
+					    (size_t)(n - off));
+					if (w <= 0)
+						return;
+					off += w;
+				}
+			}
+		}
+	}
+}
+
+static void
+proxy_reap(int sig)
+{
+	(void)sig;
+	while (waitpid(-1, NULL, WNOHANG) > 0)
+		;
+}
+
+static int
+cmd_proxy(int argc, char **argv)
+{
+	const char *listen_spec = NULL;
+	struct proxy_backend backends[64];
+	int nbackends = 0, ch, timeout_ms = 2000, lfd, rr = 0;
+	char lhost[256], lport[16];
+	enum proxy_algo algo = ALGO_ROUNDROBIN;
+	int *conns = NULL;	/* shared active-connection counts (least-conn) */
+
+	static struct option longopts[] = {
+		{ "listen",	required_argument,	NULL, 'l' },
+		{ "backend",	required_argument,	NULL, 'b' },
+		{ "timeout",	required_argument,	NULL, 't' },
+		{ "algo",	required_argument,	NULL, 'a' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "l:b:t:a:h", longopts,
+	    NULL)) != -1) {
+		switch (ch) {
+		case 'l':
+			listen_spec = optarg;
+			break;
+		case 'a':
+			algo = proxy_algo_parse(optarg);
+			break;
+		case 'b': {
+			char *colon = strrchr(optarg, ':');
+
+			if (colon == NULL) {
+				fprintf(stderr, "error: --backend needs "
+				    "host:port\n");
+				return (1);
+			}
+			if (nbackends < 64) {
+				*colon = '\0';
+				backends[nbackends].host = strdup(optarg);
+				backends[nbackends].port = strdup(colon + 1);
+				nbackends++;
+			}
+			break;
+		}
+		case 't':
+			timeout_ms = atoi(optarg);
+			break;
+		case 'h':
+			usage("proxy --listen [addr:]port --backend host:port "
+			    "[--backend ...] [--algo round-robin|random|"
+			    "source-hash|least-conn]");
+			return (0);
+		default:
+			usage("proxy --listen [addr:]port --backend host:port "
+			    "[--backend ...] [--algo round-robin|random|"
+			    "source-hash|least-conn]");
+			return (1);
+		}
+	}
+	if (listen_spec == NULL || nbackends == 0) {
+		fprintf(stderr, "error: proxy requires --listen and at least "
+		    "one --backend\n");
+		return (1);
+	}
+
+	/* Split listen spec into [addr:]port. */
+	{
+		const char *colon = strrchr(listen_spec, ':');
+
+		if (colon != NULL) {
+			size_t hl = (size_t)(colon - listen_spec);
+
+			if (hl >= sizeof(lhost))
+				hl = sizeof(lhost) - 1;
+			memcpy(lhost, listen_spec, hl);
+			lhost[hl] = '\0';
+			snprintf(lport, sizeof(lport), "%s", colon + 1);
+		} else {
+			lhost[0] = '\0';
+			snprintf(lport, sizeof(lport), "%s", listen_spec);
+		}
+	}
+
+	/* Bind + listen. */
+	{
+		struct addrinfo hints, *res;
+		int one = 1;
+
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_flags = AI_PASSIVE;
+		if (getaddrinfo(lhost[0] ? lhost : NULL, lport, &hints,
+		    &res) != 0) {
+			fprintf(stderr, "error: cannot resolve listen %s\n",
+			    listen_spec);
+			return (1);
+		}
+		lfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+		if (lfd < 0) {
+			perror("socket");
+			freeaddrinfo(res);
+			return (1);
+		}
+		(void)setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one,
+		    sizeof(one));
+		if (bind(lfd, res->ai_addr, res->ai_addrlen) != 0) {
+			perror("bind");
+			freeaddrinfo(res);
+			return (1);
+		}
+		freeaddrinfo(res);
+		if (listen(lfd, 128) != 0) {
+			perror("listen");
+			return (1);
+		}
+	}
+
+	/*
+	 * least-conn needs live connection counts shared across the
+	 * fork-per-connection children; back them with anonymous shared memory
+	 * so a child can decrement its backend on exit.
+	 */
+	if (algo == ALGO_LEASTCONN) {
+		conns = mmap(NULL, sizeof(int) * (size_t)nbackends,
+		    PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
+		if (conns == MAP_FAILED) {
+			conns = NULL;
+			algo = ALGO_ROUNDROBIN;
+		}
+	}
+
+	signal(SIGCHLD, proxy_reap);
+	signal(SIGPIPE, SIG_IGN);
+	{
+		const char *an = algo == ALGO_RANDOM ? "random" :
+		    algo == ALGO_SOURCEHASH ? "source-hash (sticky)" :
+		    algo == ALGO_LEASTCONN ? "least-conn" : "round-robin";
+
+		printf("ocifbsd proxy: listening on %s -> %d backend(s), "
+		    "algo=%s, failover on\n", listen_spec, nbackends, an);
+		fflush(stdout);
+	}
+
+	for (;;) {
+		struct sockaddr_storage ss;
+		socklen_t sslen = sizeof(ss);
+		int cfd = accept(lfd, (struct sockaddr *)&ss, &sslen);
+		int bfd = -1, tries, start, chosen = -1;
+		pid_t pid;
+
+		if (cfd < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+
+		/* Choose the preferred starting backend per algorithm. */
+		switch (algo) {
+		case ALGO_RANDOM:
+			start = (int)(random() % nbackends);
+			break;
+		case ALGO_SOURCEHASH:
+			start = (int)(proxy_addr_hash((struct sockaddr *)&ss,
+			    sslen) % (unsigned long)nbackends);
+			break;
+		case ALGO_LEASTCONN: {
+			int m = 0;
+
+			for (int i = 1; i < nbackends; i++)
+				if (conns[i] < conns[m])
+					m = i;
+			start = m;
+			break;
+		}
+		case ALGO_ROUNDROBIN:
+		default:
+			start = rr;
+			break;
+		}
+
+		/* Try from the preferred index, failing over to the rest. */
+		for (tries = 0; tries < nbackends; tries++) {
+			int idx = (start + tries) % nbackends;
+
+			bfd = proxy_dial(backends[idx].host,
+			    backends[idx].port, timeout_ms);
+			if (bfd >= 0) {
+				chosen = idx;
+				break;
+			}
+		}
+		if (bfd < 0) {		/* all backends unreachable */
+			close(cfd);
+			continue;
+		}
+		rr = (chosen + 1) % nbackends;
+		if (conns != NULL)
+			conns[chosen]++;
+
+		pid = fork();
+		if (pid == 0) {
+			close(lfd);
+			proxy_pump(cfd, bfd);
+			if (conns != NULL)
+				conns[chosen]--;
+			_exit(0);
+		}
+		close(cfd);
+		close(bfd);
+	}
+	close(lfd);
 	return (0);
 }
 
@@ -3054,6 +3430,7 @@ static struct command commands[] = {
 	{ "state",	cmd_state,	"Show container state" },
 	{ "list",	cmd_list,	"List containers" },
 	{ "stats",	cmd_stats,	"Per-container resource stats (JSON)" },
+	{ "proxy",	cmd_proxy,	"L4 (protocol-agnostic) load balancer across backends" },
 	{ "inspect",	cmd_inspect,	"Show container details" },
 	{ "run",	cmd_run,	"Create and start container" },
 	{ "exec",	cmd_exec,	"Run a command in a running container" },
