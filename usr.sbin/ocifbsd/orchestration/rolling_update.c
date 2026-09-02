@@ -243,11 +243,27 @@ rolling_update_progress(struct rolling_update_info *info)
 			continue;
 		}
 		
-		snprintf(old_pod_name, sizeof(old_pod_name), "%s-replica-%d",
-		    info->service, info->current_replica);
-		snprintf(new_pod_name, sizeof(new_pod_name), "%s-replica-%d-new",
-		    info->service, info->current_replica);
-		
+		/*
+		 * The current (old) pod is whatever this replica points at now
+		 * — which, after a previous rolling update, may already carry a
+		 * "-vN" suffix — not always "<svc>-replica-<n>". Fall back to the
+		 * canonical name when the replica has none recorded. The new pod
+		 * gets a fresh generation suffix so it never collides with the
+		 * pod being retired.
+		 */
+		if (info->current_replica < service->nreplicas &&
+		    service->replicas != NULL &&
+		    service->replicas[info->current_replica].pod_name[0] != '\0')
+			strlcpy(old_pod_name,
+			    service->replicas[info->current_replica].pod_name,
+			    sizeof(old_pod_name));
+		else
+			snprintf(old_pod_name, sizeof(old_pod_name),
+			    "%s-replica-%d", info->service, info->current_replica);
+		snprintf(new_pod_name, sizeof(new_pod_name),
+		    "%s-replica-%d-v%d", info->service, info->current_replica,
+		    (int)info->state.started + info->current_replica);
+
 		/* Get old pod */
 		old_pod = pod_get(old_pod_name, info->namespace);
 		
@@ -295,10 +311,18 @@ rolling_update_progress(struct rolling_update_info *info)
 			sleep(5);  /* Graceful shutdown */
 			pod_delete(old_pod);
 		}
-		
-		/* Rename new pod to old name */
-		/* In production, this would involve updating the pod's name in state */
-		
+
+		/*
+		 * Point the replica at the new pod so the service tracks it —
+		 * without this the service kept referencing the deleted old pod
+		 * and the new pod leaked on `service delete`.
+		 */
+		if (info->current_replica < service->nreplicas &&
+		    service->replicas != NULL)
+			strlcpy(service->replicas[info->current_replica].pod_name,
+			    new_pod_name,
+			    sizeof(service->replicas[info->current_replica].pod_name));
+
 		/* Update state */
 		info->state.updated_replicas++;
 		info->current_replica++;
@@ -322,10 +346,19 @@ rolling_update_progress(struct rolling_update_info *info)
 	    "Rolling update completed for service %s", info->service);
 	
 	save_rolling_update_state(info);
-	
-	/* Update service spec */
-	service_update(service, &info->new_spec);
-	
+
+	/*
+	 * Commit the new image onto the service and persist the remapped replica
+	 * pod names. NOT via service_update() — that would re-enter
+	 * rolling_update_init(), which sees this still-active update and bails,
+	 * leaving the service pointing at the retired pods.
+	 */
+	info->active = false;
+	if (service->spec != NULL)
+		strlcpy(service->spec->image, info->new_spec.image,
+		    sizeof(service->spec->image));
+	save_service_state(service);
+
 	return (0);
 }
 

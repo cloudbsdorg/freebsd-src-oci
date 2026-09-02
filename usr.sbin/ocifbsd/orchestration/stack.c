@@ -626,7 +626,7 @@ get_service_state_path(const char *name, const char *namespace)
  * directory). Saves the fields the CLI needs: name/namespace/stack and the
  * spec's image + replica count.
  */
-static int
+int
 save_service_state(struct service *service)
 {
 	FILE *fp;

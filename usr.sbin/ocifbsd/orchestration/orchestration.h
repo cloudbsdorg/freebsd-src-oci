@@ -453,6 +453,8 @@ struct service	**service_list(const char *namespace, int *count);
 void		service_free(struct service *service);
 int		service_scale(struct service *service, int replicas);
 int		service_update(struct service *service, struct service_spec *new_spec);
+/* Persist a service's state (name/image/replicas/replica pod names) to disk. */
+int		save_service_state(struct service *service);
 int		service_rollback(struct service *service);
 struct service_replica **service_get_replicas(struct service *service, int *count);
 struct service_status *service_get_status(struct service *service);
