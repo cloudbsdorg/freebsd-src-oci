@@ -36,6 +36,7 @@
 #include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
+#include <regex.h>		/* regex_t in struct alert_rule */
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -141,6 +142,8 @@ struct alert_rule {
     bool            enabled;
     bool            silenced;        /* Temporarily disabled */
     time_t          silenced_until;  /* auto-unsilence at this time (0 = manual) */
+    regex_t         compiled_re;     /* match_pattern compiled once at add */
+    bool            re_compiled;     /* true if compiled_re is valid */
 
     /* Actions */
     bool            notify_webhook;

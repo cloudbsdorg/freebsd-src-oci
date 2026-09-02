@@ -903,6 +903,16 @@ alert_rule_add(struct alert_rule *rule)
         return (-1);  /* Already exists */
     }
 
+    /*
+     * Compile the match regex ONCE here instead of per log entry. The old
+     * code ran regcomp() for every rule for every incoming log line while
+     * holding logd_state_lock — O(entries x rules x compile) and a serial
+     * bottleneck on the logging hot path. Compile once, reuse compiled_re.
+     */
+    if (rule->match_pattern != NULL &&
+        regcomp(&rule->compiled_re, rule->match_pattern, REG_EXTENDED) == 0)
+        rule->re_compiled = true;
+
     RB_INSERT(alert_rule_tree, &alert_rules, rule);
 
     pthread_mutex_unlock(&logd_state_lock);
@@ -927,6 +937,8 @@ alert_rule_remove(const char *name)
     rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
     if (rule) {
         RB_REMOVE(alert_rule_tree, &alert_rules, rule);
+        if (rule->re_compiled)
+            regfree(&rule->compiled_re);
         free(rule);
     }
 
@@ -974,7 +986,6 @@ int
 alert_process_entry(struct log_entry *entry)
 {
     struct alert_rule *rule;
-    regex_t re;
 
     if (entry == NULL)
         return (0);
@@ -1002,15 +1013,10 @@ alert_process_entry(struct log_entry *entry)
         if (rule->source_name && fnmatch(rule->source_name, entry->source_name, 0) != 0)
             continue;
 
-        /* Check message pattern */
-        if (rule->match_pattern) {
-            if (regcomp(&re, rule->match_pattern, REG_EXTENDED) != 0)
+        /* Check message pattern against the pre-compiled regex. */
+        if (rule->re_compiled) {
+            if (regexec(&rule->compiled_re, entry->message, 0, NULL, 0) != 0)
                 continue;
-            if (regexec(&re, entry->message, 0, NULL, 0) != 0) {
-                regfree(&re);
-                continue;
-            }
-            regfree(&re);
         }
 
         /* Match! Update count */
