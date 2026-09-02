@@ -2479,7 +2479,7 @@ tcp_discardcb(struct tcpcb *tp)
 	 * say srtt etc into the general one used by other stacks.
 	 */
 	if (tp->t_rttupdated >= 4) {
-		struct hc_metrics_lite metrics;
+		struct tcp_hc_metrics metrics;
 		uint32_t ssthresh;
 
 		bzero(&metrics, sizeof(metrics));
@@ -4295,6 +4295,9 @@ tcp_inptoxtp(const struct inpcb *inp, struct xtcpcb *xt)
 	bcopy(CC_ALGO(tp)->name, xt->xt_cc, TCP_CA_NAME_MAX);
 #ifdef TCP_BLACKBOX
 	(void)tcp_log_get_id(tp, xt->xt_logid);
+	xt->t_lognum = tp->t_lognum;
+	xt->t_loglimit = tp->t_loglimit;
+	xt->t_logsn = tp->t_logsn;
 #endif
 
 	xt->xt_len = sizeof(struct xtcpcb);

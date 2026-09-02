@@ -879,6 +879,7 @@ int
 vfs_busy(struct mount *mp, int flags)
 {
 	struct mount_pcpu *mpcpu;
+	int error;
 
 	MPASS((flags & ~MBF_MASK) == 0);
 	CTR3(KTR_VFS, "%s: mp %p with flags %d", __func__, mp, flags);
@@ -923,10 +924,24 @@ vfs_busy(struct mount *mp, int flags)
 		if (flags & MBF_MNTLSTLOCK)
 			mtx_unlock(&mountlist_mtx);
 		mp->mnt_kern_flag |= MNTK_MWAIT;
-		msleep(mp, MNT_MTX(mp), PVFS | PDROP, "vfs_busy", 0);
+		error = msleep(mp, MNT_MTX(mp), ((flags & MBF_PCATCH) != 0 ?
+		    PCATCH : 0) | PVFS | PDROP, "vfs_busy", 0);
 		if (flags & MBF_MNTLSTLOCK)
 			mtx_lock(&mountlist_mtx);
 		MNT_ILOCK(mp);
+		if (error != 0) {
+			MNT_REL(mp);
+
+			/*
+			 * Clearing MNTK_MWAIT might cause spurious
+			 * wakeups, but better clear our flag there
+			 * then leak it.
+			 */
+			mp->mnt_kern_flag &= ~MNTK_MWAIT;
+			wakeup(mp);
+			MNT_IUNLOCK(mp);
+			return (error);
+		}
 	}
 	if (flags & MBF_MNTLSTLOCK)
 		mtx_unlock(&mountlist_mtx);
@@ -1936,9 +1951,14 @@ vtryrecycle(struct vnode *vp, bool isvnlru)
 	 * anyone picked up this vnode from another list.  If not, we will
 	 * mark it with DOOMED via vgonel() so that anyone who does find it
 	 * will skip over it.
+	 *
+	 * We cannot check only for v_usecount > 0 there, since
+	 * v_usecount increment is lockless.  Instead check for
+	 * v_holdcnt > 1, with the side effect that a parallel vhold()
+	 * also aborts freeing this vnode.
 	 */
 	VI_LOCK(vp);
-	if (vp->v_usecount) {
+	if (vp->v_holdcnt > 1) {
 		VOP_UNLOCK(vp);
 		vdropl_recycle(vp);
 		vn_finished_write(vnmp);
@@ -6670,7 +6690,7 @@ vfs_knlunlock(void *arg)
 	struct vnode *vp = arg;
 
 	if (KNLIST_EMPTY(&vp->v_pollinfo->vpi_selinfo.si_note))
-		vn_irflag_unset(vp, VIRF_KNOTE);
+		vp->v_v2flag &= ~V2_KNOTE;
 	VOP_UNLOCK(vp);
 }
 
@@ -6720,8 +6740,7 @@ vfs_kqfilter(struct vop_kqfilter_args *ap)
 	vhold(vp);
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	knlist_add(knl, kn, 1);
-	if ((vn_irflag_read(vp) & VIRF_KNOTE) == 0)
-		vn_irflag_set(vp, VIRF_KNOTE);
+	vp->v_v2flag |= V2_KNOTE;
 	VOP_UNLOCK(vp);
 
 	return (0);
