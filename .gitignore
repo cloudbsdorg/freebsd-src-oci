@@ -64,6 +64,9 @@ obj.*/
 usr.sbin/ocifbsd/ocifbsd
 usr.sbin/ocifbsd/ocifbsd-*
 usr.sbin/ocifbsd/*/ocifbsd-*
+# ...but the perf/stress harnesses under tools/ are tracked source, not outputs.
+!usr.sbin/ocifbsd/tools/ocifbsd-perf.sh
+!usr.sbin/ocifbsd/tools/ocifbsd-stress.sh
 tests/usr.sbin/ocifbsd/ocifbsd_test
 tests/usr.sbin/ocifbsd/ocifbsd_test.o
 tests/usr.sbin/ocifbsd/*.core

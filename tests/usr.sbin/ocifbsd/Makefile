@@ -37,7 +37,7 @@ ATF_TESTS_C=	parser_test ensemble_test utils_test oci2jail_test hooks_test \
 		controller_test pipeline_test rctl_test mac_test \
 		network_test alerting_test namespace_test cert_acme_test \
 		pam_jwt_test auth_crypto_test
-ATF_TESTS_SH=	cli_test lifecycle_test
+ATF_TESTS_SH=	cli_test lifecycle_test perfstress_test
 
 # convert/ sources compile at WARNS=3; match for #include tests
 WARNS=		3
