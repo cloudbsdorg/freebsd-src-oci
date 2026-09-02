@@ -134,6 +134,35 @@ service_lifecycle_persists_body()
 	atf_check -s exit:0 -o not-match:"^web " "${bin}" service list
 }
 
+atf_test_case service_scale_persists
+service_scale_persists_head()
+{
+	atf_set "descr" "service scale changes the persisted replica count"
+}
+service_scale_persists_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	export OCIFBSD_ORCH_DIR="${PWD}/orch"
+	mkdir -p "${OCIFBSD_ORCH_DIR}"
+
+	atf_check -s exit:0 -o ignore -e ignore \
+	    "${bin}" service create --name web --image nginx:1.27 --replicas 1
+	# scale up: the persisted replica count (a separate list process) is 3.
+	atf_check -s exit:0 -o ignore -e ignore \
+	    "${bin}" service scale --name web --replicas 3
+	atf_check -s exit:0 -o match:"web .* 3 " "${bin}" service list
+	# scale down to 1.
+	atf_check -s exit:0 -o ignore -e ignore \
+	    "${bin}" service scale --name web --replicas 1
+	atf_check -s exit:0 -o match:"web .* 1 " "${bin}" service list
+	atf_check -s exit:0 -o ignore "${bin}" service delete --name web
+}
+
 atf_test_case version_prints
 version_prints_head()
 {
@@ -565,6 +594,7 @@ atf_init_test_cases()
 	atf_add_test_case pod_lifecycle_persists
 	atf_add_test_case stack_lifecycle_persists
 	atf_add_test_case service_lifecycle_persists
+	atf_add_test_case service_scale_persists
 	atf_add_test_case version_prints
 	atf_add_test_case unknown_command_fails
 	atf_add_test_case pull_dry_run

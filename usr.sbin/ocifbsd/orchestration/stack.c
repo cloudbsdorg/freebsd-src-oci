@@ -883,86 +883,84 @@ service_create(struct service_spec *spec)
 }
 
 /*
- * Start a service
+ * Launch a single replica (index i): schedule it, create its backing pod, and
+ * start the pod's container. Shared by service_start and service_scale.
  */
-int
-service_start(struct service *service)
+static int
+service_launch_replica(struct service *service, int i)
 {
+	struct pod_spec spec;
+	struct pod *pod;
 	struct scheduling_decision *decision;
+	char pod_name[256];
 
-	if (service == NULL)
+	snprintf(pod_name, sizeof(pod_name), "%s-replica-%d", service->name, i);
+
+	/* Build a single-container pod spec for this replica. */
+	memset(&spec, 0, sizeof(spec));
+	strlcpy(spec.name, pod_name, sizeof(spec.name));
+	strlcpy(spec.namespace, service->namespace, sizeof(spec.namespace));
+	spec.containers = calloc(1, sizeof(*spec.containers));
+	if (spec.containers == NULL) {
+		service->replicas[i].state = REPLICA_STATE_FAILED;
 		return (-1);
-	
-	/* Start health checker if configured */
-	if (service->spec->health_check.type != HEALTH_CHECK_NONE) {
-		health_check_start(service);
 	}
-	
-	/* Create replicas */
-	for (int i = 0; i < service->nreplicas; i++) {
-		struct pod_spec spec;
-		struct pod *pod;
-		char pod_name[256];
-		
-		snprintf(pod_name, sizeof(pod_name), "%s-replica-%d",
-		    service->name, i);
-		
-		/* Build pod spec for this replica */
-		memset(&spec, 0, sizeof(spec));
-		strlcpy(spec.name, pod_name, sizeof(spec.name));
-		strlcpy(spec.namespace, service->namespace, sizeof(spec.namespace));
-
-		/*
-		 * spec.containers is a pointer, NULL after the memset; it must
-		 * be allocated before indexing. Writing spec.containers[0]
-		 * without this dereferenced NULL and crashed every start.
-		 */
-		spec.containers = calloc(1, sizeof(*spec.containers));
-		if (spec.containers == NULL) {
-			service->replicas[i].state = REPLICA_STATE_FAILED;
-			return (-1);
-		}
-		spec.ncontainers = 1;
-
-		/* Create container spec */
-		strlcpy(spec.containers[0].name, service->name,
-		    sizeof(spec.containers[0].name));
+	spec.ncontainers = 1;
+	strlcpy(spec.containers[0].name, service->name,
+	    sizeof(spec.containers[0].name));
+	if (service->spec != NULL)
 		strlcpy(spec.containers[0].image, service->spec->image,
 		    sizeof(spec.containers[0].image));
 
-		/* Schedule pod */
-		decision = scheduler_select_node(&spec);
-		if (decision == NULL) {
-			free(spec.containers);
-			service->replicas[i].state = REPLICA_STATE_FAILED;
-			return (-1);
-		}
-		
-		strlcpy(service->replicas[i].node, decision->node,
-		    sizeof(service->replicas[i].node));
-		strlcpy(service->replicas[i].pod_name, pod_name,
-		    sizeof(service->replicas[i].pod_name));
-		free(decision);
-		
-		/* Create and start pod */
-		pod = pod_create(&spec);
-		if (pod == NULL) {
-			free(spec.containers);
-			service->replicas[i].state = REPLICA_STATE_FAILED;
-			return (-1);
-		}
-
-		if (pod_start(pod) == 0) {
-			service->replicas[i].state = REPLICA_STATE_RUNNING;
-			service->replicas[i].started = time(NULL);
-			service->status->available_replicas++;
-		} else {
-			service->replicas[i].state = REPLICA_STATE_FAILED;
-		}
+	decision = scheduler_select_node(&spec);
+	if (decision == NULL) {
 		free(spec.containers);
-		spec.containers = NULL;
+		service->replicas[i].state = REPLICA_STATE_FAILED;
+		return (-1);
 	}
-	
+	strlcpy(service->replicas[i].node, decision->node,
+	    sizeof(service->replicas[i].node));
+	strlcpy(service->replicas[i].pod_name, pod_name,
+	    sizeof(service->replicas[i].pod_name));
+	free(decision);
+
+	pod = pod_create(&spec);
+	if (pod == NULL) {
+		free(spec.containers);
+		service->replicas[i].state = REPLICA_STATE_FAILED;
+		return (-1);
+	}
+	if (pod_start(pod) == 0) {
+		service->replicas[i].state = REPLICA_STATE_RUNNING;
+		service->replicas[i].started = time(NULL);
+		if (service->status != NULL)
+			service->status->available_replicas++;
+	} else {
+		service->replicas[i].state = REPLICA_STATE_FAILED;
+	}
+	free(spec.containers);
+	return (0);
+}
+
+int
+service_start(struct service *service)
+{
+	if (service == NULL)
+		return (-1);
+
+	/* Start health checker if configured */
+	if (service->spec != NULL &&
+	    service->spec->health_check.type != HEALTH_CHECK_NONE) {
+		health_check_start(service);
+	}
+
+	/*
+	 * Launch each replica. A single replica's failure (e.g. image not in
+	 * the store) is recorded on that replica but does not abort the rest.
+	 */
+	for (int i = 0; i < service->nreplicas; i++)
+		(void)service_launch_replica(service, i);
+
 	service->status->ready_replicas = service->status->available_replicas;
 	service->status->updated = time(NULL);
 
@@ -1206,20 +1204,26 @@ service_scale(struct service *service, int replicas)
 		
 		service->replicas = new_replicas;
 		
-		/* Initialize new replicas */
+		/* Initialize AND launch the new replicas. */
 		for (int i = old_count; i < replicas; i++) {
+			memset(&service->replicas[i], 0,
+			    sizeof(service->replicas[i]));
 			service->replicas[i].replica_id = i;
 			strlcpy(service->replicas[i].service, service->name,
 			    sizeof(service->replicas[i].service));
-			snprintf(service->replicas[i].name, 
+			snprintf(service->replicas[i].name,
 			    sizeof(service->replicas[i].name),
 			    "%s-replica-%d", service->name, i);
 			service->replicas[i].state = REPLICA_STATE_PENDING;
+			service->nreplicas = i + 1;
+			(void)service_launch_replica(service, i);
 		}
-		
+
 		service->nreplicas = replicas;
-		service->spec->replicas = replicas;
-		service->status->desired_replicas = replicas;
+		if (service->spec != NULL)
+			service->spec->replicas = replicas;
+		if (service->status != NULL)
+			service->status->desired_replicas = replicas;
 	} else if (replicas < service->nreplicas) {
 		/* Scale down - stop excess replicas */
 		for (int i = service->nreplicas - 1; i >= replicas; i--) {
@@ -1237,15 +1241,23 @@ service_scale(struct service *service, int replicas)
 		}
 		
 		service->nreplicas = replicas;
-		service->spec->replicas = replicas;
-		service->status->desired_replicas = replicas;
+		if (service->spec != NULL)
+			service->spec->replicas = replicas;
+		if (service->status != NULL) {
+			service->status->desired_replicas = replicas;
+			service->status->available_replicas = replicas;
+		}
 	}
-	
+
+	/* Persist the new replica set so a later list/delete reflects it. */
+	save_service_state(service);
+
 	orch_event_publish("Normal", "Scaled", service->namespace,
 	    "Service %s scaled to %d replicas", service->name, replicas);
 
 	/* Rebalance the load-balancer pool to match the new replica set. */
-	if (service->status->load_balancer_ip[0] != '\0')
+	if (service->status != NULL &&
+	    service->status->load_balancer_ip[0] != '\0')
 		(void)service_lb_apply(service);
 
 	return (0);
