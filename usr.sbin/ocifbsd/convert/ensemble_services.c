@@ -383,7 +383,21 @@ ensemble_services_convert_v2(const char *compose, char **output,
 		environment = ensemble_services_get_value(service_block, "environment");
 		networks = ensemble_services_get_value(service_block, "networks");
 		depends_on = ensemble_services_get_value(service_block, "depends_on");
-		
+
+		/* Warn about directives read but not translated (see v3). */
+		if (environment != NULL)
+			fprintf(stderr, "warning: service '%s': 'environment' "
+			    "was not converted; set it in the native config\n",
+			    services[i]);
+		if (networks != NULL)
+			fprintf(stderr, "warning: service '%s': 'networks' was "
+			    "not converted; ocifbsd uses native VNET networking\n",
+			    services[i]);
+		if (depends_on != NULL)
+			fprintf(stderr, "warning: service '%s': 'depends_on' "
+			    "was not converted; start ordering is not modeled\n",
+			    services[i]);
+
 		char *new_result;
 		asprintf(&new_result,
 		    "%s%s  - name: %s\n"
@@ -475,7 +489,26 @@ ensemble_services_convert_v3(const char *compose, char **output,
 		if (deploy != NULL) {
 			deploy_replicas = ensemble_services_get_value(deploy, "replicas");
 		}
-		
+
+		/*
+		 * Warn about directives that are read but not translated, so the
+		 * converted config is never silently incomplete. ocifbsd converts
+		 * the core service shape (image, ports, volumes, replicas); the
+		 * rest must be set in the native config by hand.
+		 */
+		if (environment != NULL)
+			fprintf(stderr, "warning: service '%s': 'environment' "
+			    "was not converted; set it in the native config\n",
+			    services[i]);
+		if (networks != NULL)
+			fprintf(stderr, "warning: service '%s': 'networks' was "
+			    "not converted; ocifbsd uses native VNET networking\n",
+			    services[i]);
+		if (depends_on != NULL)
+			fprintf(stderr, "warning: service '%s': 'depends_on' "
+			    "was not converted; start ordering is not modeled\n",
+			    services[i]);
+
 		int replicas = deploy_replicas ? atoi(deploy_replicas) : 1;
 		
 		char *new_result;
