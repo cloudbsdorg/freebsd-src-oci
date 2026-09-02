@@ -1218,8 +1218,7 @@ pam_add_role_binding(struct role_binding *binding)
     pthread_mutex_lock(&auth_lock);
 
     num_role_bindings++;
-    role_bindings = realloc(role_bindings, num_role_bindings * sizeof(*binding));
-    if (role_bindings == NULL) {
+    if (ocifbsd_realloc_grow((void **)&role_bindings, num_role_bindings * sizeof(*binding)) != 0) {
         num_role_bindings--;
         pthread_mutex_unlock(&auth_lock);
         return (-1);

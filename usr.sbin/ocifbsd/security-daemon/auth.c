@@ -1026,8 +1026,7 @@ audit_query(time_t start, time_t end, const char *user, const char *action, cons
         
         if (n >= alloc) {
             alloc *= 2;
-            result = realloc(result, alloc * sizeof(struct audit_entry *));
-            if (result == NULL) {
+            if (ocifbsd_realloc_grow((void **)&result, alloc * sizeof(struct audit_entry *)) != 0) {
                 pthread_mutex_unlock(&audit_lock);
                 *count = 0;
                 return (NULL);

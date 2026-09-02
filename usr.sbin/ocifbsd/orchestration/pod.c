@@ -429,9 +429,7 @@ pod_create(struct pod_spec *spec)
 	if (pod_registry_count >= pod_registry_size) {
 		pod_registry_size = pod_registry_size ? 
 		    pod_registry_size * 2 : 16;
-		pod_registry = realloc(pod_registry, 
-		    pod_registry_size * sizeof(struct pod *));
-		if (pod_registry == NULL) {
+		if (ocifbsd_realloc_grow((void **)&pod_registry, pod_registry_size * sizeof(struct pod *)) != 0) {
 			pthread_mutex_unlock(&pod_registry_lock);
 			free(status->containers);
 			free(status);

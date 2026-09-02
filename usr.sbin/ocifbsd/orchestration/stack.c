@@ -311,9 +311,7 @@ stack_create(struct stack_spec *spec)
 	if (stack_registry_count >= stack_registry_size) {
 		stack_registry_size = stack_registry_size ? 
 		    stack_registry_size * 2 : 16;
-		stack_registry = realloc(stack_registry, 
-		    stack_registry_size * sizeof(struct stack *));
-		if (stack_registry == NULL) {
+		if (ocifbsd_realloc_grow((void **)&stack_registry, stack_registry_size * sizeof(struct stack *)) != 0) {
 			pthread_mutex_unlock(&stack_registry_lock);
 			free(status);
 			free(stack->spec);
@@ -891,9 +889,7 @@ service_create(struct service_spec *spec)
 	if (service_registry_count >= service_registry_size) {
 		service_registry_size = service_registry_size ? 
 		    service_registry_size * 2 : 16;
-		service_registry = realloc(service_registry, 
-		    service_registry_size * sizeof(struct service *));
-		if (service_registry == NULL) {
+		if (ocifbsd_realloc_grow((void **)&service_registry, service_registry_size * sizeof(struct service *)) != 0) {
 			pthread_mutex_unlock(&service_registry_lock);
 			free(service->replicas);
 			free(status);

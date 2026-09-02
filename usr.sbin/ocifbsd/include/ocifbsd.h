@@ -275,6 +275,23 @@ char   *resolve_bundle_path(const char *bundle);
 int	ensure_directory(const char *path, mode_t mode);
 /* Recursive mkdir (mkdir -p); program-global so the network archive resolves. */
 int	mkdirp(const char *path, mode_t mode);
+
+#include <stdlib.h>
+/*
+ * Grow *p to n bytes via realloc. On success updates *p and returns 0; on
+ * failure leaves *p unchanged and returns -1, so the old allocation is never
+ * lost (the `p = realloc(p, n)` idiom leaks it when it returns NULL).
+ */
+static inline int
+ocifbsd_realloc_grow(void **p, size_t n)
+{
+	void *t = realloc(*p, n);
+
+	if (t == NULL)
+		return (-1);
+	*p = t;
+	return (0);
+}
 int	safe_write(int fd, const void *buf, size_t n);
 char   *read_file(const char *path, size_t *len);
 int	write_file(const char *path, const void *data, size_t len);

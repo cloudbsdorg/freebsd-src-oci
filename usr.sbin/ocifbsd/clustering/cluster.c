@@ -2496,9 +2496,7 @@ cluster_register_service(const char *name, const char *ns, const char *ip, uint1
     
     pthread_mutex_lock(&service_lock);
     
-    service_registry = realloc(service_registry,
-        (n_services + 1) * sizeof(struct service_endpoint *));
-    if (service_registry == NULL) {
+    if (ocifbsd_realloc_grow((void **)&service_registry, (n_services + 1) * sizeof(struct service_endpoint *)) != 0) {
         pthread_mutex_unlock(&service_lock);
         return (-1);
     }
