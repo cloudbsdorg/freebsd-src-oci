@@ -382,7 +382,6 @@ node_metrics_collect(struct node_metrics *metrics)
 {
     int mib[4];
     size_t len;
-    struct loadavg la;
     struct utsname uts;
     struct ifaddrs *ifaddrs, *ifa;
     uint64_t rx_bytes = 0, tx_bytes = 0;
@@ -396,10 +395,30 @@ node_metrics_collect(struct node_metrics *metrics)
     uname(&uts);
     strlcpy(metrics->hostname, uts.nodename, sizeof(metrics->hostname));
     
-    /* CPU metrics */
-    len = sizeof(metrics->cpu_user);
-    if (sysctlbyname("kern.cp_time", &metrics->cp_time, &len, NULL, 0) == 0) {
-        /* Calculate percentages from cp_time */
+    /*
+     * CPU metrics. kern.cp_time is a long[CPUSTATES] of cumulative ticks per
+     * state; report each state as a percentage of the total since boot.
+     * (The old code sized the buffer as one double — too small, so the read
+     * failed — and never computed anything, leaving cpu_* at 0.)
+     */
+    {
+        long cp_time[CPUSTATES];
+
+        len = sizeof(cp_time);
+        if (sysctlbyname("kern.cp_time", cp_time, &len, NULL, 0) == 0) {
+            long total = 0;
+            int i;
+
+            for (i = 0; i < CPUSTATES; i++)
+                total += cp_time[i];
+            if (total > 0) {
+                metrics->cpu_user = 100.0 *
+                    (cp_time[CP_USER] + cp_time[CP_NICE]) / total;
+                metrics->cpu_system = 100.0 * cp_time[CP_SYS] / total;
+                metrics->cpu_interrupt = 100.0 * cp_time[CP_INTR] / total;
+                metrics->cpu_idle = 100.0 * cp_time[CP_IDLE] / total;
+            }
+        }
     }
     
     /* Get per-CPU idle time */
@@ -410,11 +429,19 @@ node_metrics_collect(struct node_metrics *metrics)
     }
     
     /* Load average */
-    len = sizeof(la);
-    if (getloadavg(&la, 3) == 3) {
-        metrics->loadavg_1m = la.ldavg[0] / la.fscale;
-        metrics->loadavg_5m = la.ldavg[1] / la.fscale;
-        metrics->loadavg_15m = la.ldavg[2] / la.fscale;
+    /*
+     * getloadavg(3) fills a double[] with the load averages directly; the old
+     * code passed a `struct loadavg *` (wrong type) and then divided by an
+     * uninitialized fscale, yielding garbage. Use the documented interface.
+     */
+    {
+        double lavg[3];
+
+        if (getloadavg(lavg, 3) == 3) {
+            metrics->loadavg_1m = lavg[0];
+            metrics->loadavg_5m = lavg[1];
+            metrics->loadavg_15m = lavg[2];
+        }
     }
     
     /* Memory metrics */
