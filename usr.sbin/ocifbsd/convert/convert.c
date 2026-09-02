@@ -79,10 +79,10 @@ convert_add_warning(struct convert_context *ctx, int line,
 	struct convert_warning *w;
 	char buf[512];
 	va_list ap;
-	
+
 	if (ctx == NULL)
 		return;
-	
+
 	if (ctx->nwarnings >= ctx->warning_capacity) {
 		int new_cap = ctx->warning_capacity ?
 		    ctx->warning_capacity * 2 : 16;
@@ -98,13 +98,13 @@ convert_add_warning(struct convert_context *ctx, int line,
 		ctx->warnings = grown;
 		ctx->warning_capacity = new_cap;
 	}
-	
+
 	w = &ctx->warnings[ctx->nwarnings];
-	
+
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
-	
+
 	strlcpy(w->message, buf, sizeof(w->message));
 	w->line = line;
 	w->code = code;
@@ -120,7 +120,7 @@ convert_get_warnings(struct convert_context *ctx,
 {
 	if (ctx == NULL || warnings == NULL || count == NULL)
 		return (-1);
-	
+
 	*warnings = ctx->warnings;
 	*count = ctx->nwarnings;
 	return (0);
@@ -142,7 +142,7 @@ static convert_source_type_t
 detect_source_type(const char *filename, const char *content)
 {
 	const char *ext;
-	
+
 	if (filename != NULL) {
 		ext = strrchr(filename, '.');
 		if (ext != NULL) {
@@ -159,13 +159,13 @@ detect_source_type(const char *filename, const char *content)
 			}
 		}
 	}
-	
+
 	/* Try to detect from content */
 	if (strstr(content, "apiVersion:") != NULL)
 		return (CONVERT_ENSEMBLE_YAML);
 	if (strstr(content, "services:") != NULL)
 		return (CONVERT_ENSEMBLE_SERVICES);
-	
+
 	return (CONVERT_ENSEMBLE_YAML);
 }
 
@@ -182,39 +182,39 @@ convert_file(const char *input_path, const char *output_path,
 	size_t len;
 	struct stat st;
 	int ret;
-	
+
 	if (input_path == NULL) {
 		errno = EINVAL;
 		return (CONVERT_FILE_ERROR);
 	}
-	
+
 	/* Read input file */
 	fp = fopen(input_path, "r");
 	if (fp == NULL)
 		return (CONVERT_FILE_ERROR);
-	
+
 	if (fstat(fileno(fp), &st) != 0) {
 		fclose(fp);
 		return (CONVERT_FILE_ERROR);
 	}
-	
+
 	input = malloc(st.st_size + 1);
 	if (input == NULL) {
 		fclose(fp);
 		return (CONVERT_MEMORY_ERROR);
 	}
-	
+
 	len = fread(input, 1, st.st_size, fp);
 	input[len] = '\0';
 	fclose(fp);
-	
+
 	/* Convert */
 	ret = convert_buffer(input, len, &output, opts);
 	free(input);
-	
+
 	if (ret != CONVERT_SUCCESS)
 		return (ret);
-	
+
 	/* Write output */
 	if (output_path != NULL && !opts->dry_run) {
 		fp = fopen(output_path, "w");
@@ -227,7 +227,7 @@ convert_file(const char *input_path, const char *output_path,
 	} else if (!opts->dry_run) {
 		puts(output);
 	}
-	
+
 	free(output);
 	return (CONVERT_SUCCESS);
 }
@@ -243,7 +243,7 @@ convert_stdin(const char *output_path, struct convert_options *opts)
 	size_t cap = 4096;
 	size_t len = 0;
 	int ret;
-	
+
 	input = malloc(cap);
 	if (input == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -270,13 +270,13 @@ convert_stdin(const char *output_path, struct convert_options *opts)
 		}
 	}
 	input[len] = '\0';
-	
+
 	ret = convert_buffer(input, len, &output, opts);
 	free(input);
-	
+
 	if (ret != CONVERT_SUCCESS)
 		return (ret);
-	
+
 	if (output_path != NULL && !opts->dry_run) {
 		FILE *fp = fopen(output_path, "w");
 		if (fp == NULL) {
@@ -288,7 +288,7 @@ convert_stdin(const char *output_path, struct convert_options *opts)
 	} else if (!opts->dry_run) {
 		puts(output);
 	}
-	
+
 	free(output);
 	return (CONVERT_SUCCESS);
 }
@@ -303,15 +303,15 @@ convert_buffer(const char *input, size_t len, char **output,
 	convert_source_type_t type;
 	int ret;
 	char *result = NULL;
-	
+
 	if (input == NULL || output == NULL) {
 		errno = EINVAL;
 		return (CONVERT_SYNTAX_ERROR);
 	}
-	
+
 	/* Detect source type */
 	type = detect_source_type(NULL, input);
-	
+
 	switch (type) {
 	case CONVERT_ENSEMBLE_YAML:
 	case CONVERT_ENSEMBLE_JSON:
@@ -323,7 +323,7 @@ convert_buffer(const char *input, size_t len, char **output,
 	default:
 		ret = CONVERT_UNSUPPORTED_FEATURE;
 	}
-	
+
 	*output = result;
 	return (ret);
 }
@@ -348,7 +348,7 @@ main(int argc, char **argv)
 		.include_configs = true
 	};
 	int ret;
-	
+
 	static struct option longopts[] = {
 		{ "output", required_argument, NULL, 'o' },
 		{ "format", required_argument, NULL, 'f' },
@@ -360,7 +360,7 @@ main(int argc, char **argv)
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	int ch;
 	while ((ch = getopt_long(argc, argv, "o:f:acvnN:h", longopts, NULL)) != -1) {
 		switch (ch) {
@@ -405,23 +405,23 @@ main(int argc, char **argv)
 			return (ch == 'h' ? 0 : 1);
 		}
 	}
-	
+
 	argc -= optind;
 	argv += optind;
-	
+
 	if (argc > 0)
 		input_file = argv[0];
-	
+
 	if (input_file != NULL) {
 		ret = convert_file(input_file, output_file, &opts);
 	} else {
 		ret = convert_stdin(output_file, &opts);
 	}
-	
+
 	if (ret != CONVERT_SUCCESS) {
 		fprintf(stderr, "Error: %s\n", convert_result_str(ret));
 		return (1);
 	}
-	
+
 	return (0);
 }

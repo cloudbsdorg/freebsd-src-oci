@@ -75,16 +75,16 @@ generate_stack_id(char *id, size_t len)
 	SHA256_CTX ctx;
 	uint8_t hash[SHA256_DIGEST_LENGTH];
 	uint64_t ts;
-	
+
 	arc4random_buf(&ts, sizeof(ts));
-	
+
 	SHA256_Init(&ctx);
 	SHA256_Update(&ctx, &ts, sizeof(ts));
 	pthread_t tid = pthread_self();
 	SHA256_Update(&ctx, &tid, sizeof(pthread_t));
 	SHA256_Final(hash, &ctx);
-	
-	snprintf(id, len, "stack-%08x", 
+
+	snprintf(id, len, "stack-%08x",
 	    (uint32_t)(hash[0] << 24 | hash[1] << 16 | hash[2] << 8 | hash[3]));
 }
 
@@ -123,7 +123,7 @@ save_stack_state(struct stack *stack)
 {
 	FILE *fp;
 	char *path;
-	
+
 	path = get_stack_state_path(stack->name, stack->namespace);
 	if (path == NULL)
 		return (-1);
@@ -159,7 +159,7 @@ save_stack_state(struct stack *stack)
 		free(path);
 		return (-1);
 	}
-	
+
 	fprintf(fp, "{\n");
 	fprintf(fp, "  \"name\": \"%s\",\n", stack->name);
 	fprintf(fp, "  \"namespace\": \"%s\",\n", stack->namespace);
@@ -246,22 +246,22 @@ stack_create(struct stack_spec *spec)
 	struct stack *stack;
 	struct stack_status *status;
 	int i;
-	
+
 	if (spec == NULL || spec->name[0] == '\0') {
 		errno = EINVAL;
 		return (NULL);
 	}
-	
+
 	stack = calloc(1, sizeof(struct stack));
 	if (stack == NULL)
 		return (NULL);
-	
+
 	/* Initialize stack */
 	strlcpy(stack->name, spec->name, sizeof(stack->name));
-	strlcpy(stack->namespace, 
+	strlcpy(stack->namespace,
 	    spec->namespace[0] ? spec->namespace : "default",
 	    sizeof(stack->namespace));
-	
+
 	/* Copy spec */
 	stack->spec = calloc(1, sizeof(struct stack_spec));
 	if (stack->spec == NULL) {
@@ -269,7 +269,7 @@ stack_create(struct stack_spec *spec)
 		return (NULL);
 	}
 	memcpy(stack->spec, spec, sizeof(struct stack_spec));
-	
+
 	/* Initialize status */
 	status = calloc(1, sizeof(struct stack_status));
 	if (status == NULL) {
@@ -277,22 +277,22 @@ stack_create(struct stack_spec *spec)
 		free(stack);
 		return (NULL);
 	}
-	
+
 	strlcpy(status->name, stack->name, sizeof(status->name));
 	strlcpy(status->namespace, stack->namespace, sizeof(status->namespace));
 	strlcpy(status->state, "pending", sizeof(status->state));
 	status->created = time(NULL);
 	status->ntotal = spec->nservices;
-	
+
 	stack->status = status;
-	
+
 	/* Create services for this stack */
 	for (i = 0; i < spec->nservices; i++) {
 		struct service_spec *svc_spec = &spec->services[i];
 		struct service *svc;
-		
+
 		strlcpy(svc_spec->stack, stack->name, sizeof(svc_spec->stack));
-		
+
 		svc = service_create(svc_spec);
 		if (svc == NULL) {
 			/* Rollback created services */
@@ -305,11 +305,11 @@ stack_create(struct stack_spec *spec)
 			return (NULL);
 		}
 	}
-	
+
 	/* Add to registry */
 	pthread_mutex_lock(&stack_registry_lock);
 	if (stack_registry_count >= stack_registry_size) {
-		stack_registry_size = stack_registry_size ? 
+		stack_registry_size = stack_registry_size ?
 		    stack_registry_size * 2 : 16;
 		if (ocifbsd_realloc_grow((void **)&stack_registry, stack_registry_size * sizeof(struct stack *)) != 0) {
 			pthread_mutex_unlock(&stack_registry_lock);
@@ -321,13 +321,13 @@ stack_create(struct stack_spec *spec)
 	}
 	stack_registry[stack_registry_count++] = stack;
 	pthread_mutex_unlock(&stack_registry_lock);
-	
+
 	/* Save initial state */
 	save_stack_state(stack);
-	
+
 	orch_event_publish("Normal", "Created", stack->namespace,
 	    "Stack %s created", stack->name);
-	
+
 	return (stack);
 }
 
@@ -340,34 +340,34 @@ stack_start(struct stack *stack)
 	struct service **services;
 	int count;
 	int ret = 0;
-	
+
 	if (stack == NULL)
 		return (-1);
-	
+
 	/* Get services belonging to this stack */
 	services = service_list(stack->namespace, &count);
 	if (services == NULL)
 		return (0);  /* No services */
-	
+
 	for (int i = 0; i < count; i++) {
 		if (strcmp(services[i]->stack, stack->name) != 0)
 			continue;
-		
+
 		if (service_start(services[i]) != 0)
 			ret = -1;
 	}
-	
+
 	free(services);
-	
+
 	stack->status->state[0] = '\0';
 	strlcpy(stack->status->state, "running", sizeof(stack->status->state));
 	stack->status->updated = time(NULL);
-	
+
 	save_stack_state(stack);
-	
+
 	orch_event_publish("Normal", "Started", stack->namespace,
 	    "Stack %s started", stack->name);
-	
+
 	return (ret);
 }
 
@@ -380,32 +380,32 @@ stack_stop(struct stack *stack)
 	struct service **services;
 	int count;
 	int ret = 0;
-	
+
 	if (stack == NULL)
 		return (-1);
-	
+
 	services = service_list(stack->namespace, &count);
 	if (services == NULL)
 		return (0);
-	
+
 	for (int i = 0; i < count; i++) {
 		if (strcmp(services[i]->stack, stack->name) != 0)
 			continue;
-		
+
 		if (service_stop(services[i]) != 0)
 			ret = -1;
 	}
-	
+
 	free(services);
-	
+
 	strlcpy(stack->status->state, "stopped", sizeof(stack->status->state));
 	stack->status->updated = time(NULL);
-	
+
 	save_stack_state(stack);
-	
+
 	orch_event_publish("Normal", "Stopped", stack->namespace,
 	    "Stack %s stopped", stack->name);
-	
+
 	return (ret);
 }
 
@@ -418,26 +418,26 @@ stack_delete(struct stack *stack)
 	struct service **services;
 	int count;
 	int ret = 0;
-	
+
 	if (stack == NULL)
 		return (-1);
-	
+
 	/* Stop all services first */
 	stack_stop(stack);
-	
+
 	/* Delete all services belonging to this stack */
 	services = service_list(stack->namespace, &count);
 	if (services != NULL) {
 		for (int i = 0; i < count; i++) {
 			if (strcmp(services[i]->stack, stack->name) != 0)
 				continue;
-			
+
 			if (service_delete(services[i]) != 0)
 				ret = -1;
 		}
 		free(services);
 	}
-	
+
 	/* Remove from registry */
 	pthread_mutex_lock(&stack_registry_lock);
 	for (int i = 0; i < stack_registry_count; i++) {
@@ -475,7 +475,7 @@ struct stack *
 stack_get(const char *name, const char *namespace)
 {
 	const char *ns = namespace ? namespace : "default";
-	
+
 	pthread_mutex_lock(&stack_registry_lock);
 	for (int i = 0; i < stack_registry_count; i++) {
 		if (strcmp(stack_registry[i]->name, name) == 0 &&
@@ -513,7 +513,7 @@ stack_list(const char *namespace, int *count)
 	result = calloc(alloc, sizeof(struct stack *));
 	if (result == NULL)
 		return (NULL);
-	
+
 	pthread_mutex_lock(&stack_registry_lock);
 	for (int i = 0; i < stack_registry_count; i++) {
 		if (strcmp(stack_registry[i]->namespace, ns) == 0) {
@@ -590,7 +590,7 @@ stack_free(struct stack *stack)
 {
 	if (stack == NULL)
 		return;
-	
+
 	free(stack->spec);
 	free(stack->status);
 	free(stack->state_file);
@@ -605,20 +605,20 @@ stack_update(struct stack *stack, struct stack_spec *new_spec)
 {
 	if (stack == NULL || new_spec == NULL)
 		return (-1);
-	
+
 	/* Stop current stack */
 	stack_stop(stack);
-	
+
 	/* Update spec */
 	free(stack->spec);
 	stack->spec = calloc(1, sizeof(struct stack_spec));
 	if (stack->spec == NULL)
 		return (-1);
 	memcpy(stack->spec, new_spec, sizeof(struct stack_spec));
-	
+
 	stack->status->updated = time(NULL);
 	save_stack_state(stack);
-	
+
 	/* Restart stack */
 	return (stack_start(stack));
 }
@@ -817,7 +817,7 @@ service_create(struct service_spec *spec)
 {
 	struct service *service;
 	struct service_status *status;
-	
+
 	if (spec == NULL || spec->name[0] == '\0') {
 		errno = EINVAL;
 		return (NULL);
@@ -831,7 +831,7 @@ service_create(struct service_spec *spec)
 	service = calloc(1, sizeof(struct service));
 	if (service == NULL)
 		return (NULL);
-	
+
 	strlcpy(service->name, spec->name, sizeof(service->name));
 	/*
 	 * service_spec has no namespace field, so a service lives in the
@@ -841,7 +841,7 @@ service_create(struct service_spec *spec)
 	 */
 	strlcpy(service->namespace, "default", sizeof(service->namespace));
 	strlcpy(service->stack, spec->stack, sizeof(service->stack));
-	
+
 	/* Copy spec */
 	service->spec = calloc(1, sizeof(struct service_spec));
 	if (service->spec == NULL) {
@@ -849,7 +849,7 @@ service_create(struct service_spec *spec)
 		return (NULL);
 	}
 	memcpy(service->spec, spec, sizeof(struct service_spec));
-	
+
 	/* Initialize status */
 	status = calloc(1, sizeof(struct service_status));
 	if (status == NULL) {
@@ -857,15 +857,15 @@ service_create(struct service_spec *spec)
 		free(service);
 		return (NULL);
 	}
-	
+
 	strlcpy(status->name, service->name, sizeof(status->name));
 	strlcpy(status->namespace, service->namespace, sizeof(status->namespace));
 	strlcpy(status->stack, service->stack, sizeof(status->stack));
 	status->desired_replicas = spec->replicas;
 	status->created = time(NULL);
-	
+
 	service->status = status;
-	
+
 	/* Allocate replicas */
 	service->nreplicas = spec->replicas;
 	service->replicas = calloc(spec->replicas, sizeof(struct service_replica));
@@ -875,7 +875,7 @@ service_create(struct service_spec *spec)
 		free(service);
 		return (NULL);
 	}
-	
+
 	/* Initialize replica array */
 	for (int i = 0; i < spec->replicas; i++) {
 		service->replicas[i].replica_id = i;
@@ -885,11 +885,11 @@ service_create(struct service_spec *spec)
 		    "%s-replica-%d", service->name, i);
 		service->replicas[i].state = REPLICA_STATE_PENDING;
 	}
-	
+
 	/* Add to registry */
 	pthread_mutex_lock(&service_registry_lock);
 	if (service_registry_count >= service_registry_size) {
-		service_registry_size = service_registry_size ? 
+		service_registry_size = service_registry_size ?
 		    service_registry_size * 2 : 16;
 		if (ocifbsd_realloc_grow((void **)&service_registry, service_registry_size * sizeof(struct service *)) != 0) {
 			pthread_mutex_unlock(&service_registry_lock);
@@ -1020,33 +1020,33 @@ service_stop(struct service *service)
 {
 	if (service == NULL)
 		return (-1);
-	
+
 	/* Stop health checker */
 	health_check_stop(service);
-	
+
 	/* Stop all replicas */
 	for (int i = 0; i < service->nreplicas; i++) {
 		struct pod *pod;
-		
+
 		if (service->replicas[i].pod_name[0] == '\0')
 			continue;
-		
+
 		pod = pod_get(service->replicas[i].pod_name, service->namespace);
 		if (pod != NULL) {
 			pod_stop(pod, SIGTERM);
 			pod_delete(pod);
 		}
-		
+
 		service->replicas[i].state = REPLICA_STATE_TERMINATED;
 	}
-	
+
 	service->status->available_replicas = 0;
 	service->status->ready_replicas = 0;
 	service->status->updated = time(NULL);
-	
+
 	orch_event_publish("Normal", "ServiceStopped", service->namespace,
 	    "Service %s stopped", service->name);
-	
+
 	return (0);
 }
 
@@ -1057,12 +1057,12 @@ int
 service_delete(struct service *service)
 {
 	int ret;
-	
+
 	if (service == NULL)
 		return (-1);
-	
+
 	ret = service_stop(service);
-	
+
 	/* Remove from registry */
 	pthread_mutex_lock(&service_registry_lock);
 	for (int i = 0; i < service_registry_count; i++) {
@@ -1101,7 +1101,7 @@ struct service *
 service_get(const char *name, const char *namespace)
 {
 	const char *ns = namespace ? namespace : "default";
-	
+
 	pthread_mutex_lock(&service_registry_lock);
 	for (int i = 0; i < service_registry_count; i++) {
 		if (strcmp(service_registry[i]->name, name) == 0 &&
@@ -1134,12 +1134,12 @@ service_list(const char *namespace, int *count)
 	const char *ns = namespace ? namespace : "default";
 	int alloc = 16;
 	int n = 0;
-	
+
 	*count = 0;
 	result = calloc(alloc, sizeof(struct service *));
 	if (result == NULL)
 		return (NULL);
-	
+
 	pthread_mutex_lock(&service_registry_lock);
 	for (int i = 0; i < service_registry_count; i++) {
 		if (strcmp(service_registry[i]->namespace, ns) == 0) {
@@ -1216,7 +1216,7 @@ service_free(struct service *service)
 {
 	if (service == NULL)
 		return;
-	
+
 	free(service->spec);
 	free(service->status);
 	free(service->replicas);
@@ -1241,14 +1241,14 @@ service_scale(struct service *service, int replicas)
 		/* Scale up */
 		struct service_replica *new_replicas;
 		int old_count = service->nreplicas;
-		
+
 		new_replicas = realloc(service->replicas,
 		    replicas * sizeof(struct service_replica));
 		if (new_replicas == NULL)
 			return (-1);
-		
+
 		service->replicas = new_replicas;
-		
+
 		/* Initialize AND launch the new replicas. */
 		for (int i = old_count; i < replicas; i++) {
 			memset(&service->replicas[i], 0,
@@ -1273,18 +1273,18 @@ service_scale(struct service *service, int replicas)
 		/* Scale down - stop excess replicas */
 		for (int i = service->nreplicas - 1; i >= replicas; i--) {
 			struct pod *pod;
-			
+
 			if (service->replicas[i].pod_name[0] == '\0')
 				continue;
-			
-			pod = pod_get(service->replicas[i].pod_name, 
+
+			pod = pod_get(service->replicas[i].pod_name,
 			    service->namespace);
 			if (pod != NULL) {
 				pod_stop(pod, SIGTERM);
 				pod_delete(pod);
 			}
 		}
-		
+
 		service->nreplicas = replicas;
 		if (service->spec != NULL)
 			service->spec->replicas = replicas;
@@ -1316,7 +1316,7 @@ service_update(struct service *service, struct service_spec *new_spec)
 {
 	if (service == NULL || new_spec == NULL)
 		return (-1);
-	
+
 	/* Initiate rolling update */
 	return (rolling_update_init(service, new_spec));
 }
@@ -1329,14 +1329,14 @@ service_rollback(struct service *service)
 {
 	if (service == NULL)
 		return (-1);
-	
+
 	/* Rollback rolling update */
 	struct rolling_update_state *state;
-	
+
 	state = rolling_update_get_status(service->name, service->namespace);
 	if (state == NULL)
 		return (-1);
-	
+
 	return (rolling_update_rollback(state));
 }
 
@@ -1348,19 +1348,19 @@ service_get_replicas(struct service *service, int *count)
 {
 	struct service_replica **result;
 	int n = 0;
-	
+
 	if (service == NULL || count == NULL)
 		return (NULL);
-	
+
 	*count = 0;
 	result = calloc(service->nreplicas, sizeof(struct service_replica *));
 	if (result == NULL)
 		return (NULL);
-	
+
 	for (int i = 0; i < service->nreplicas; i++) {
 		result[n++] = &service->replicas[i];
 	}
-	
+
 	*count = n;
 	return (result);
 }
@@ -1372,17 +1372,17 @@ struct service_status *
 service_get_status(struct service *service)
 {
 	int running = 0, ready = 0;
-	
+
 	if (service == NULL)
 		return (NULL);
-	
+
 	for (int i = 0; i < service->nreplicas; i++) {
 		if (service->replicas[i].state == REPLICA_STATE_RUNNING)
 			running++;
 	}
-	
+
 	service->status->available_replicas = running;
 	service->status->ready_replicas = ready;
-	
+
 	return (service->status);
 }

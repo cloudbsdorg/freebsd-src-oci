@@ -67,16 +67,16 @@ generate_pod_uid(char *uid, size_t len)
 	SHA256_CTX ctx;
 	uint8_t hash[SHA256_DIGEST_LENGTH];
 	uint64_t ts;
-	
+
 	arc4random_buf(&ts, sizeof(ts));
-	
+
 	SHA256_Init(&ctx);
 	SHA256_Update(&ctx, &ts, sizeof(ts));
 	pthread_t tid = pthread_self();
 	SHA256_Update(&ctx, &tid, sizeof(pthread_t));
 	SHA256_Final(hash, &ctx);
-	
-	snprintf(uid, len, "pod-%08x%08x", 
+
+	snprintf(uid, len, "pod-%08x%08x",
 	    (uint32_t)(hash[0] << 24 | hash[1] << 16 | hash[2] << 8 | hash[3]),
 	    (uint32_t)(hash[4] << 24 | hash[5] << 16 | hash[6] << 8 | hash[7]));
 }
@@ -145,7 +145,7 @@ save_pod_state(struct pod *pod)
 {
 	FILE *fp;
 	char *path;
-	
+
 	path = get_pod_state_path(pod->name, pod->namespace);
 	if (path == NULL)
 		return (-1);
@@ -234,17 +234,17 @@ load_pod_state(struct pod *pod)
 	char *path;
 	FILE *fp;
 	char buf[1024];
-	
+
 	path = get_pod_state_path(pod->name, pod->namespace);
 	if (path == NULL)
 		return (-1);
-	
+
 	fp = fopen(path, "r");
 	free(path);
-	
+
 	if (fp == NULL)
 		return (-1);
-	
+
 	/* Simple state restoration - for full JSON parsing, would use json_parser */
 	while (fgets(buf, sizeof(buf), fp) != NULL) {
 		/* Basic state parsing */
@@ -342,23 +342,23 @@ pod_create(struct pod_spec *spec)
 	struct pod *pod;
 	struct pod_status *status;
 	int i;
-	
+
 	if (spec == NULL || spec->name[0] == '\0') {
 		errno = EINVAL;
 		return (NULL);
 	}
-	
+
 	pod = calloc(1, sizeof(struct pod));
 	if (pod == NULL)
 		return (NULL);
-	
+
 	/* Initialize pod */
 	generate_pod_uid(pod->uid, sizeof(pod->uid));
 	strlcpy(pod->name, spec->name, sizeof(pod->name));
-	strlcpy(pod->namespace, 
+	strlcpy(pod->namespace,
 	    spec->namespace[0] ? spec->namespace : "default",
 	    sizeof(pod->namespace));
-	
+
 	/* Copy spec */
 	pod->spec = calloc(1, sizeof(struct pod_spec));
 	if (pod->spec == NULL) {
@@ -385,7 +385,7 @@ pod_create(struct pod_spec *spec)
 		pod->spec->containers = NULL;
 		pod->spec->ncontainers = 0;
 	}
-	
+
 	/* Initialize status */
 	status = calloc(1, sizeof(struct pod_status));
 	if (status == NULL) {
@@ -393,14 +393,14 @@ pod_create(struct pod_spec *spec)
 		free(pod);
 		return (NULL);
 	}
-	
+
 	strlcpy(status->uid, pod->uid, sizeof(status->uid));
 	strlcpy(status->name, pod->name, sizeof(status->name));
 	strlcpy(status->namespace, pod->namespace, sizeof(status->namespace));
 	status->state = POD_STATE_PENDING;
 	status->created = time(NULL);
 	status->ncontainers = spec->ncontainers;
-	
+
 	/* Container status array */
 	if (spec->ncontainers > 0) {
 		status->containers = calloc(spec->ncontainers,
@@ -421,13 +421,13 @@ pod_create(struct pod_spec *spec)
 			status->containers[i].state = REPLICA_STATE_PENDING;
 		}
 	}
-	
+
 	pod->status = status;
-	
+
 	/* Add to registry */
 	pthread_mutex_lock(&pod_registry_lock);
 	if (pod_registry_count >= pod_registry_size) {
-		pod_registry_size = pod_registry_size ? 
+		pod_registry_size = pod_registry_size ?
 		    pod_registry_size * 2 : 16;
 		if (ocifbsd_realloc_grow((void **)&pod_registry, pod_registry_size * sizeof(struct pod *)) != 0) {
 			pthread_mutex_unlock(&pod_registry_lock);
@@ -440,14 +440,14 @@ pod_create(struct pod_spec *spec)
 	}
 	pod_registry[pod_registry_count++] = pod;
 	pthread_mutex_unlock(&pod_registry_lock);
-	
+
 	/* Save initial state */
 	save_pod_state(pod);
-	
+
 	/* Publish event */
 	orch_event_publish("Normal", "Scheduled", pod->namespace,
 	    "Pod %s scheduled", pod->name);
-	
+
 	return (pod);
 }
 
@@ -462,26 +462,26 @@ pod_start(struct pod *pod)
 
 	if (pod == NULL)
 		return (-1);
-	
+
 	if (pod->status->state == POD_STATE_RUNNING)
 		return (0);
-	
+
 	/* Start each container in the pod */
 	for (i = 0; i < pod->spec->ncontainers; i++) {
 		struct container_spec *cs = &pod->spec->containers[i];
 		char *container_id = NULL;
-		
+
 		/* Create and start container using ocifbsd */
 		ret = ocifbsd_create_container(cs->name, cs->image,
 		    cs->command, cs->args, pod->uid, &container_id);
-		
+
 		if (ret != 0) {
 			pod->status->containers[i].state = REPLICA_STATE_FAILED;
 			pod->status->containers[i].exit_code = ret;
 			ret = -1;
 			continue;
 		}
-		
+
 		ret = ocifbsd_start_container(container_id);
 		if (ret != 0) {
 			pod->status->containers[i].state = REPLICA_STATE_FAILED;
@@ -493,10 +493,10 @@ pod_start(struct pod *pod)
 			    container_id,
 			    sizeof(pod->status->containers[i].container_id));
 		}
-		
+
 		free(container_id);
 	}
-	
+
 	/* Update pod status */
 	if (ret == 0) {
 		pod->status->state = POD_STATE_RUNNING;
@@ -508,7 +508,7 @@ pod_start(struct pod *pod)
 		strlcpy(pod->status->reason, "ContainerStartFailed",
 		    sizeof(pod->status->reason));
 	}
-	
+
 	save_pod_state(pod);
 	return (ret);
 }
@@ -521,10 +521,10 @@ pod_stop(struct pod *pod, int sig)
 {
 	int i;
 	int ret = 0;
-	
+
 	if (pod == NULL)
 		return (-1);
-	
+
 	if (pod->status == NULL || pod->status->state != POD_STATE_RUNNING)
 		return (0);
 
@@ -549,13 +549,13 @@ pod_stop(struct pod *pod, int sig)
 				    REPLICA_STATE_TERMINATED;
 		}
 	}
-	
+
 	pod->status->state = POD_STATE_PENDING;
 	save_pod_state(pod);
-	
+
 	orch_event_publish("Normal", "Stopped", pod->namespace,
 	    "Pod %s stopped", pod->name);
-	
+
 	return (ret);
 }
 
@@ -567,10 +567,10 @@ pod_delete(struct pod *pod)
 {
 	int i;
 	int ret = 0;
-	
+
 	if (pod == NULL)
 		return (-1);
-	
+
 	/* Stop if running */
 	if (pod->status != NULL && pod->status->state == POD_STATE_RUNNING)
 		pod_stop(pod, SIGTERM);
@@ -592,7 +592,7 @@ pod_delete(struct pod *pod)
 				ret = -1;
 		}
 	}
-	
+
 	/* Remove from registry */
 	pthread_mutex_lock(&pod_registry_lock);
 	for (i = 0; i < pod_registry_count; i++) {
@@ -635,7 +635,7 @@ pod_get(const char *name, const char *namespace)
 {
 	struct pod **p;
 	int count;
-	
+
 	(void)p;
 	(void)count;
 
@@ -792,18 +792,18 @@ pod_get_status(struct pod *pod)
 {
 	if (pod == NULL)
 		return (NULL);
-	
+
 	/* Refresh status from containers */
 	for (int i = 0; i < pod->spec->ncontainers; i++) {
 		char *cid = pod->status->containers[i].container_id;
 		if (cid == NULL || cid[0] == '\0')
 			continue;
-		
+
 		/* Query container state from ocifbsd */
 		container_state_t state;
 		int exit_code;
 		ocifbsd_get_container_state(cid, &state, &exit_code);
-		
+
 		switch (state) {
 		case CONTAINER_STATE_RUNNING:
 			pod->status->containers[i].state = REPLICA_STATE_RUNNING;
@@ -819,7 +819,7 @@ pod_get_status(struct pod *pod)
 			break;
 		}
 	}
-	
+
 	/* Update pod-level state */
 	bool all_running = true;
 	bool any_failed = false;
@@ -829,12 +829,12 @@ pod_get_status(struct pod *pod)
 		if (pod->status->containers[i].state == REPLICA_STATE_FAILED)
 			any_failed = true;
 	}
-	
+
 	if (all_running)
 		pod->status->state = POD_STATE_RUNNING;
 	else if (any_failed)
 		pod->status->state = POD_STATE_FAILED;
-	
+
 	return (pod->status);
 }
 
@@ -846,17 +846,17 @@ pod_update(struct pod *pod, struct pod_spec *new_spec)
 {
 	if (pod == NULL || new_spec == NULL)
 		return (-1);
-	
+
 	/* Stop current pod */
 	pod_stop(pod, SIGTERM);
-	
+
 	/* Update spec */
 	free(pod->spec);
 	pod->spec = calloc(1, sizeof(struct pod_spec));
 	if (pod->spec == NULL)
 		return (-1);
 	memcpy(pod->spec, new_spec, sizeof(struct pod_spec));
-	
+
 	/* Restart pod with new spec */
 	return (pod_start(pod));
 }
@@ -868,17 +868,17 @@ int
 pod_logs(struct pod *pod, const char *container, int tail, bool follow)
 {
 	int i;
-	
+
 	if (pod == NULL)
 		return (-1);
-	
+
 	if (container == NULL) {
 		/* Return logs from first container */
 		if (pod->spec->ncontainers == 0)
 			return (0);
 		container = pod->spec->containers[0].name;
 	}
-	
+
 	for (i = 0; i < pod->spec->ncontainers; i++) {
 		if (strcmp(pod->spec->containers[i].name, container) == 0) {
 			char *cid = pod->status->containers[i].container_id;
@@ -887,7 +887,7 @@ pod_logs(struct pod *pod, const char *container, int tail, bool follow)
 			return (ocifbsd_logs(cid, tail, follow));
 		}
 	}
-	
+
 	errno = ENOENT;
 	return (-1);
 }

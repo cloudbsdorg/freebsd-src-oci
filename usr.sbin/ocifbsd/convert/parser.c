@@ -71,7 +71,7 @@ yaml_escape(const char *str)
 	char *result;
 	char *p, *q;
 	size_t len;
-	
+
 	if (str == NULL)
 		return (strdup("\"\""));
 
@@ -116,7 +116,7 @@ yaml_escape(const char *str)
 	}
 	*q++ = '"';
 	*q = '\0';
-	
+
 	return (result);
 }
 
@@ -129,7 +129,7 @@ json_escape(const char *str)
 	char *result;
 	char *p, *q;
 	size_t len;
-	
+
 	if (str == NULL)
 		return (strdup("\"\""));
 
@@ -191,7 +191,7 @@ json_escape(const char *str)
 	}
 	*q++ = '"';
 	*q = '\0';
-	
+
 	return (result);
 }
 
@@ -205,7 +205,7 @@ native_format_service(const char *name, const char *image,
     const char *depends_on, struct convert_options *opts)
 {
 	char *result;
-	
+
 	asprintf(&result,
 	    "  - name: %s\n"
 	    "    image: %s\n"
@@ -220,7 +220,7 @@ native_format_service(const char *name, const char *image,
 	    ports ? "\n" : "",
 	    volumes ? "    volumes:\n      - " : "",
 	    volumes ? volumes : "");
-	
+
 	return (result);
 }
 
@@ -229,7 +229,7 @@ native_format_network(const char *name, const char *driver,
     const char *subnet, struct convert_options *opts)
 {
 	char *result;
-	
+
 	asprintf(&result,
 	    "  - name: %s\n"
 	    "    driver: %s\n"
@@ -239,7 +239,7 @@ native_format_network(const char *name, const char *driver,
 	    subnet ? "    subnet: " : "",
 	    subnet ? subnet : "",
 	    subnet ? "\n" : "");
-	
+
 	return (result);
 }
 
@@ -248,13 +248,13 @@ native_format_volume(const char *name, const char *driver,
     const char *opts, struct convert_options *copts)
 {
 	char *result;
-	
+
 	asprintf(&result,
 	    "  - name: %s\n"
 	    "    driver: %s\n",
 	    name ? name : "unnamed",
 	    driver ? driver : "zfs");
-	
+
 	return (result);
 }
 
@@ -264,7 +264,7 @@ native_format_stack(const char *name, const char *services,
     struct convert_options *opts)
 {
 	char *result;
-	
+
 	asprintf(&result,
 	    "name: %s\n"
 	    "namespace: default\n"
@@ -273,6 +273,6 @@ native_format_stack(const char *name, const char *services,
 	    services ? "services:\n" : "",
 	    services ? services : "",
 	    networks ? "\nnetworks:\n" : "");
-	
+
 	return (result);
 }

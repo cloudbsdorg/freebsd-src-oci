@@ -65,12 +65,12 @@ ensemble_detect_kind(const char *yaml)
 {
 	if (strstr(yaml, "kind:") == NULL)
 		return (ENSEMBLE_UNKNOWN);
-	
+
 	/* Extract kind value */
 	const char *p = strstr(yaml, "kind:");
 	if (p == NULL)
 		return (ENSEMBLE_UNKNOWN);
-	
+
 	p += 5;
 	while (isspace((unsigned char)*p))
 		p++;
@@ -130,18 +130,18 @@ yaml_get_field(const char *yaml, const char *field)
 	const char *p;
 	char search[64];
 	size_t field_len;
-	
+
 	field_len = strlen(field);
 	snprintf(search, sizeof(search), "%s:", field);
-	
+
 	p = strstr(yaml, search);
 	if (p == NULL)
 		return (NULL);
-	
+
 	p += field_len + 1;
 	while (isspace((unsigned char)*p))
 		p++;
-	
+
 	/* Check for quoted string */
 	if (*p == '"' || *p == '\'') {
 		char quote = *p++;
@@ -158,11 +158,11 @@ yaml_get_field(const char *yaml, const char *field)
 		const char *end = p;
 		while (*end && *end != '\n' && *end != '#')
 			end++;
-		
+
 		/* Trim trailing whitespace */
 		while (end > p && isspace((unsigned char)end[-1]))
 			end--;
-		
+
 		if (end > p) {
 			result = malloc(end - p + 1);
 			if (result != NULL) {
@@ -171,7 +171,7 @@ yaml_get_field(const char *yaml, const char *field)
 			}
 		}
 	}
-	
+
 	return (result);
 }
 
@@ -204,7 +204,7 @@ ensemble_convert_deployment(const char *yaml, char **output,
 	char *image = yaml_get_field(yaml, "image");
 	char *replicas_str = yaml_get_field(yaml, "replicas");
 	char *container_port_str = yaml_get_field(yaml, "containerPort");
-	
+
 	int replicas = replicas_str ? atoi(replicas_str) : 1;
 	const char *svc_name = name ? name : (app ? app : "unknown");
 	char portbuf[160] = "";
@@ -246,14 +246,14 @@ ensemble_convert_deployment(const char *yaml, char **output,
 	    image ? image : "# TODO: set image",
 	    replicas,
 	    portbuf);
-	
+
 	free(name);
 	free(namespace);
 	free(app);
 	free(image);
 	free(replicas_str);
 	free(container_port_str);
-	
+
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
 	*output = result;
@@ -273,7 +273,7 @@ ensemble_convert_service(const char *yaml, char **output,
 	char *port_name = yaml_get_field(yaml, "port");
 	char *target_port_str = yaml_get_field(yaml, "targetPort");
 	char *type = yaml_get_field(yaml, "type");
-	
+
 	const char *svc_name = name ? name : "unknown";
 	char selbuf[160] = "";
 	char portbuf[200] = "";
@@ -310,14 +310,14 @@ ensemble_convert_service(const char *yaml, char **output,
 	    svc_name,
 	    selbuf,
 	    portbuf);
-	
+
 	free(name);
 	free(namespace);
 	free(selector);
 	free(port_name);
 	free(target_port_str);
 	free(type);
-	
+
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
 	*output = result;
@@ -355,10 +355,10 @@ ensemble_convert_configmap(const char *yaml, char **output,
 	    name ? name : "unknown",
 	    name ? name : "unknown",
 	    ns);
-	
+
 	free(name);
 	free(namespace);
-	
+
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
 	*output = result;
@@ -397,10 +397,10 @@ ensemble_convert_secret(const char *yaml, char **output,
 	    name ? name : "unknown",
 	    name ? name : "unknown",
 	    ns);
-	
+
 	free(name);
 	free(namespace);
-	
+
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
 	*output = result;
@@ -446,10 +446,10 @@ ensemble_convert_ingress(const char *yaml, char **output,
 	    name ? name : "unknown",
 	    ns,
 	    name ? name : "unknown");
-	
+
 	free(name);
 	free(namespace);
-	
+
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
 	*output = result;
@@ -507,7 +507,7 @@ ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
 	free(name);
 	free(namespace);
 	free(storage_str);
-	
+
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
 	*output = result;
@@ -522,7 +522,7 @@ ensemble_convert_namespace(const char *yaml, char **output,
     struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
-	
+
 	char *result;
 	asprintf(&result,
 	    "# Converted from Ensemble Namespace\n"
@@ -530,9 +530,9 @@ ensemble_convert_namespace(const char *yaml, char **output,
 	    "# Namespace definition\n"
 	    "name: %s\n",
 	    name ? name : "default");
-	
+
 	free(name);
-	
+
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
 	*output = result;
@@ -562,7 +562,7 @@ ensemble_convert_multi(const char *yaml, char **output,
 	    "\n");
 	result_len = strlen(result);
 	result_cap = result_len + 1;
-	
+
 	/*
 	 * Split into documents on the "---" separator. Documents may appear
 	 * before the first separator, between separators, and after the last
@@ -597,12 +597,12 @@ ensemble_convert_multi(const char *yaml, char **output,
 		doc = malloc(doc_len + 1);
 		if (doc == NULL)
 			continue;
-		
+
 		memcpy(doc, doc_start, doc_len);
 		doc[doc_len] = '\0';
-		
+
 		kind = ensemble_detect_kind(doc);
-		
+
 		switch (kind) {
 		case ENSEMBLE_DEPLOYMENT:
 			ret = ensemble_convert_deployment(doc, &converted, opts);
@@ -629,7 +629,7 @@ ensemble_convert_multi(const char *yaml, char **output,
 			asprintf(&converted, "# Skipped unknown kind\n");
 			ret = CONVERT_SUCCESS;
 		}
-		
+
 		if (ret == CONVERT_SUCCESS && converted != NULL) {
 			/*
 			 * Separate each converted object with a YAML document
@@ -664,7 +664,7 @@ ensemble_convert_multi(const char *yaml, char **output,
 			result[result_len] = '\0';
 			docs++;
 		}
-		
+
 		free(converted);
 		free(doc);
 		/* Advance to the separator (or end); the top of the loop

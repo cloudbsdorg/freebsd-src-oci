@@ -50,20 +50,20 @@ ensemble_services_detect_version(const char *compose)
 		/* Default to v3 */
 		return (3);
 	}
-	
+
 	p += 8;
 	while (isspace(*p))
 		p++;
-	
+
 	/* Check for quoted version */
 	if (*p == '"' || *p == '\'')
 		p++;
-	
+
 	if (p[0] == '2' && (p[1] == '\0' || p[1] == '.'))
 		return (2);
 	if (p[0] == '3' && (p[1] == '\0' || p[1] == '.'))
 		return (3);
-	
+
 	return (3);  /* Default to v3 */
 }
 
@@ -76,9 +76,9 @@ ensemble_services_get_services(const char *compose, int *count)
 	char **services = NULL;
 	int services_cap = 0;
 	*count = 0;
-	
+
 	const char *p = compose;
-	
+
 	if ((p = strstr(p, "services:")) != NULL) {
 		const char *nl = strchr(p, '\n');
 		int svc_indent = -1;
@@ -146,7 +146,7 @@ ensemble_services_get_services(const char *compose, int *count)
 			line = line_end + 1;
 		}
 	}
-	
+
 	return (services);
 }
 
@@ -190,7 +190,7 @@ ensemble_services_get_value(const char *service_block, const char *key)
 
 	while (*p == ' ' || *p == '\t')
 		p++;
-	
+
 	/* Check for inline array/list */
 	if (*p == '[') {
 		/* JSON-style array - collect until matching ] */
@@ -209,7 +209,7 @@ ensemble_services_get_value(const char *service_block, const char *key)
 		}
 		return (result);
 	}
-	
+
 	/* Check for block array (lines starting with -) */
 	if (*p == '\n') {
 		/* Look for first item */
@@ -229,22 +229,22 @@ ensemble_services_get_value(const char *service_block, const char *key)
 			return (result);
 		}
 	}
-	
+
 	/* Single value - until end of line */
 	const char *end = strchr(p, '\n');
 	if (end == NULL)
 		end = p + strlen(p);
-	
+
 	/* Trim */
 	while (end > p && isspace(end[-1]))
 		end--;
-	
+
 	result = malloc(end - p + 1);
 	if (result != NULL) {
 		memcpy(result, p, end - p);
 		result[end - p] = '\0';
 	}
-	
+
 	return (result);
 }
 
@@ -326,7 +326,7 @@ ensemble_services_convert(const char *compose, char **output,
     struct convert_options *opts)
 {
 	int version = ensemble_services_detect_version(compose);
-	
+
 	switch (version) {
 	case 2:
 		return ensemble_services_convert_v2(compose, output, opts);
@@ -346,13 +346,13 @@ ensemble_services_convert_v2(const char *compose, char **output,
 	char **services;
 	int count;
 	char *result = NULL;
-	
+
 	services = ensemble_services_get_services(compose, &count);
 	if (services == NULL || count == 0) {
 		*output = strdup("# No services found in the stack file\n");
 		return (CONVERT_SUCCESS);
 	}
-	
+
 	/*
 	 * Build output into a memory stream. Each service is appended in O(1)
 	 * amortized; the previous asprintf("%s", result, ...) chain recopied the
@@ -509,7 +509,7 @@ ensemble_services_convert_v3(const char *compose, char **output,
 		environment = ensemble_services_get_value(service_block, "environment");
 		networks = ensemble_services_get_value(service_block, "networks");
 		depends_on = ensemble_services_get_value(service_block, "depends_on");
-		
+
 		/* v3 deploy section */
 		deploy_replicas = NULL;
 		char *deploy = strstr(service_block, "deploy:");

@@ -60,16 +60,16 @@ struct rolling_update_info {
 	bool			paused;
 	bool			active;
 	pthread_mutex_t		lock;
-	
+
 	/* For blue-green deployments */
 	char			blue_name[256];
 	char			green_name[256];
 	int			active_set;  /* 0 = blue, 1 = green */
-	
+
 	/* Update progress */
 	int			current_replica;
 	time_t			last_update;
-	
+
 	/* Rollback support */
 	struct service_spec	previous_spec;
 	bool			has_previous;
@@ -116,7 +116,7 @@ save_rolling_update_state(struct rolling_update_info *info)
 	fp = fopen(path, "w");
 	if (fp == NULL)
 		return (-1);
-	
+
 	fprintf(fp, "{\n");
 	fprintf(fp, "  \"service\": \"%s\",\n", info->service);
 	fprintf(fp, "  \"namespace\": \"%s\",\n", info->namespace);
@@ -129,7 +129,7 @@ save_rolling_update_state(struct rolling_update_info *info)
 	fprintf(fp, "  \"total_replicas\": %d,\n", info->state.total_replicas);
 	fprintf(fp, "  \"paused\": %s\n", info->paused ? "true" : "false");
 	fprintf(fp, "}\n");
-	
+
 	fclose(fp);
 	return (0);
 }
@@ -144,9 +144,9 @@ rolling_update_init(struct service *service, struct service_spec *new_spec)
 
 	if (service == NULL || new_spec == NULL)
 		return (-1);
-	
+
 	pthread_mutex_lock(&rolling_lock);
-	
+
 	/* Find existing update for this service */
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
 		if (rolling_updates[i] != NULL &&
@@ -158,7 +158,7 @@ rolling_update_init(struct service *service, struct service_spec *new_spec)
 			return (-1);
 		}
 	}
-	
+
 	/* Find empty slot */
 	info = NULL;
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
@@ -173,27 +173,27 @@ rolling_update_init(struct service *service, struct service_spec *new_spec)
 			break;
 		}
 	}
-	
+
 	if (info == NULL) {
 		pthread_mutex_unlock(&rolling_lock);
 		errno = ENOMEM;
 		return (-1);
 	}
-	
+
 	pthread_mutex_init(&info->lock, NULL);
-	
+
 	/* Initialize rolling update info */
 	strlcpy(info->service, service->name, sizeof(info->service));
 	strlcpy(info->namespace, service->namespace, sizeof(info->namespace));
-	
+
 	/* Save current spec for rollback */
 	info->has_previous = true;
 	memcpy(&info->previous_spec, service->spec, sizeof(struct service_spec));
-	
+
 	/* Copy specs */
 	memcpy(&info->old_spec, service->spec, sizeof(struct service_spec));
 	memcpy(&info->new_spec, new_spec, sizeof(struct service_spec));
-	
+
 	/* Initialize state */
 	info->state.total_replicas = service->nreplicas;
 	info->state.updated_replicas = 0;
@@ -201,31 +201,31 @@ rolling_update_init(struct service *service, struct service_spec *new_spec)
 	info->state.ready_replicas = service->status->ready_replicas;
 	info->state.started = time(NULL);
 	strlcpy(info->state.status, "running", sizeof(info->state.status));
-	
+
 	/* Determine strategy */
 	info->strategy = service->spec->update_config.strategy;
 	if (info->strategy == 0)
 		info->strategy = ROLLING_STRATEGY_ROLLING;
-	
+
 	/* Set update parameters */
 	info->state.current_surge = service->spec->update_config.max_surge;
 	info->state.current_unavailable = service->spec->update_config.max_unavailable;
-	
+
 	info->active = true;
 	info->paused = false;
 	info->current_replica = 0;
 	info->last_update = time(NULL);
-	
+
 	pthread_mutex_unlock(&rolling_lock);
-	
+
 	/* Publish event */
 	orch_event_publish("Normal", "RollingUpdateStarted",
 	    info->namespace,
 	    "Rolling update started for service %s", info->service);
-	
+
 	/* Save state */
 	save_rolling_update_state(info);
-	
+
 	/* Start the rolling update */
 	return (rolling_update_progress(info));
 }
@@ -242,20 +242,20 @@ rolling_update_progress(struct rolling_update_info *info)
 	char old_pod_name[256];
 	struct pod *old_pod, *new_pod;
 	struct pod_spec pod_spec;
-	
+
 	service = service_get(info->service, info->namespace);
 	if (service == NULL)
 		return (-1);
-	
+
 	target_spec = &info->new_spec;
-	
+
 	/* Process each replica */
 	while (info->current_replica < info->state.total_replicas) {
 		if (info->paused) {
 			sleep(1);
 			continue;
 		}
-		
+
 		/*
 		 * The current (old) pod is whatever this replica points at now
 		 * — which, after a previous rolling update, may already carry a
@@ -279,7 +279,7 @@ rolling_update_progress(struct rolling_update_info *info)
 
 		/* Get old pod */
 		old_pod = pod_get(old_pod_name, info->namespace);
-		
+
 		/* Create new pod with updated spec */
 		memset(&pod_spec, 0, sizeof(pod_spec));
 		strlcpy(pod_spec.name, new_pod_name, sizeof(pod_spec.name));
@@ -307,17 +307,17 @@ rolling_update_progress(struct rolling_update_info *info)
 			info->current_replica++;
 			continue;
 		}
-		
+
 		/* Start new pod */
 		if (pod_start(new_pod) != 0) {
 			pod_delete(new_pod);
 			info->current_replica++;
 			continue;
 		}
-		
+
 		/* Wait for new pod to be ready */
 		sleep(2);  /* In production, wait for health check */
-		
+
 		/* Stop old pod */
 		if (old_pod != NULL) {
 			pod_stop(old_pod, SIGTERM);
@@ -340,24 +340,24 @@ rolling_update_progress(struct rolling_update_info *info)
 		info->state.updated_replicas++;
 		info->current_replica++;
 		info->last_update = time(NULL);
-		
+
 		orch_event_publish("Normal", "RollingUpdateProgress",
 		    info->namespace,
 		    "Rolling update: %d/%d replicas updated",
 		    info->state.updated_replicas, info->state.total_replicas);
-		
+
 		save_rolling_update_state(info);
 	}
-	
+
 	/* Update complete */
 	strlcpy(info->state.status, "completed", sizeof(info->state.status));
 	info->state.completed = time(NULL);
 	info->active = false;
-	
+
 	orch_event_publish("Normal", "RollingUpdateComplete",
 	    info->namespace,
 	    "Rolling update completed for service %s", info->service);
-	
+
 	save_rolling_update_state(info);
 
 	/*
@@ -382,7 +382,7 @@ int
 rolling_update_pause(struct rolling_update_state *state)
 {
 	pthread_mutex_lock(&rolling_lock);
-	
+
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
 		if (rolling_updates[i] != NULL &&
 		    strcmp(rolling_updates[i]->service, state->service) == 0 &&
@@ -392,14 +392,14 @@ rolling_update_pause(struct rolling_update_state *state)
 			    sizeof(rolling_updates[i]->state.status));
 			save_rolling_update_state(rolling_updates[i]);
 			pthread_mutex_unlock(&rolling_lock);
-			
+
 			orch_event_publish("Normal", "RollingUpdatePaused",
 			    state->namespace,
 			    "Rolling update paused for service %s", state->service);
 			return (0);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&rolling_lock);
 	errno = ENOENT;
 	return (-1);
@@ -412,7 +412,7 @@ int
 rolling_update_resume(struct rolling_update_state *state)
 {
 	pthread_mutex_lock(&rolling_lock);
-	
+
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
 		if (rolling_updates[i] != NULL &&
 		    strcmp(rolling_updates[i]->service, state->service) == 0 &&
@@ -422,14 +422,14 @@ rolling_update_resume(struct rolling_update_state *state)
 			    sizeof(rolling_updates[i]->state.status));
 			save_rolling_update_state(rolling_updates[i]);
 			pthread_mutex_unlock(&rolling_lock);
-			
+
 			orch_event_publish("Normal", "RollingUpdateResumed",
 			    state->namespace,
 			    "Rolling update resumed for service %s", state->service);
 			return (0);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&rolling_lock);
 	errno = ENOENT;
 	return (-1);
@@ -442,9 +442,9 @@ int
 rolling_update_rollback(struct rolling_update_state *state)
 {
 	struct service *service;
-	
+
 	pthread_mutex_lock(&rolling_lock);
-	
+
 	struct rolling_update_info *info = NULL;
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
 		if (rolling_updates[i] != NULL &&
@@ -454,42 +454,42 @@ rolling_update_rollback(struct rolling_update_state *state)
 			break;
 		}
 	}
-	
+
 	if (info == NULL) {
 		pthread_mutex_unlock(&rolling_lock);
 		errno = ENOENT;
 		return (-1);
 	}
-	
+
 	if (!info->has_previous) {
 		pthread_mutex_unlock(&rolling_lock);
 		errno = ENOENT;
 		return (-1);
 	}
-	
+
 	/* Stop rolling update */
 	info->active = false;
 	info->paused = false;
 	strlcpy(info->state.status, "rolling_back", sizeof(info->state.status));
-	
+
 	pthread_mutex_unlock(&rolling_lock);
-	
+
 	/* Get service and rollback */
 	service = service_get(state->service, state->namespace);
 	if (service != NULL) {
 		service_update(service, &info->previous_spec);
 	}
-	
+
 	pthread_mutex_lock(&rolling_lock);
 	strlcpy(info->state.status, "rolled_back", sizeof(info->state.status));
 	info->active = false;
 	save_rolling_update_state(info);
 	pthread_mutex_unlock(&rolling_lock);
-	
+
 	orch_event_publish("Warning", "RollingUpdateRolledBack",
 	    state->namespace,
 	    "Rolling update rolled back for service %s", state->service);
-	
+
 	return (0);
 }
 
@@ -500,7 +500,7 @@ struct rolling_update_state *
 rolling_update_get_status(const char *service_name, const char *namespace)
 {
 	pthread_mutex_lock(&rolling_lock);
-	
+
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
 		if (rolling_updates[i] != NULL &&
 		    strcmp(rolling_updates[i]->service, service_name) == 0 &&
@@ -510,7 +510,7 @@ rolling_update_get_status(const char *service_name, const char *namespace)
 			return (state);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&rolling_lock);
 	errno = ENOENT;
 	return (NULL);
@@ -523,7 +523,7 @@ int
 rolling_update_complete(struct rolling_update_state *state)
 {
 	pthread_mutex_lock(&rolling_lock);
-	
+
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
 		if (rolling_updates[i] != NULL &&
 		    strcmp(rolling_updates[i]->service, state->service) == 0 &&
@@ -535,16 +535,16 @@ rolling_update_complete(struct rolling_update_state *state)
 			rolling_updates[i]->state.updated_replicas =
 			    rolling_updates[i]->state.total_replicas;
 			save_rolling_update_state(rolling_updates[i]);
-			
+
 			orch_event_publish("Normal", "RollingUpdateComplete",
 			    state->namespace,
 			    "Rolling update completed for service %s", state->service);
-			
+
 			pthread_mutex_unlock(&rolling_lock);
 			return (0);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&rolling_lock);
 	errno = ENOENT;
 	return (-1);

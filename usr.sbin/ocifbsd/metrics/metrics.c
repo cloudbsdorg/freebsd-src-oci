@@ -101,7 +101,7 @@ metrics_init(struct metrics_config *config)
         pthread_mutex_lock(&metrics_lock);
         if (metrics_initialized == 0) {
             RB_INIT(&metrics_registry);
-            
+
             if (config != NULL) {
                 memcpy(&metrics_conf, config, sizeof(struct metrics_config));
             } else {
@@ -115,11 +115,11 @@ metrics_init(struct metrics_config *config)
                 metrics_conf.enable_service_metrics = true;
                 metrics_conf.histogram_buckets = 11;
             }
-            
+
             __sync_fetch_and_add(&metrics_initialized, 1);
         }
         pthread_mutex_unlock(&metrics_lock);
-        
+
         /* Start collection thread */
         pthread_create(&metrics_thread, NULL, metrics_collector_thread, NULL);
     }
@@ -143,19 +143,19 @@ static void *
 metrics_collector_thread(void *arg)
 {
     struct node_metrics node_metrics;
-    
+
     (void)arg;
-    
+
     while (!__sync_fetch_and_add(&metrics_shutdown_requested, 0)) {
         /* Collect node metrics */
         if (metrics_conf.enable_host_metrics) {
             node_metrics_collect(&node_metrics);
         }
-        
+
         /* Sleep until next collection */
         sleep(metrics_conf.collection_interval);
     }
-    
+
     return (NULL);
 }
 
@@ -166,24 +166,24 @@ struct metric *
 metrics_register(const char *name, const char *help, int type)
 {
     struct metric *m, *existing;
-    
+
     if (name == NULL)
         return (NULL);
-    
+
     pthread_mutex_lock(&metrics_lock);
-    
+
     m = calloc(1, sizeof(struct metric));
     if (m == NULL) {
         pthread_mutex_unlock(&metrics_lock);
         return (NULL);
     }
-    
+
     strlcpy(m->name, name, sizeof(m->name));
     if (help != NULL)
         strlcpy(m->help, help, sizeof(m->help));
     m->type = type;
     m->timestamp = time(NULL);
-    
+
     /* Initialize histogram */
     if (type == METRIC_TYPE_HISTOGRAM) {
         m->histogram = calloc(1, sizeof(struct metric_histogram));
@@ -194,17 +194,17 @@ metrics_register(const char *name, const char *help, int type)
             m->histogram->sum = 0;
         }
     }
-    
+
     existing = RB_FIND(metric_tree, &metrics_registry, m);
     if (existing != NULL) {
         free(m);
         pthread_mutex_unlock(&metrics_lock);
         return (existing);
     }
-    
+
     RB_INSERT(metric_tree, &metrics_registry, m);
     pthread_mutex_unlock(&metrics_lock);
-    
+
     return (m);
 }
 
@@ -215,12 +215,12 @@ int
 metrics_unregister(const char *name)
 {
     struct metric m_find, *m;
-    
+
     if (name == NULL)
         return (-1);
-    
+
     strlcpy(m_find.name, name, sizeof(m_find.name));
-    
+
     pthread_mutex_lock(&metrics_lock);
     m = RB_FIND(metric_tree, &metrics_registry, &m_find);
     if (m != NULL) {
@@ -230,7 +230,7 @@ metrics_unregister(const char *name)
         free(m);
     }
     pthread_mutex_unlock(&metrics_lock);
-    
+
     return (m != NULL ? 0 : -1);
 }
 
@@ -241,19 +241,19 @@ int
 metrics_set_gauge(const char *name, double value)
 {
     struct metric *m;
-    
+
     m = metrics_query(name);
     if (m == NULL) {
         m = metrics_register(name, NULL, METRIC_TYPE_GAUGE);
         if (m == NULL)
             return (-1);
     }
-    
+
     pthread_mutex_lock(&metrics_lock);
     m->value = value;
     m->timestamp = time(NULL);
     pthread_mutex_unlock(&metrics_lock);
-    
+
     return (0);
 }
 
@@ -264,19 +264,19 @@ int
 metrics_inc_counter(const char *name, double delta)
 {
     struct metric *m;
-    
+
     m = metrics_query(name);
     if (m == NULL) {
         m = metrics_register(name, NULL, METRIC_TYPE_COUNTER);
         if (m == NULL)
             return (-1);
     }
-    
+
     pthread_mutex_lock(&metrics_lock);
     m->value += delta;
     m->timestamp = time(NULL);
     pthread_mutex_unlock(&metrics_lock);
-    
+
     return (0);
 }
 
@@ -288,21 +288,21 @@ metrics_observe_histogram(const char *name, double value)
 {
     struct metric *m;
     int i;
-    
+
     m = metrics_query(name);
     if (m == NULL) {
         m = metrics_register(name, NULL, METRIC_TYPE_HISTOGRAM);
         if (m == NULL)
             return (-1);
     }
-    
+
     pthread_mutex_lock(&metrics_lock);
-    
+
     if (m->histogram != NULL) {
         m->histogram->count++;
         m->histogram->sum += value;
         m->histogram->sum_squared += value * value;
-        
+
         /* Update bucket counts */
         for (i = 0; i < m->histogram->nbuckets; i++) {
             if (value <= m->histogram->bounds[i]) {
@@ -311,10 +311,10 @@ metrics_observe_histogram(const char *name, double value)
             }
         }
     }
-    
+
     m->timestamp = time(NULL);
     pthread_mutex_unlock(&metrics_lock);
-    
+
     return (0);
 }
 
@@ -325,16 +325,16 @@ struct metric *
 metrics_query(const char *name)
 {
     struct metric m_find;
-    
+
     if (name == NULL)
         return (NULL);
-    
+
     strlcpy(m_find.name, name, sizeof(m_find.name));
-    
+
     pthread_mutex_lock(&metrics_lock);
     struct metric *m = RB_FIND(metric_tree, &metrics_registry, &m_find);
     pthread_mutex_unlock(&metrics_lock);
-    
+
     return (m);
 }
 
@@ -348,12 +348,12 @@ metrics_list(int *count)
     struct metric *m;
     int alloc = 16;
     int n = 0;
-    
+
     *count = 0;
     result = calloc(alloc, sizeof(struct metric *));
     if (result == NULL)
         return (NULL);
-    
+
     pthread_mutex_lock(&metrics_lock);
     RB_FOREACH(m, metric_tree, &metrics_registry) {
         if (n >= alloc) {
@@ -369,7 +369,7 @@ metrics_list(int *count)
         result[n++] = m;
     }
     pthread_mutex_unlock(&metrics_lock);
-    
+
     *count = n;
     return (result);
 }
@@ -385,16 +385,16 @@ node_metrics_collect(struct node_metrics *metrics)
     struct utsname uts;
     struct ifaddrs *ifaddrs, *ifa;
     uint64_t rx_bytes = 0, tx_bytes = 0;
-    
+
     if (metrics == NULL)
         return (-1);
-    
+
     memset(metrics, 0, sizeof(struct node_metrics));
-    
+
     /* Get hostname */
     uname(&uts);
     strlcpy(metrics->hostname, uts.nodename, sizeof(metrics->hostname));
-    
+
     /*
      * CPU metrics. kern.cp_time is a long[CPUSTATES] of cumulative ticks per
      * state; report each state as a percentage of the total since boot.
@@ -420,14 +420,14 @@ node_metrics_collect(struct node_metrics *metrics)
             }
         }
     }
-    
+
     /* Get per-CPU idle time */
     int ncpu;
     len = sizeof(ncpu);
     if (sysctlbyname("hw.ncpu", &ncpu, &len, NULL, 0) == 0) {
         metrics->cpu_threads = ncpu;
     }
-    
+
     /* Load average */
     /*
      * getloadavg(3) fills a double[] with the load averages directly; the old
@@ -443,24 +443,24 @@ node_metrics_collect(struct node_metrics *metrics)
             metrics->loadavg_15m = lavg[2];
         }
     }
-    
+
     /* Memory metrics */
     len = sizeof(uint64_t);
     sysctlbyname("hw.physmem", &metrics->mem_total, &len, NULL, 0);
-    
+
     int page_size = getpagesize();
     len = sizeof(uint64_t);
     sysctlbyname("vm.stats.vm.v_free_count", &metrics->mem_free, &len, NULL, 0);
     metrics->mem_free *= page_size;
-    
+
     len = sizeof(uint64_t);
     sysctlbyname("vm.stats.vm.v_active_count", &metrics->mem_available, &len, NULL, 0);
     metrics->mem_available *= page_size;
-    
+
     len = sizeof(uint64_t);
     sysctlbyname("vm.stats.vm.v_cache_count", &metrics->mem_cached, &len, NULL, 0);
     metrics->mem_cached *= page_size;
-    
+
     /* Network metrics - aggregate all interfaces */
     if (getifaddrs(&ifaddrs) == 0) {
         for (ifa = ifaddrs; ifa != NULL; ifa = ifa->ifa_next) {
@@ -468,7 +468,7 @@ node_metrics_collect(struct node_metrics *metrics)
                 continue;
             if (ifa->ifa_addr->sa_family != AF_LINK)
                 continue;
-            
+
             struct if_data *ifdata = (struct if_data *)ifa->ifa_data;
             if (ifdata != NULL) {
                 rx_bytes += ifdata->ifi_ibytes;
@@ -481,10 +481,10 @@ node_metrics_collect(struct node_metrics *metrics)
         }
         freeifaddrs(ifaddrs);
     }
-    
+
     metrics->net_rx_bytes = rx_bytes;
     metrics->net_tx_bytes = tx_bytes;
-    
+
     /* Disk metrics */
     struct statvfs fs;
     if (statvfs("/", &fs) == 0) {
@@ -493,14 +493,14 @@ node_metrics_collect(struct node_metrics *metrics)
         metrics->disk_inodes_total = fs.f_files;
         metrics->disk_inodes_free = fs.f_ffree;
     }
-    
+
     /* Swap */
     len = sizeof(uint64_t);
     sysctlbyname("vm.swap_total", &metrics->mem_swap_total, &len, NULL, 0);
-    
+
     /* Timestamp */
     metrics->timestamp = time(NULL);
-    
+
     /* Update gauge metrics */
     metrics_set_gauge("node_cpu_usage_percent", metrics->cpu_user);
     metrics_set_gauge("node_memory_total_bytes", metrics->mem_total);
@@ -513,7 +513,7 @@ node_metrics_collect(struct node_metrics *metrics)
     metrics_set_gauge("node_network_tx_bytes_total", metrics->net_tx_bytes);
     metrics_set_gauge("node_filesystem_total_bytes", metrics->disk_total);
     metrics_set_gauge("node_filesystem_free_bytes", metrics->disk_free);
-    
+
     return (0);
 }
 
@@ -524,13 +524,13 @@ int
 node_metrics_export_json(FILE *fp)
 {
     struct node_metrics metrics;
-    
+
     if (fp == NULL)
         return (-1);
-    
+
     if (node_metrics_collect(&metrics) != 0)
         return (-1);
-    
+
     fprintf(fp, "{\n");
     fprintf(fp, "  \"hostname\": \"%s\",\n", metrics.hostname);
     fprintf(fp, "  \"timestamp\": %lu,\n", metrics.timestamp);
@@ -558,7 +558,7 @@ node_metrics_export_json(FILE *fp)
     fprintf(fp, "    \"15m\": %.2f\n", metrics.loadavg_15m);
     fprintf(fp, "  }\n");
     fprintf(fp, "}\n");
-    
+
     return (0);
 }
 
@@ -569,41 +569,41 @@ int
 node_metrics_export_prometheus(FILE *fp)
 {
     struct node_metrics metrics;
-    
+
     if (fp == NULL)
         return (-1);
-    
+
     if (node_metrics_collect(&metrics) != 0)
         return (-1);
-    
+
     fprintf(fp, "# HELP node_cpu_threads Number of CPU threads\n");
     fprintf(fp, "# TYPE node_cpu_threads gauge\n");
     fprintf(fp, "node_cpu_threads %.0f\n", (double)metrics.cpu_threads);
-    
+
     fprintf(fp, "# HELP node_memory_total_bytes Total memory in bytes\n");
     fprintf(fp, "# TYPE node_memory_total_bytes gauge\n");
     fprintf(fp, "node_memory_total_bytes %.0f\n", (double)metrics.mem_total);
-    
+
     fprintf(fp, "# HELP node_memory_free_bytes Free memory in bytes\n");
     fprintf(fp, "# TYPE node_memory_free_bytes gauge\n");
     fprintf(fp, "node_memory_free_bytes %.0f\n", (double)metrics.mem_free);
-    
+
     fprintf(fp, "# HELP node_memory_available_bytes Available memory in bytes\n");
     fprintf(fp, "# TYPE node_memory_available_bytes gauge\n");
     fprintf(fp, "node_memory_available_bytes %.0f\n", (double)metrics.mem_available);
-    
+
     fprintf(fp, "# HELP node_loadavg_1m 1-minute load average\n");
     fprintf(fp, "# TYPE node_loadavg_1m gauge\n");
     fprintf(fp, "node_loadavg_1m %.2f\n", metrics.loadavg_1m);
-    
+
     fprintf(fp, "# HELP node_network_rx_bytes_total Network receive bytes total\n");
     fprintf(fp, "# TYPE node_network_rx_bytes_total counter\n");
     fprintf(fp, "node_network_rx_bytes_total %.0f\n", (double)metrics.net_rx_bytes);
-    
+
     fprintf(fp, "# HELP node_network_tx_bytes_total Network transmit bytes total\n");
     fprintf(fp, "# TYPE node_network_tx_bytes_total counter\n");
     fprintf(fp, "node_network_tx_bytes_total %.0f\n", (double)metrics.net_tx_bytes);
-    
+
     return (0);
 }
 
@@ -649,11 +649,11 @@ pod_metrics_collect(const char *pod_name, struct pod_metrics *metrics)
 
     memset(metrics, 0, sizeof(struct pod_metrics));
     strlcpy(metrics->pod_name, pod_name, sizeof(metrics->pod_name));
-    
+
     /* Get jail metrics using rctl */
     snprintf(cmd, sizeof(cmd), "rctl -h jail:%s 2>/dev/null", pod_name);
     fp = popen(cmd, "r");
-    
+
     if (fp != NULL) {
         while (fgets(buf, sizeof(buf), fp) != NULL) {
             if (strstr(buf, "vmemoryuse")) {
@@ -680,7 +680,7 @@ pod_metrics_collect(const char *pod_name, struct pod_metrics *metrics)
         }
         pclose(fp);
     }
-    
+
     /* Get disk usage from ZFS */
     snprintf(cmd, sizeof(cmd), "zfs get -H -p used ocifbsd/pods/%s 2>/dev/null | "
         "awk '{print $3}'", pod_name);
@@ -691,19 +691,19 @@ pod_metrics_collect(const char *pod_name, struct pod_metrics *metrics)
         }
         pclose(fp);
     }
-    
+
     /* Update gauge metrics */
     char metric_name[512];
     snprintf(metric_name, sizeof(metric_name), "pod_memory_usage_bytes{pod=\"%s\"}",
         pod_name);
     metrics_set_gauge(metric_name, metrics->mem_usage);
-    
+
     snprintf(metric_name, sizeof(metric_name), "pod_cpu_usage_ratio{pod=\"%s\"}",
         pod_name);
     metrics_set_gauge(metric_name, metrics->cpu_usage / 100.0);
-    
+
     metrics->timestamp = time(NULL);
-    
+
     return (0);
 }
 
@@ -720,33 +720,33 @@ pod_metrics_list(struct pod_metrics **metrics, int *count)
     int n = 0;
     DIR *dir;
     struct dirent *ent;
-    
+
     if (metrics == NULL || count == NULL)
         return (-1);
-    
+
     *metrics = NULL;
     *count = 0;
-    
+
     result = calloc(alloc, sizeof(struct pod_metrics));
     if (result == NULL)
         return (-1);
-    
+
     /* List pods from state directory */
     char pod_dir[PATH_MAX];
     snprintf(pod_dir, sizeof(pod_dir), "%s/pods", OCIFBSD_VAR_DIR);
-    
+
     dir = opendir(pod_dir);
     if (dir == NULL) {
         free(result);
         return (-1);
     }
-    
+
     while ((ent = readdir(dir)) != NULL) {
         if (ent->d_type != DT_DIR)
             continue;
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
             continue;
-        
+
         if (n >= alloc) {
             alloc *= 2;
             void *_new = realloc(result, alloc * sizeof(struct pod_metrics));
@@ -756,17 +756,17 @@ pod_metrics_list(struct pod_metrics **metrics, int *count)
             }
             result = _new;
         }
-        
+
         if (pod_metrics_collect(ent->d_name, &result[n]) == 0) {
             n++;
         }
     }
-    
+
     closedir(dir);
-    
+
     *metrics = result;
     *count = n;
-    
+
     return (0);
 }
 
@@ -779,16 +779,16 @@ pod_metrics_export_json(FILE *fp)
     struct pod_metrics *metrics;
     int count;
     int i;
-    
+
     if (fp == NULL)
         return (-1);
-    
+
     if (pod_metrics_list(&metrics, &count) != 0)
         return (-1);
-    
+
     fprintf(fp, "{\n");
     fprintf(fp, "  \"pods\": [\n");
-    
+
     for (i = 0; i < count; i++) {
         fprintf(fp, "    {\n");
         fprintf(fp, "      \"name\": \"%s\",\n", metrics[i].pod_name);
@@ -803,10 +803,10 @@ pod_metrics_export_json(FILE *fp)
         fprintf(fp, "      \"timestamp\": %lu\n", metrics[i].timestamp);
         fprintf(fp, "    }%s\n", i < count - 1 ? "," : "");
     }
-    
+
     fprintf(fp, "  ]\n");
     fprintf(fp, "}\n");
-    
+
     free(metrics);
     return (0);
 }
@@ -820,32 +820,32 @@ pod_metrics_export_prometheus(FILE *fp)
     struct pod_metrics *metrics;
     int count;
     int i;
-    
+
     if (fp == NULL)
         return (-1);
-    
+
     if (pod_metrics_list(&metrics, &count) != 0)
         return (-1);
-    
+
     for (i = 0; i < count; i++) {
         fprintf(fp, "# HELP pod_memory_usage_bytes Memory usage in bytes\n");
         fprintf(fp, "# TYPE pod_memory_usage_bytes gauge\n");
         fprintf(fp, "pod_memory_usage_bytes{pod=\"%s\",namespace=\"%s\",node=\"%s\"} %.0f\n",
             metrics[i].pod_name, metrics[i].namespace, metrics[i].node,
             (double)metrics[i].mem_usage);
-        
+
         fprintf(fp, "# HELP pod_cpu_usage_ratio CPU usage ratio (0-1)\n");
         fprintf(fp, "# TYPE pod_cpu_usage_ratio gauge\n");
         fprintf(fp, "pod_cpu_usage_ratio{pod=\"%s\",namespace=\"%s\",node=\"%s\"} %.4f\n",
             metrics[i].pod_name, metrics[i].namespace, metrics[i].node,
             metrics[i].cpu_usage / 100.0);
-        
+
         fprintf(fp, "# HELP pod_process_count Number of processes\n");
         fprintf(fp, "# TYPE pod_process_count gauge\n");
         fprintf(fp, "pod_process_count{pod=\"%s\",namespace=\"%s\"} %lu\n",
             metrics[i].pod_name, metrics[i].namespace, metrics[i].process_count);
     }
-    
+
     free(metrics);
     return (0);
 }
@@ -955,23 +955,23 @@ int
 metrics_set_threshold(const char *name, double warning, double critical, int comparison)
 {
     pthread_mutex_lock(&threshold_lock);
-    
+
     void *_new = realloc(thresholds, (n_thresholds + 1) * sizeof(struct metrics_threshold));
     if (_new == NULL) {
         pthread_mutex_unlock(&threshold_lock);
         return (-1);
     }
     thresholds = _new;
-    
+
     strlcpy(thresholds[n_thresholds].metric_name, name,
         sizeof(thresholds[n_thresholds].metric_name));
     thresholds[n_thresholds].warning = warning;
     thresholds[n_thresholds].critical = critical;
     thresholds[n_thresholds].comparison = comparison;
     n_thresholds++;
-    
+
     pthread_mutex_unlock(&threshold_lock);
-    
+
     return (0);
 }
 
@@ -982,18 +982,18 @@ int
 metrics_check_thresholds(void)
 {
     int i;
-    
+
     pthread_mutex_lock(&threshold_lock);
-    
+
     for (i = 0; i < n_thresholds; i++) {
         struct metric *m = metrics_query(thresholds[i].metric_name);
         if (m == NULL)
             continue;
-        
+
         double value = m->value;
         int violated = 0;
         int severity = 0;  /* 0 = ok, 1 = warning, 2 = critical */
-        
+
         if (thresholds[i].comparison == 0) {  /* above */
             if (value >= thresholds[i].critical)
                 severity = 2;
@@ -1005,11 +1005,11 @@ metrics_check_thresholds(void)
             else if (value <= thresholds[i].warning)
                 severity = 1;
         }
-        
+
         if (severity > 0) {
             /* Add alert */
             pthread_mutex_lock(&alert_lock);
-            
+
             if (ocifbsd_realloc_grow((void **)&active_alerts,
                 (n_alerts + 1) * sizeof(char *)) == 0) {
                 char alert[512];
@@ -1021,18 +1021,18 @@ metrics_check_thresholds(void)
                     thresholds[i].comparison == 0 ? ">=" : "<=",
                     thresholds[i].warning,
                     thresholds[i].critical);
-                
+
                 active_alerts[n_alerts] = strdup(alert);
                 if (active_alerts[n_alerts] != NULL)
                     n_alerts++;
             }
-            
+
             pthread_mutex_unlock(&alert_lock);
         }
     }
-    
+
     pthread_mutex_unlock(&threshold_lock);
-    
+
     return (0);
 }
 
@@ -1045,7 +1045,7 @@ metrics_get_alerts_json(void)
     char *json, *p;
     int i;
     size_t json_size;
-    
+
     pthread_mutex_lock(&alert_lock);
 
     json_size = 256 + (size_t)n_alerts * 512;

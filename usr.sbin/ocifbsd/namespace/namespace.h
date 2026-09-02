@@ -83,40 +83,40 @@ struct namespace {
     int state;                  /* NS_STATE_* */
     time_t created;             /* creation timestamp */
     time_t updated;             /* last update timestamp */
-    
+
     /* Resource limits */
     struct ns_resource_limits limits;
-    
+
     /* Security */
     char mac_label[256];        /* MAC label, e.g. prod/high */
     int security_level;         /* securelevel */
-    
+
     /* Network policy */
     struct ns_network_policy net_policy;
-    
+
     /* Volume policy */
     struct ns_volume_policy vol_policy;
-    
+
     /* Quota */
     uint64_t pod_limit;         /* max pods */
     uint64_t service_limit;     /* max services */
     uint64_t volume_limit;      /* max volumes */
     uint64_t secret_limit;      /* max secrets */
-    
+
     /* Usage counters */
     uint32_t pod_count;
     uint32_t service_count;
     uint32_t volume_count;
     uint32_t secret_count;
-    
+
     /* RBAC */
     char *allowed_users;        /* comma-separated users */
     char *allowed_groups;       /* comma-separated groups */
-    
+
     /* Annotations */
     char **annotations;
     char **labels;
-    
+
     /* Internal */
     RB_ENTRY(namespace) entry;
     pthread_mutex_t lock;

@@ -59,7 +59,7 @@ struct node_info {
 	bool		ready;
 	bool		schedulable;
 	time_t		last_heartbeat;
-	
+
 	/* Resource capacity */
 	uint64_t	memory_capacity;
 	uint64_t	memory_used;
@@ -67,13 +67,13 @@ struct node_info {
 	uint64_t	cpu_used;
 	uint64_t	storage_capacity;
 	uint64_t	storage_used;
-	
+
 	/* Attributes */
 	char		region[64];
 	char		zone[64];
 	char		instance_type[64];
 	char		labels[512];	/* JSON: {"key": "value"} */
-	
+
 	/* Metrics (updated periodically) */
 	double		load_average_1m;
 	double		load_average_5m;
@@ -110,12 +110,12 @@ int
 scheduler_init(void)
 {
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	if (scheduler_initialized) {
 		pthread_mutex_unlock(&scheduler_lock);
 		return (0);
 	}
-	
+
 	/* Add local node by default. nodes[] holds pointers, all NULL; the
 	 * local node must be allocated before use. */
 	nodes[0] = calloc(1, sizeof(struct node_info));
@@ -131,12 +131,12 @@ scheduler_init(void)
 	nodes[0]->memory_capacity = get_physmem() * 4096;  /* bytes */
 	nodes[0]->cpu_capacity = sysconf(_SC_NPROCESSORS_ONLN) * 1000;  /* millicores */
 	nodes[0]->pods_capacity = 110;  /* default pods-per-node limit */
-	
+
 	node_count = 1;
 	scheduler_initialized = true;
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
-	
+
 	return (0);
 }
 
@@ -148,10 +148,10 @@ get_physmem(void)
 {
 	size_t len = sizeof(uint64_t);
 	uint64_t physmem;
-	
+
 	if (sysctlbyname("hw.physmem", &physmem, &len, NULL, 0) != 0)
 		return (0);
-	
+
 	return (physmem);
 }
 
@@ -162,46 +162,46 @@ static double
 score_node(struct node_info *node, struct pod_spec *spec)
 {
 	double score = 100.0;
-	
+
 	if (!node->ready || !node->schedulable)
 		return (0.0);
-	
+
 	/* Check if node has enough resources */
 	if (spec->resources.memory_limit > 0) {
 		uint64_t avail = node->memory_capacity - node->memory_used;
 		if (avail < spec->resources.memory_limit)
 			return (0.0);
 	}
-	
+
 	if (spec->resources.cpu_limit > 0) {
 		uint64_t avail = node->cpu_capacity - node->cpu_used;
 		if (avail < (uint64_t)spec->resources.cpu_limit)
 			return (0.0);
 	}
-	
+
 	/* Score based on available resources (bin-packing) */
 	if (node->memory_capacity > 0) {
-		double mem_avail_pct = (double)(node->memory_capacity - node->memory_used) / 
+		double mem_avail_pct = (double)(node->memory_capacity - node->memory_used) /
 		    node->memory_capacity;
 		score -= (1.0 - mem_avail_pct) * scoring_weights.memory_weight;
 	}
-	
+
 	if (node->cpu_capacity > 0) {
-		double cpu_avail_pct = (double)(node->cpu_capacity - node->cpu_used) / 
+		double cpu_avail_pct = (double)(node->cpu_capacity - node->cpu_used) /
 		    node->cpu_capacity;
 		score -= (1.0 - cpu_avail_pct) * scoring_weights.cpu_weight;
 	}
-	
+
 	/* Prefer nodes with fewer pods (spread) */
 	if (node->pods_capacity > 0) {
 		double pods_pct = (double)node->pods_running / node->pods_capacity;
 		score -= pods_pct * scoring_weights.pod_count_weight;
 	}
-	
+
 	/* Score must be non-negative */
 	if (score < 0)
 		score = 0;
-	
+
 	return (score);
 }
 
@@ -215,13 +215,13 @@ scheduler_select_node(struct pod_spec *spec)
 	struct node_info *best_node = NULL;
 	double best_score = -1.0;
 	char reason[256];
-	
+
 	decision = calloc(1, sizeof(struct scheduling_decision));
 	if (decision == NULL)
 		return (NULL);
-	
+
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	/* Find best node */
 	for (int i = 0; i < node_count; i++) {
 		struct node_info *node = nodes[i];
@@ -234,26 +234,26 @@ scheduler_select_node(struct pod_spec *spec)
 			continue;
 
 		score = score_node(node, spec);
-		
+
 		if (score > best_score) {
 			best_score = score;
 			best_node = node;
 		}
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
-	
+
 	if (best_node == NULL) {
 		strlcpy(reason, "No schedulable nodes available", sizeof(reason));
 		decision->score = 0;
 		decision->failed_reason = strdup(reason);
 		return (decision);
 	}
-	
+
 	/* Build decision */
 	strlcpy(decision->node, best_node->name, sizeof(decision->node));
 	decision->score = best_score;
-	snprintf(reason, sizeof(reason), 
+	snprintf(reason, sizeof(reason),
 	    "Node has %.0f%% score (mem: %lu%%, cpu: %lu%%, pods: %lu/%lu)",
 	    best_score,
 	    (best_node->memory_capacity > 0) ?
@@ -263,7 +263,7 @@ scheduler_select_node(struct pod_spec *spec)
 	    best_node->pods_running,
 	    best_node->pods_capacity);
 	strlcpy(decision->reason, reason, sizeof(decision->reason));
-	
+
 	/* Update node resource usage (preliminary) */
 	pthread_mutex_lock(&scheduler_lock);
 	if (spec->resources.memory_limit > 0)
@@ -272,7 +272,7 @@ scheduler_select_node(struct pod_spec *spec)
 		best_node->cpu_used += spec->resources.cpu_limit;
 	best_node->pods_running++;
 	pthread_mutex_unlock(&scheduler_lock);
-	
+
 	return (decision);
 }
 
@@ -283,24 +283,24 @@ int
 scheduler_score_node(const char *node_name, struct pod_spec *spec)
 {
 	struct node_info *node = NULL;
-	
+
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	for (int i = 0; i < node_count; i++) {
-		if (nodes[i] != NULL && 
+		if (nodes[i] != NULL &&
 		    strcmp(nodes[i]->name, node_name) == 0) {
 			node = nodes[i];
 			break;
 		}
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
-	
+
 	if (node == NULL) {
 		errno = ENOENT;
 		return (-1);
 	}
-	
+
 	double score = score_node(node, spec);
 	return ((int)(score * 100));  /* Return as integer 0-10000 */
 }
@@ -313,19 +313,19 @@ scheduler_list_nodes(int *count)
 {
 	char **result;
 	int alloc;
-	
+
 	*count = 0;
 	alloc = 16;
 	result = malloc(alloc * sizeof(char *));
 	if (result == NULL)
 		return (NULL);
-	
+
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	for (int i = 0; i < node_count; i++) {
 		if (nodes[i] == NULL)
 			continue;
-		
+
 		if (*count >= alloc) {
 			alloc *= 2;
 			char **new_result = realloc(result, alloc * sizeof(char *));
@@ -336,13 +336,13 @@ scheduler_list_nodes(int *count)
 			}
 			result = new_result;
 		}
-		
+
 		result[*count] = strdup(nodes[i]->name);
 		(*count)++;
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
-	
+
 	return (result);
 }
 
@@ -353,16 +353,16 @@ int
 scheduler_add_node(const char *node_name)
 {
 	struct node_info *node;
-	
+
 	if (node_count >= MAX_NODES) {
 		errno = ENOMEM;
 		return (-1);
 	}
-	
+
 	node = calloc(1, sizeof(struct node_info));
 	if (node == NULL)
 		return (-1);
-	
+
 	strlcpy(node->name, node_name, sizeof(node->name));
 	node->ready = true;
 	node->schedulable = true;
@@ -374,11 +374,11 @@ scheduler_add_node(const char *node_name)
 	 */
 	node->memory_capacity = (uint64_t)8 * 1024 * 1024 * 1024;	/* 8 GiB */
 	node->cpu_capacity = 8000;					/* 8 cores */
-	
+
 	pthread_mutex_lock(&scheduler_lock);
 	nodes[node_count++] = node;
 	pthread_mutex_unlock(&scheduler_lock);
-	
+
 	orch_event_publish("Normal", "NodeRegistered", "cluster",
 	    "Node %s registered", node_name);
 
@@ -487,22 +487,22 @@ int
 scheduler_remove_node(const char *node_name)
 {
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	for (int i = 0; i < node_count; i++) {
-		if (nodes[i] != NULL && 
+		if (nodes[i] != NULL &&
 		    strcmp(nodes[i]->name, node_name) == 0) {
 			free(nodes[i]);
 			memmove(&nodes[i], &nodes[i + 1],
 			    (node_count - i - 1) * sizeof(struct node_info *));
 			node_count--;
 			pthread_mutex_unlock(&scheduler_lock);
-			
+
 			orch_event_publish("Warning", "NodeRemoved", "cluster",
 			    "Node %s removed", node_name);
 			return (0);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
 	errno = ENOENT;
 	return (-1);
@@ -515,21 +515,21 @@ int
 scheduler_node_ready(const char *node_name)
 {
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	for (int i = 0; i < node_count; i++) {
-		if (nodes[i] != NULL && 
+		if (nodes[i] != NULL &&
 		    strcmp(nodes[i]->name, node_name) == 0) {
 			nodes[i]->ready = true;
 			nodes[i]->schedulable = true;
 			nodes[i]->last_heartbeat = time(NULL);
 			pthread_mutex_unlock(&scheduler_lock);
-			
+
 			orch_event_publish("Normal", "NodeReady", "cluster",
 			    "Node %s is ready", node_name);
 			return (0);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
 	errno = ENOENT;
 	return (-1);
@@ -542,20 +542,20 @@ int
 scheduler_node_not_ready(const char *node_name)
 {
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	for (int i = 0; i < node_count; i++) {
-		if (nodes[i] != NULL && 
+		if (nodes[i] != NULL &&
 		    strcmp(nodes[i]->name, node_name) == 0) {
 			nodes[i]->ready = false;
 			nodes[i]->schedulable = false;
 			pthread_mutex_unlock(&scheduler_lock);
-			
+
 			orch_event_publish("Warning", "NodeNotReady", "cluster",
 			    "Node %s is not ready", node_name);
 			return (0);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
 	errno = ENOENT;
 	return (-1);
@@ -565,13 +565,13 @@ scheduler_node_not_ready(const char *node_name)
  * Update node resources (called by metrics collector)
  */
 static int
-scheduler_update_node_resources(const char *node_name, 
+scheduler_update_node_resources(const char *node_name,
     uint64_t memory_used, uint64_t cpu_used)
 {
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	for (int i = 0; i < node_count; i++) {
-		if (nodes[i] != NULL && 
+		if (nodes[i] != NULL &&
 		    strcmp(nodes[i]->name, node_name) == 0) {
 			nodes[i]->memory_used = memory_used;
 			nodes[i]->cpu_used = cpu_used;
@@ -580,7 +580,7 @@ scheduler_update_node_resources(const char *node_name,
 			return (0);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
 	errno = ENOENT;
 	return (-1);
@@ -593,15 +593,15 @@ static struct node_info *
 scheduler_get_node(const char *node_name)
 {
 	pthread_mutex_lock(&scheduler_lock);
-	
+
 	for (int i = 0; i < node_count; i++) {
-		if (nodes[i] != NULL && 
+		if (nodes[i] != NULL &&
 		    strcmp(nodes[i]->name, node_name) == 0) {
 			pthread_mutex_unlock(&scheduler_lock);
 			return (nodes[i]);
 		}
 	}
-	
+
 	pthread_mutex_unlock(&scheduler_lock);
 	return (NULL);
 }

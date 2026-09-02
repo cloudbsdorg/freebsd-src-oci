@@ -103,7 +103,7 @@ struct cluster_node {
     uint64_t used_storage;        /* used storage */
     char **labels;                /* node labels for scheduling */
     int nlabels;
-    
+
     /* Gossip state */
     uint32_t suspicion_count;     /* number of suspicion rounds */
     time_t suspicion_started;
@@ -113,7 +113,7 @@ struct cluster_node {
      * replicated on the peer. */
     uint64_t raft_next_index;
     uint64_t raft_match_index;
-    
+
     /* Tree entry */
     RB_ENTRY(cluster_node) entry;
     pthread_mutex_t lock;
@@ -170,16 +170,16 @@ struct raft_state {
         RAFT_CANDIDATE,
         RAFT_LEADER
     } state;
-    
+
     uint64_t current_term;
     char voted_for[256];
     uint64_t commit_index;
     uint64_t last_applied;
-    
+
     /* Leader info */
     char leader_id[256];
     time_t last_heartbeat;
-    
+
     /*
      * Snapshot boundary: log[] holds entries with absolute index
      * > snapshot_index only; everything up to (snapshot_index, snapshot_term)

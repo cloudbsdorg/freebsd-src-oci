@@ -270,7 +270,7 @@ struct service_spec {
 	char		*networks[16];
 	int		nnetworks;
 	char		placement[512];	/* node selectors, constraints */
-	
+
 	/* Health check configuration */
 	struct health_check {
 		health_check_type_t type;
@@ -283,7 +283,7 @@ struct service_spec {
 		char		command[1024];	/* for exec checks */
 		int		port;		/* for TCP checks */
 	} health_check;
-	
+
 	/* Rolling update configuration */
 	struct {
 		rolling_strategy_t strategy;
@@ -292,7 +292,7 @@ struct service_spec {
 		int		timeout;	/* seconds per replica */
 		char		*failure_policy;	/* pause, rollback, continue */
 	} update_config;
-	
+
 	/* Scaling configuration */
 	struct {
 		int		min_replicas;
@@ -300,7 +300,7 @@ struct service_spec {
 		char		*metrics;	/* JSON metrics config */
 		int		target_cpu_percent;
 	} scaling_config;
-	
+
 	/* Network configuration */
 	struct {
 		char		lb_algorithm[32];	/* roundrobin, leastconn, iphash */

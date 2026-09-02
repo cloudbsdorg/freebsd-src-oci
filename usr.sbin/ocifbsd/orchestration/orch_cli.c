@@ -82,14 +82,14 @@ cmd_pod_create(int argc, char **argv)
 	struct pod_spec spec;
 	char *name = NULL;
 	char *namespace = "default";
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "namespace", required_argument, NULL, 'N' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:N:h", longopts, NULL)) != -1) {
@@ -106,7 +106,7 @@ cmd_pod_create(int argc, char **argv)
 			return (ch == 'h' ? 0 : 1);
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
@@ -126,7 +126,7 @@ cmd_pod_create(int argc, char **argv)
 		fprintf(stderr, "Error: Failed to create pod: %s\n", strerror(errno));
 		return (1);
 	}
-	
+
 	printf("Pod %s created with UID %s\n", pod->name, pod->uid);
 	/* pod is owned by the registry; do not free it here. */
 	return (0);
@@ -138,13 +138,13 @@ cmd_pod_list(int argc, char **argv)
 	struct pod **pods;
 	int count;
 	char *namespace = "default";
-	
+
 	static struct option longopts[] = {
 		{ "namespace", required_argument, NULL, 'N' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "N:h", longopts, NULL)) != -1) {
@@ -157,16 +157,16 @@ cmd_pod_list(int argc, char **argv)
 			return (ch == 'h' ? 0 : 1);
 		}
 	}
-	
+
 	pods = pod_list(namespace, &count);
 	if (pods == NULL) {
 		printf("No pods found in namespace %s\n", namespace);
 		return (0);
 	}
-	
+
 	printf("%-30s %-20s %-10s %s\n", "NAME", "UID", "STATE", "NAMESPACE");
 	printf("%-30s %-20s %-10s %s\n", "----", "---", "-----", "---------");
-	
+
 	for (int i = 0; i < count; i++) {
 		printf("%-30s %-20s %-10d %s\n",
 		    pods[i]->name,
@@ -174,7 +174,7 @@ cmd_pod_list(int argc, char **argv)
 		    pods[i]->status->state,
 		    pods[i]->namespace);
 	}
-	
+
 	/*
 	 * pods[] are registry-owned pointers (pod_list returns references,
 	 * not copies); only free the array, never the elements. Freeing them
@@ -191,13 +191,13 @@ cmd_pod_delete(int argc, char **argv)
 {
 	char *name = NULL;
 	char *namespace = "default";
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "namespace", required_argument, NULL, 'N' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:N:", longopts, NULL)) != -1) {
@@ -210,23 +210,23 @@ cmd_pod_delete(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct pod *pod = pod_get(name, namespace);
 	if (pod == NULL) {
 		fprintf(stderr, "Error: Pod %s not found\n", name);
 		return (1);
 	}
-	
+
 	if (pod_delete(pod) != 0) {
 		fprintf(stderr, "Error: Failed to delete pod: %s\n", strerror(errno));
 		return (1);
 	}
-	
+
 	printf("Pod %s deleted\n", name);
 	return (0);
 }
@@ -239,7 +239,7 @@ cmd_pod_logs(int argc, char **argv)
 	char *container = NULL;
 	int tail = 100;
 	bool follow = false;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "namespace", required_argument, NULL, 'N' },
@@ -248,7 +248,7 @@ cmd_pod_logs(int argc, char **argv)
 		{ "follow", no_argument, NULL, 'f' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:N:c:t:f", longopts, NULL)) != -1) {
@@ -270,18 +270,18 @@ cmd_pod_logs(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct pod *pod = pod_get(name, namespace);
 	if (pod == NULL) {
 		fprintf(stderr, "Error: Pod %s not found\n", name);
 		return (1);
 	}
-	
+
 	return (pod_logs(pod, container, tail, follow));
 }
 
@@ -295,7 +295,7 @@ cmd_service_create(int argc, char **argv)
 	char *name = NULL;
 	char *image = NULL;
 	int replicas = 1;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "image", required_argument, NULL, 'i' },
@@ -303,7 +303,7 @@ cmd_service_create(int argc, char **argv)
 		{ "replicas", required_argument, NULL, 'r' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:i:N:r:", longopts, NULL)) != -1) {
@@ -321,7 +321,7 @@ cmd_service_create(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL || image == NULL) {
 		fprintf(stderr, "Error: --name and --image are required\n");
 		return (1);
@@ -346,7 +346,7 @@ cmd_service_create(int argc, char **argv)
 	strlcpy(spec.name, name, sizeof(spec.name));
 	strlcpy(spec.image, image, sizeof(spec.image));
 	spec.replicas = replicas;
-	
+
 	struct service *svc = service_create(&spec);
 	if (svc == NULL) {
 		fprintf(stderr, "Error: Failed to create service: %s\n", strerror(errno));
@@ -374,14 +374,14 @@ cmd_service_scale(int argc, char **argv)
 	char *name = NULL;
 	char *namespace = "default";
 	int replicas = 1;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "namespace", required_argument, NULL, 'N' },
 		{ "replicas", required_argument, NULL, 'r' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:N:r:", longopts, NULL)) != -1) {
@@ -397,18 +397,18 @@ cmd_service_scale(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct service *svc = service_get(name, namespace);
 	if (svc == NULL) {
 		fprintf(stderr, "Error: Service %s not found\n", name);
 		return (1);
 	}
-	
+
 	if (service_scale(svc, replicas) != 0) {
 		fprintf(stderr, "Error: Failed to scale service: %s\n", strerror(errno));
 		return (1);
@@ -425,14 +425,14 @@ cmd_service_update(int argc, char **argv)
 	char *name = NULL;
 	char *namespace = "default";
 	char *image = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "namespace", required_argument, NULL, 'N' },
 		{ "image", required_argument, NULL, 'i' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:N:i:", longopts, NULL)) != -1) {
@@ -448,23 +448,23 @@ cmd_service_update(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct service *svc = service_get(name, namespace);
 	if (svc == NULL) {
 		fprintf(stderr, "Error: Service %s not found\n", name);
 		return (1);
 	}
-	
+
 	if (image != NULL) {
 		struct service_spec new_spec;
 		memcpy(&new_spec, svc->spec, sizeof(new_spec));
 		strlcpy(new_spec.image, image, sizeof(new_spec.image));
-		
+
 		if (service_update(svc, &new_spec) != 0) {
 			fprintf(stderr, "Error: Failed to update service: %s\n", strerror(errno));
 			return (1);
@@ -485,12 +485,12 @@ cmd_service_list(int argc, char **argv)
 	struct service **services;
 	int count;
 	char *namespace = "default";
-	
+
 	static struct option longopts[] = {
 		{ "namespace", required_argument, NULL, 'N' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "N:", longopts, NULL)) != -1) {
@@ -500,16 +500,16 @@ cmd_service_list(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	services = service_list(namespace, &count);
 	if (services == NULL) {
 		printf("No services found in namespace %s\n", namespace);
 		return (0);
 	}
-	
+
 	printf("%-30s %-15s %-10s %-10s %s\n", "NAME", "IMAGE", "REPLICAS", "AVAILABLE", "NAMESPACE");
 	printf("%-30s %-15s %-10s %-10s %s\n", "----", "-----", "--------", "---------", "---------");
-	
+
 	for (int i = 0; i < count; i++) {
 		struct service_status *status = service_get_status(services[i]);
 		printf("%-30s %-15s %-10d %-10d %s\n",
@@ -519,10 +519,10 @@ cmd_service_list(int argc, char **argv)
 		    status ? status->available_replicas : 0,
 		    services[i]->namespace);
 	}
-	
+
 	/* services[] are registry-owned references; free only the array. */
 	free(services);
-	
+
 	return (0);
 }
 
@@ -531,13 +531,13 @@ cmd_service_delete(int argc, char **argv)
 {
 	char *name = NULL;
 	char *namespace = "default";
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ "namespace", required_argument, NULL, 'N' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:N:", longopts, NULL)) != -1) {
@@ -550,23 +550,23 @@ cmd_service_delete(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct service *svc = service_get(name, namespace);
 	if (svc == NULL) {
 		fprintf(stderr, "Error: Service %s not found\n", name);
 		return (1);
 	}
-	
+
 	if (service_delete(svc) != 0) {
 		fprintf(stderr, "Error: Failed to delete service: %s\n", strerror(errno));
 		return (1);
 	}
-	
+
 	printf("Service %s deleted\n", name);
 	return (0);
 }
@@ -584,7 +584,7 @@ cmd_stack_create(int argc, char **argv)
 		{ "file", required_argument, NULL, 'f' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:f:", longopts, NULL)) != -1) {
@@ -596,7 +596,7 @@ cmd_stack_create(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
@@ -611,13 +611,13 @@ cmd_stack_create(int argc, char **argv)
 	struct stack_spec spec;
 	memset(&spec, 0, sizeof(spec));
 	strlcpy(spec.name, name, sizeof(spec.name));
-	
+
 	struct stack *stack = stack_create(&spec);
 	if (stack == NULL) {
 		fprintf(stderr, "Error: Failed to create stack: %s\n", strerror(errno));
 		return (1);
 	}
-	
+
 	printf("Stack %s created\n", name);
 	/* stack is registry-owned; do not free. */
 	return (0);
@@ -627,12 +627,12 @@ static int
 cmd_stack_up(int argc, char **argv)
 {
 	char *name = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:", longopts, NULL)) != -1) {
@@ -642,18 +642,18 @@ cmd_stack_up(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct stack *stack = stack_get(name, "default");
 	if (stack == NULL) {
 		fprintf(stderr, "Error: Stack %s not found\n", name);
 		return (1);
 	}
-	
+
 	if (stack_start(stack) != 0) {
 		fprintf(stderr, "Error: Failed to start stack: %s\n", strerror(errno));
 		return (1);
@@ -668,12 +668,12 @@ static int
 cmd_stack_down(int argc, char **argv)
 {
 	char *name = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:", longopts, NULL)) != -1) {
@@ -683,18 +683,18 @@ cmd_stack_down(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct stack *stack = stack_get(name, "default");
 	if (stack == NULL) {
 		fprintf(stderr, "Error: Stack %s not found\n", name);
 		return (1);
 	}
-	
+
 	if (stack_stop(stack) != 0) {
 		fprintf(stderr, "Error: Failed to stop stack: %s\n", strerror(errno));
 		return (1);
@@ -711,16 +711,16 @@ cmd_stack_list(int argc, char **argv)
 	struct stack **stacks;
 	int count;
 	char *namespace = "default";
-	
+
 	stacks = stack_list(namespace, &count);
 	if (stacks == NULL) {
 		printf("No stacks found\n");
 		return (0);
 	}
-	
+
 	printf("%-30s %-15s %-10s %s\n", "NAME", "VERSION", "STATE", "NAMESPACE");
 	printf("%-30s %-15s %-10s %s\n", "----", "-------", "-----", "---------");
-	
+
 	for (int i = 0; i < count; i++) {
 		/*
 		 * A stack reconstructed from disk carries metadata + status but
@@ -735,10 +735,10 @@ cmd_stack_list(int argc, char **argv)
 		    stacks[i]->status->state : "-",
 		    stacks[i]->namespace);
 	}
-	
+
 	/* stacks[] are registry-owned references; free only the array. */
 	free(stacks);
-	
+
 	return (0);
 }
 
@@ -746,12 +746,12 @@ static int
 cmd_stack_delete(int argc, char **argv)
 {
 	char *name = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:", longopts, NULL)) != -1) {
@@ -761,23 +761,23 @@ cmd_stack_delete(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	struct stack *stack = stack_get(name, "default");
 	if (stack == NULL) {
 		fprintf(stderr, "Error: Stack %s not found\n", name);
 		return (1);
 	}
-	
+
 	if (stack_delete(stack) != 0) {
 		fprintf(stderr, "Error: Failed to delete stack: %s\n", strerror(errno));
 		return (1);
 	}
-	
+
 	printf("Stack %s deleted\n", name);
 	return (0);
 }
@@ -790,13 +790,13 @@ cmd_rolling_update(int argc, char **argv)
 {
 	char *service = NULL;
 	char *namespace = "default";
-	
+
 	static struct option longopts[] = {
 		{ "service", required_argument, NULL, 's' },
 		{ "namespace", required_argument, NULL, 'N' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "s:N:", longopts, NULL)) != -1) {
@@ -809,12 +809,12 @@ cmd_rolling_update(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (service == NULL) {
 		fprintf(stderr, "Error: --service is required\n");
 		return (1);
 	}
-	
+
 	struct rolling_update_state *state = rolling_update_get_status(service, namespace);
 	if (state != NULL) {
 		printf("Rolling update in progress for %s:\n", service);
@@ -822,7 +822,7 @@ cmd_rolling_update(int argc, char **argv)
 		printf("  Status: %s\n", state->status);
 		return (0);
 	}
-	
+
 	printf("No rolling update in progress for %s\n", service);
 	return (0);
 }
@@ -831,12 +831,12 @@ static int
 cmd_rolling_pause(int argc, char **argv)
 {
 	char *service = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "service", required_argument, NULL, 's' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "s:", longopts, NULL)) != -1) {
@@ -846,20 +846,20 @@ cmd_rolling_pause(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (service == NULL) {
 		fprintf(stderr, "Error: --service is required\n");
 		return (1);
 	}
-	
+
 	struct rolling_update_state state = { .service = "", .namespace = "" };
 	strlcpy(state.service, service, sizeof(state.service));
-	
+
 	if (rolling_update_pause(&state) != 0) {
 		fprintf(stderr, "Error: Failed to pause rolling update\n");
 		return (1);
 	}
-	
+
 	printf("Rolling update paused for %s\n", service);
 	return (0);
 }
@@ -868,12 +868,12 @@ static int
 cmd_rolling_resume(int argc, char **argv)
 {
 	char *service = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "service", required_argument, NULL, 's' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "s:", longopts, NULL)) != -1) {
@@ -883,20 +883,20 @@ cmd_rolling_resume(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (service == NULL) {
 		fprintf(stderr, "Error: --service is required\n");
 		return (1);
 	}
-	
+
 	struct rolling_update_state state = { .service = "", .namespace = "" };
 	strlcpy(state.service, service, sizeof(state.service));
-	
+
 	if (rolling_update_resume(&state) != 0) {
 		fprintf(stderr, "Error: Failed to resume rolling update\n");
 		return (1);
 	}
-	
+
 	printf("Rolling update resumed for %s\n", service);
 	return (0);
 }
@@ -905,12 +905,12 @@ static int
 cmd_rolling_rollback(int argc, char **argv)
 {
 	char *service = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "service", required_argument, NULL, 's' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "s:", longopts, NULL)) != -1) {
@@ -920,20 +920,20 @@ cmd_rolling_rollback(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (service == NULL) {
 		fprintf(stderr, "Error: --service is required\n");
 		return (1);
 	}
-	
+
 	struct rolling_update_state state = { .service = "", .namespace = "" };
 	strlcpy(state.service, service, sizeof(state.service));
-	
+
 	if (rolling_update_rollback(&state) != 0) {
 		fprintf(stderr, "Error: Failed to rollback\n");
 		return (1);
 	}
-	
+
 	printf("Rolling update rolled back for %s\n", service);
 	return (0);
 }
@@ -946,22 +946,22 @@ cmd_node_list(int argc, char **argv)
 {
 	char **nodes;
 	int count;
-	
+
 	nodes = scheduler_list_nodes(&count);
 	if (nodes == NULL) {
 		printf("No nodes found\n");
 		return (0);
 	}
-	
+
 	printf("%-30s %-15s %s\n", "NAME", "STATUS", "ADDRESS");
 	printf("%-30s %-15s %s\n", "----", "------", "-------");
-	
+
 	for (int i = 0; i < count; i++) {
 		printf("%-30s %-15s %s\n", nodes[i], "Ready", "127.0.0.1");
 		free(nodes[i]);
 	}
 	free(nodes);
-	
+
 	return (0);
 }
 
@@ -969,12 +969,12 @@ static int
 cmd_node_add(int argc, char **argv)
 {
 	char *name = NULL;
-	
+
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
 		{ NULL, 0, NULL, 0 }
 	};
-	
+
 	optind = 0;
 	int ch;
 	while ((ch = getopt_long(argc, argv, "n:", longopts, NULL)) != -1) {
@@ -984,17 +984,17 @@ cmd_node_add(int argc, char **argv)
 			break;
 		}
 	}
-	
+
 	if (name == NULL) {
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+
 	if (scheduler_add_node(name) != 0) {
 		fprintf(stderr, "Error: Failed to add node: %s\n", strerror(errno));
 		return (1);
 	}
-	
+
 	printf("Node %s added\n", name);
 	return (0);
 }
@@ -1007,7 +1007,7 @@ orch_cli_dispatch(int argc, char **argv)
 {
 	if (argc < 2)
 		goto usage;
-	
+
 	/* Pod commands */
 	if (strcmp(argv[1], "pod") == 0) {
 		if (argc < 3)
@@ -1021,7 +1021,7 @@ orch_cli_dispatch(int argc, char **argv)
 		if (strcmp(argv[2], "logs") == 0)
 			return cmd_pod_logs(argc - 2, argv + 2);
 	}
-	
+
 	/* Service commands */
 	if (strcmp(argv[1], "service") == 0) {
 		if (argc < 3)
@@ -1037,7 +1037,7 @@ orch_cli_dispatch(int argc, char **argv)
 		if (strcmp(argv[2], "delete") == 0)
 			return cmd_service_delete(argc - 2, argv + 2);
 	}
-	
+
 	/* Stack commands */
 	if (strcmp(argv[1], "stack") == 0) {
 		if (argc < 3)
@@ -1053,7 +1053,7 @@ orch_cli_dispatch(int argc, char **argv)
 		if (strcmp(argv[2], "delete") == 0)
 			return cmd_stack_delete(argc - 2, argv + 2);
 	}
-	
+
 	/* Rolling update commands */
 	if (strcmp(argv[1], "rolling") == 0) {
 		if (argc < 3)
@@ -1067,7 +1067,7 @@ orch_cli_dispatch(int argc, char **argv)
 		if (strcmp(argv[2], "rollback") == 0)
 			return cmd_rolling_rollback(argc - 2, argv + 2);
 	}
-	
+
 	/* Node commands */
 	if (strcmp(argv[1], "node") == 0) {
 		if (argc < 3)

@@ -118,7 +118,7 @@ static char *
 get_ns_state_path(const char *name)
 {
     char *path;
-    
+
     asprintf(&path, "%s/namespaces/%s.json", OCIFBSD_VAR_DIR, name);
     return (path);
 }
@@ -131,9 +131,9 @@ save_namespace_state(struct namespace *ns)
 {
     FILE *fp;
     char *path;
-    
+
     init_namespace_registry();
-    
+
     path = get_ns_state_path(ns->name);
     if (path == NULL)
         return (-1);
@@ -157,10 +157,10 @@ save_namespace_state(struct namespace *ns)
 
     fp = fopen(path, "w");
     free(path);
-    
+
     if (fp == NULL)
         return (-1);
-    
+
     fprintf(fp, "{\n");
     fprintf(fp, "  \"name\": \"%s\",\n", ns->name);
     fprintf(fp, "  \"id\": %u,\n", ns->id);
@@ -183,7 +183,7 @@ save_namespace_state(struct namespace *ns)
     fprintf(fp, "  \"volume_limit\": %lu,\n", ns->volume_limit);
     fprintf(fp, "  \"secret_limit\": %lu\n", ns->secret_limit);
     fprintf(fp, "}\n");
-    
+
     fclose(fp);
     return (0);
 }
@@ -198,27 +198,27 @@ load_namespace_state(const char *name)
     char *path;
     FILE *fp;
     char buf[1024];
-    
+
     ns = calloc(1, sizeof(struct namespace));
     if (ns == NULL)
         return (NULL);
-    
+
     strlcpy(ns->name, name, sizeof(ns->name));
     path = get_ns_state_path(name);
-    
+
     if (path == NULL) {
         free(ns);
         return (NULL);
     }
-    
+
     fp = fopen(path, "r");
     free(path);
-    
+
     if (fp == NULL) {
         free(ns);
         return (NULL);
     }
-    
+
     /* Simple state loading - for full JSON parsing, use json_parser */
     while (fgets(buf, sizeof(buf), fp) != NULL) {
         if (strstr(buf, "\"id\":"))
@@ -228,7 +228,7 @@ load_namespace_state(const char *name)
         else if (strstr(buf, "\"created\":"))
             sscanf(buf, "  \"created\": %ld", (long *)&ns->created);
     }
-    
+
     fclose(fp);
     return (ns);
 }
@@ -277,7 +277,7 @@ ns_create(const char *name)
         errno = EINVAL;
         return (NULL);
     }
-    
+
     /* Check if namespace already exists */
     pthread_mutex_lock(&namespace_registry_lock);
     ns = calloc(1, sizeof(struct namespace));
@@ -285,9 +285,9 @@ ns_create(const char *name)
         pthread_mutex_unlock(&namespace_registry_lock);
         return (NULL);
     }
-    
+
     strlcpy(ns->name, name, sizeof(ns->name));
-    
+
     existing = RB_FIND(ns_tree, &namespace_registry, ns);
     if (existing != NULL) {
         free(ns);
@@ -295,13 +295,13 @@ ns_create(const char *name)
         errno = EEXIST;
         return (NULL);
     }
-    
+
     /* Initialize namespace */
     ns->id = __sync_fetch_and_add(&next_namespace_id, 1);
     ns->state = NS_STATE_ACTIVE;
     ns->created = time(NULL);
     ns->updated = time(NULL);
-    
+
     /* Default limits */
     ns->limits.memory_limit = 0;          /* unlimited */
     ns->limits.memory_reservation = 0;
@@ -310,43 +310,43 @@ ns_create(const char *name)
     ns->limits.processes_max = 0;
     ns->limits.files_max = 0;
     ns->limits.sockets_max = 0;
-    
+
     /* Default quotas */
     ns->pod_limit = 100;
     ns->service_limit = 50;
     ns->volume_limit = 50;
     ns->secret_limit = 100;
-    
+
     /* Default MAC label */
     snprintf(ns->mac_label, sizeof(ns->mac_label), "ocifbsd/%s/*", name);
-    
+
     /* Default network policy */
     ns->net_policy.allow_external = true;
     ns->net_policy.allow_internal = true;
     ns->net_policy.egress_limit = false;
     ns->net_policy.egress_rate = 0;
-    
+
     /* Default volume policy */
     ns->vol_policy.allow_shared = true;
     ns->vol_policy.allow_exclusive = true;
     ns->vol_policy.allow_readonly = true;
-    
+
     pthread_mutex_init(&ns->lock, NULL);
-    
+
     RB_INSERT(ns_tree, &namespace_registry, ns);
     pthread_mutex_unlock(&namespace_registry_lock);
-    
+
     /* Save to disk */
     save_namespace_state(ns);
-    
+
     /* Create namespace directory in /var/run */
     char nsdir[PATH_MAX];
     snprintf(nsdir, sizeof(nsdir), "%s/namespaces/%s", OCIFBSD_VAR_DIR, name);
     mkdirp(nsdir, 0755);
-    
+
     /* Create jail for namespace isolation */
     create_namespace_jail(ns);
-    
+
     return (ns);
 }
 
@@ -357,12 +357,12 @@ int
 ns_delete(struct namespace *ns)
 {
     int ret = 0;
-    
+
     if (ns == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
-    
+
     if (ns->pod_count > 0) {
         fprintf(stderr, "namespace '%s' has %u pods, cannot delete\n",
             ns->name, ns->pod_count);
@@ -370,33 +370,33 @@ ns_delete(struct namespace *ns)
         errno = EBUSY;
         return (-1);
     }
-    
+
     ns->state = NS_STATE_TERMINATING;
     pthread_mutex_unlock(&ns->lock);
-    
+
     /* Remove jail */
     delete_namespace_jail(ns);
-    
+
     /* Remove from registry */
     pthread_mutex_lock(&namespace_registry_lock);
     RB_REMOVE(ns_tree, &namespace_registry, ns);
     pthread_mutex_unlock(&namespace_registry_lock);
-    
+
     /* Remove state file */
     char *path = get_ns_state_path(ns->name);
     if (path != NULL) {
         unlink(path);
         free(path);
     }
-    
+
     /* Remove namespace directory */
     char nsdir[PATH_MAX];
     snprintf(nsdir, sizeof(nsdir), "%s/namespaces/%s", OCIFBSD_VAR_DIR, ns->name);
     rmdir(nsdir);
-    
+
     pthread_mutex_destroy(&ns->lock);
     free(ns);
-    
+
     return (ret);
 }
 
@@ -407,18 +407,18 @@ struct namespace *
 ns_get(const char *name)
 {
     struct namespace ns_find;
-    
+
     init_namespace_registry();
-    
+
     if (name == NULL)
         return (NULL);
-    
+
     strlcpy(ns_find.name, name, sizeof(ns_find.name));
-    
+
     pthread_mutex_lock(&namespace_registry_lock);
     struct namespace *ns = RB_FIND(ns_tree, &namespace_registry, &ns_find);
     pthread_mutex_unlock(&namespace_registry_lock);
-    
+
     if (ns == NULL) {
         /* Try loading from disk */
         ns = load_namespace_state(name);
@@ -428,7 +428,7 @@ ns_get(const char *name)
             pthread_mutex_unlock(&namespace_registry_lock);
         }
     }
-    
+
     return (ns);
 }
 
@@ -442,14 +442,14 @@ ns_list(int *count)
     struct namespace *ns;
     int alloc = 16;
     int n = 0;
-    
+
     init_namespace_registry();
-    
+
     *count = 0;
     result = calloc(alloc, sizeof(struct namespace *));
     if (result == NULL)
         return (NULL);
-    
+
     pthread_mutex_lock(&namespace_registry_lock);
     RB_FOREACH(ns, ns_tree, &namespace_registry) {
         if (n >= alloc) {
@@ -465,7 +465,7 @@ ns_list(int *count)
         result[n++] = ns;
     }
     pthread_mutex_unlock(&namespace_registry_lock);
-    
+
     *count = n;
     return (result);
 }
@@ -478,11 +478,11 @@ ns_update(struct namespace *ns)
 {
     if (ns == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
     ns->updated = time(NULL);
     pthread_mutex_unlock(&ns->lock);
-    
+
     return (save_namespace_state(ns));
 }
 
@@ -494,14 +494,14 @@ ns_set_limits(struct namespace *ns, struct ns_resource_limits *limits)
 {
     if (ns == NULL || limits == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
-    
+
     memcpy(&ns->limits, limits, sizeof(struct ns_resource_limits));
     ns->updated = time(NULL);
-    
+
     pthread_mutex_unlock(&ns->lock);
-    
+
     /* Apply limits via rctl */
     return (apply_namespace_rctl(ns));
 }
@@ -545,14 +545,14 @@ ns_get_usage(struct namespace *ns, struct ns_resource_limits *usage)
         }
         free(pods);
     }
-    
+
     usage->memory_limit = ns->limits.memory_limit;
     usage->memory_reservation = total_memory;
     usage->cpu_limit = ns->limits.cpu_limit;
     usage->cpu_reservation = total_cpu;
     usage->processes_max = total_procs;
     usage->files_max = total_files;
-    
+
     return (0);
 }
 
@@ -564,12 +564,12 @@ ns_check_quota(struct namespace *ns, const char *resource, uint32_t count)
 {
     if (ns == NULL || resource == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
-    
+
     int current = 0;
     uint64_t limit = 0;
-    
+
     if (strcmp(resource, "pods") == 0) {
         current = ns->pod_count;
         limit = ns->pod_limit;
@@ -587,14 +587,14 @@ ns_check_quota(struct namespace *ns, const char *resource, uint32_t count)
         errno = EINVAL;
         return (-1);
     }
-    
+
     pthread_mutex_unlock(&ns->lock);
-    
+
     if (limit > 0 && current + count > limit) {
         errno = EDQUOT;
         return (-1);
     }
-    
+
     return (0);
 }
 
@@ -606,12 +606,12 @@ ns_add_pod(struct namespace *ns, const char *pod_name)
 {
     if (ns == NULL || pod_name == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
     ns->pod_count++;
     ns->updated = time(NULL);
     pthread_mutex_unlock(&ns->lock);
-    
+
     return (ns_update(ns));
 }
 
@@ -623,13 +623,13 @@ ns_remove_pod(struct namespace *ns, const char *pod_name)
 {
     if (ns == NULL || pod_name == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
     if (ns->pod_count > 0)
         ns->pod_count--;
     ns->updated = time(NULL);
     pthread_mutex_unlock(&ns->lock);
-    
+
     return (ns_update(ns));
 }
 
@@ -645,24 +645,24 @@ ns_list_pods(struct namespace *ns, char ***pods, int *count)
     char **result = NULL;
     int alloc = 0;
     int n = 0;
-    
+
     if (ns == NULL || pods == NULL || count == NULL)
         return (-1);
-    
+
     *pods = NULL;
     *count = 0;
-    
+
     snprintf(path, sizeof(path), "%s/namespaces/%s/pods",
         OCIFBSD_VAR_DIR, ns->name);
-    
+
     dir = opendir(path);
     if (dir == NULL)
         return (-1);
-    
+
     while ((ent = readdir(dir)) != NULL) {
         if (ent->d_type != DT_REG)
             continue;
-        
+
         if (n >= alloc) {
             alloc = alloc ? alloc * 2 : 16;
             void *_new = realloc(result, alloc * sizeof(char *));
@@ -672,14 +672,14 @@ ns_list_pods(struct namespace *ns, char ***pods, int *count)
             }
             result = _new;
         }
-        
+
         result[n] = strdup(ent->d_name);
         if (result[n] != NULL)
             n++;
     }
-    
+
     closedir(dir);
-    
+
     *pods = result;
     *count = n;
     return (0);
@@ -693,12 +693,12 @@ ns_configure_network(struct namespace *ns, struct ns_network_policy *policy)
 {
     if (ns == NULL || policy == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
     memcpy(&ns->net_policy, policy, sizeof(struct ns_network_policy));
     ns->updated = time(NULL);
     pthread_mutex_unlock(&ns->lock);
-    
+
     /* Apply firewall rules */
     return (ns_apply_firewall_rules(ns));
 }
@@ -712,61 +712,61 @@ ns_apply_firewall_rules(struct namespace *ns)
     char anchor_name[256];
     char rules_file[PATH_MAX];
     FILE *fp;
-    
+
     if (ns == NULL)
         return (-1);
-    
+
     /* Create per-namespace pf anchor */
     snprintf(anchor_name, sizeof(anchor_name), "ocifbsd-ns-%s", ns->name);
     snprintf(rules_file, sizeof(rules_file), "%s/namespaces/%s/pf.rules",
         OCIFBSD_VAR_DIR, ns->name);
-    
+
     fp = fopen(rules_file, "w");
     if (fp == NULL)
         return (-1);
-    
+
     /* Write pf rules for namespace */
     fprintf(fp, "# Namespace %s firewall rules\n", ns->name);
     fprintf(fp, "set skip on lo\n");
-    
+
     /* Internal namespace traffic */
     if (ns->net_policy.allow_internal) {
         fprintf(fp, "# Allow internal namespace traffic\n");
         fprintf(fp, "pass quick on { ocifbsd%d } all\n", ns->id);
     }
-    
+
     /* External traffic */
     if (!ns->net_policy.allow_external) {
         fprintf(fp, "# Block external traffic\n");
         fprintf(fp, "block quick all\n");
     }
-    
+
     /* Egress limiting */
     if (ns->net_policy.egress_limit) {
         fprintf(fp, "# Egress rate limiting\n");
         fprintf(fp, "queue egress bandwidth %lubps\n", ns->net_policy.egress_rate);
     }
-    
+
     /* Allowed networks */
     if (ns->net_policy.allowed_networks) {
         fprintf(fp, "# Allowed networks\n");
         fprintf(fp, "pass out quick to %s\n", ns->net_policy.allowed_networks);
     }
-    
+
     /* Denied networks */
     if (ns->net_policy.denied_networks) {
         fprintf(fp, "# Denied networks\n");
         fprintf(fp, "block out quick to %s\n", ns->net_policy.denied_networks);
     }
-    
+
     fclose(fp);
-    
+
     /* Load rules into pf */
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
         "pfctl -a '%s' -f '%s' 2>/dev/null", anchor_name, rules_file);
     system(cmd);
-    
+
     return (0);
 }
 
@@ -778,12 +778,12 @@ ns_configure_volumes(struct namespace *ns, struct ns_volume_policy *policy)
 {
     if (ns == NULL || policy == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
     memcpy(&ns->vol_policy, policy, sizeof(struct ns_volume_policy));
     ns->updated = time(NULL);
     pthread_mutex_unlock(&ns->lock);
-    
+
     return (ns_update(ns));
 }
 
@@ -795,12 +795,12 @@ ns_check_volume_access(struct namespace *ns, const char *dataset)
 {
     char **allowed, **denied;
     int i;
-    
+
     if (ns == NULL || dataset == NULL)
         return (-1);
-    
+
     pthread_mutex_lock(&ns->lock);
-    
+
     denied = ns->vol_policy.denied_datasets;
     if (denied != NULL) {
         for (i = 0; denied[i] != NULL; i++) {
@@ -811,7 +811,7 @@ ns_check_volume_access(struct namespace *ns, const char *dataset)
             }
         }
     }
-    
+
     allowed = ns->vol_policy.allowed_datasets;
     if (allowed != NULL && allowed[0] != NULL) {
         for (i = 0; allowed[i] != NULL; i++) {
@@ -824,7 +824,7 @@ ns_check_volume_access(struct namespace *ns, const char *dataset)
         errno = EACCES;
         return (-1);
     }
-    
+
     pthread_mutex_unlock(&ns->lock);
     return (0);
 }
@@ -885,15 +885,15 @@ int
 ns_apply_mac_label(struct namespace *ns)
 {
     char cmd[512];
-    
+
     if (ns == NULL)
         return (-1);
-    
+
     /* Set MAC label on namespace jail */
     snprintf(cmd, sizeof(cmd),
         "jail -m label=%s %s 2>/dev/null || true", ns->mac_label, ns->name);
     system(cmd);
-    
+
     return (0);
 }
 
@@ -904,12 +904,12 @@ int
 ns_get_stats(struct namespace *ns, FILE *fp)
 {
     struct ns_resource_limits usage;
-    
+
     if (ns == NULL || fp == NULL)
         return (-1);
-    
+
     ns_get_usage(ns, &usage);
-    
+
     fprintf(fp, "Namespace: %s (id=%u)\n", ns->name, ns->id);
     fprintf(fp, "State: %s\n",
         ns->state == NS_STATE_ACTIVE ? "active" :
@@ -927,7 +927,7 @@ ns_get_stats(struct namespace *ns, FILE *fp)
     fprintf(fp, "  Volumes: %u/%lu\n", ns->volume_count, ns->volume_limit);
     fprintf(fp, "  Secrets: %u/%lu\n", ns->secret_count, ns->secret_limit);
     fprintf(fp, "\nMAC Label: %s\n", ns->mac_label);
-    
+
     return (0);
 }
 
@@ -939,7 +939,7 @@ create_namespace_jail(struct namespace *ns)
 {
     char cmd[1024];
     int ret;
-    
+
     /* Create ZFS dataset for namespace */
     snprintf(cmd, sizeof(cmd),
         "zfs create -o mountpoint=/namespaces/%s "
@@ -950,7 +950,7 @@ create_namespace_jail(struct namespace *ns)
         ns->pod_limit * 10, /* 10GB per pod estimate */
         ns->name);
     system(cmd);
-    
+
     /* Create jail configuration */
     snprintf(cmd, sizeof(cmd),
         "cat > /etc/jail.conf.d/ocifbsd-%s.conf << EOF\n"
@@ -970,9 +970,9 @@ create_namespace_jail(struct namespace *ns)
         "EOF\n",
         ns->name, ns->name, ns->name, ns->name, ns->name,
         ns->id, ns->pod_limit);
-    
+
     ret = system(cmd);
-    
+
     return (ret == 0 ? 0 : -1);
 }
 
@@ -983,15 +983,15 @@ static int
 delete_namespace_jail(struct namespace *ns)
 {
     char cmd[256];
-    
+
     /* Remove jail configuration */
     snprintf(cmd, sizeof(cmd), "rm -f /etc/jail.conf.d/ocifbsd-%s.conf", ns->name);
     system(cmd);
-    
+
     /* Destroy ZFS dataset */
     snprintf(cmd, sizeof(cmd), "zfs destroy -r ocifbsd/namespaces/%s 2>/dev/null || true", ns->name);
     system(cmd);
-    
+
     return (0);
 }
 
@@ -1002,10 +1002,10 @@ static int
 apply_namespace_rctl(struct namespace *ns)
 {
     char cmd[1024];
-    
+
     if (ns == NULL)
         return (-1);
-    
+
     /* Memory limits */
     if (ns->limits.memory_limit > 0) {
         snprintf(cmd, sizeof(cmd),
@@ -1013,7 +1013,7 @@ apply_namespace_rctl(struct namespace *ns)
             ns->name, ns->limits.memory_limit);
         system(cmd);
     }
-    
+
     /* Process limits */
     if (ns->limits.processes_max > 0) {
         snprintf(cmd, sizeof(cmd),
@@ -1021,7 +1021,7 @@ apply_namespace_rctl(struct namespace *ns)
             ns->name, ns->limits.processes_max);
         system(cmd);
     }
-    
+
     /* File descriptor limits */
     if (ns->limits.files_max > 0) {
         snprintf(cmd, sizeof(cmd),
@@ -1029,7 +1029,7 @@ apply_namespace_rctl(struct namespace *ns)
             ns->name, ns->limits.files_max);
         system(cmd);
     }
-    
+
     return (0);
 }
 
