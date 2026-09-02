@@ -731,9 +731,8 @@ pam_list_users(int *count)
     pthread_mutex_lock(&auth_lock);
 
     RB_FOREACH(user, user_tree, &user_registry) {
-        users = realloc(users, (n + 1) * sizeof(*users));
-        if (users == NULL)
-            break;
+        if (ocifbsd_realloc_grow((void **)&users, (n + 1) * sizeof(*users)) != 0)
+        	break;
         users[n++] = user;
     }
 

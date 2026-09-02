@@ -618,9 +618,8 @@ gc_list_orphans(int *count)
     pthread_mutex_lock(&gc_lock);
 
     RB_FOREACH(orphan, orphan_tree, &orphans) {
-        list = realloc(list, (n + 1) * sizeof(*list));
-        if (list == NULL)
-            break;
+        if (ocifbsd_realloc_grow((void **)&list, (n + 1) * sizeof(*list)) != 0)
+        	break;
         list[n++] = orphan;
     }
 

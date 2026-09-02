@@ -611,9 +611,8 @@ cert_list(int *count)
     pthread_mutex_lock(&cert_lock);
 
     RB_FOREACH(cert, cert_tree, &cert_registry) {
-        list = realloc(list, (n + 1) * sizeof(*list));
-        if (list == NULL)
-            break;
+        if (ocifbsd_realloc_grow((void **)&list, (n + 1) * sizeof(*list)) != 0)
+        	break;
         list[n++] = cert;
     }
 

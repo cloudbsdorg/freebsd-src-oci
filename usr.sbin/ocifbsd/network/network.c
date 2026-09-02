@@ -57,6 +57,7 @@
 extern int mkdirp(const char *path, mode_t mode);
 
 #include "network.h"
+#include "../include/ocifbsd.h"	/* ocifbsd_realloc_grow */
 
 /*
  * Network state directory
@@ -471,8 +472,8 @@ bridge_list_interfaces(const char *bridge, char ***interfaces, int *ninterfaces)
 					*end-- = '\0';
 
 				if (*p) {
-					ifaces = realloc(ifaces, (nifaces + 1) * sizeof(char *));
-					if (ifaces == NULL) continue;
+					if (ocifbsd_realloc_grow((void **)&ifaces, (nifaces + 1) * sizeof(char *)) != 0)
+						continue;
 					ifaces[nifaces++] = strdup(p);
 				}
 			}
@@ -1052,8 +1053,8 @@ network_list(struct network_config ***networks, int *nnetworks)
 
 			struct network_config *config = network_get(network_id);
 			if (config) {
-				list = realloc(list, (count + 1) * sizeof(*list));
-				if (list == NULL) continue;
+				if (ocifbsd_realloc_grow((void **)&list, (count + 1) * sizeof(*list)) != 0)
+					continue;
 				list[count++] = config;
 			}
 		}

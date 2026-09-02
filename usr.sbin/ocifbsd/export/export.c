@@ -856,9 +856,8 @@ export_list(int *count)
     pthread_mutex_lock(&export_lock);
 
     TAILQ_FOREACH(job, &export_jobs, next) {
-        jobs = realloc(jobs, (n + 1) * sizeof(*jobs));
-        if (jobs == NULL)
-            break;
+        if (ocifbsd_realloc_grow((void **)&jobs, (n + 1) * sizeof(*jobs)) != 0)
+        	break;
         jobs[n++] = job;
     }
 
