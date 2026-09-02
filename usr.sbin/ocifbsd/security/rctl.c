@@ -142,6 +142,8 @@ rctl_format_size(uint64_t size)
 	if (size >= 1024ULL * 1024 * 1024 * 1024)
 		snprintf(buf, sizeof(buf), "%lluT", (unsigned long long)(size / (1024ULL * 1024 * 1024 * 1024)));
 	else if (size >= 1024ULL * 1024 * 1024)
+		snprintf(buf, sizeof(buf), "%lluG", (unsigned long long)(size / (1024ULL * 1024 * 1024)));
+	else if (size >= 1024ULL * 1024)
 		snprintf(buf, sizeof(buf), "%lluM", (unsigned long long)(size / (1024ULL * 1024)));
 	else if (size >= 1024ULL)
 		snprintf(buf, sizeof(buf), "%lluK", (unsigned long long)(size / 1024));
