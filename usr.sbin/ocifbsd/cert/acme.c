@@ -940,10 +940,88 @@ acme_certificate_renew(const char *domain)
 	return (acme_certificate_request(domain, NULL));
 }
 
+/*
+ * Build the ACME revokeCert request body from a PEM certificate:
+ * {"certificate":"<base64url(DER)>"} per RFC 8555 §7.6. Pure (no network),
+ * so it is unit-testable. Returns a malloc'd JSON string, or NULL on a parse
+ * or encoding failure.
+ */
+static char *
+acme_revoke_payload(const char *cert_pem)
+{
+	BIO *bio;
+	X509 *x;
+	unsigned char *der = NULL;
+	int derlen;
+	char *b64, *payload = NULL;
+
+	if (cert_pem == NULL)
+		return (NULL);
+	bio = BIO_new_mem_buf(cert_pem, -1);
+	if (bio == NULL)
+		return (NULL);
+	x = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+	BIO_free(bio);
+	if (x == NULL)
+		return (NULL);
+	derlen = i2d_X509(x, &der);
+	X509_free(x);
+	if (derlen <= 0 || der == NULL)
+		return (NULL);
+	b64 = b64url(der, (size_t)derlen);
+	OPENSSL_free(der);
+	if (b64 == NULL)
+		return (NULL);
+	if (asprintf(&payload, "{\"certificate\":\"%s\"}", b64) < 0)
+		payload = NULL;
+	free(b64);
+	return (payload);
+}
+
 int
 acme_certificate_revoke(const char *domain)
 {
-	(void)domain;
-	errno = ENOSYS;
-	return (-1);
+	char *pem = NULL, *payload;
+	long sz;
+	FILE *f;
+	struct http_result r;
+	int rc, ok;
+
+	(void)domain;	/* the issued certificate lives at actx.cert_path */
+
+	if (actx.url_revoke[0] == '\0' || actx.cert_path == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	/* Read the issued certificate PEM. */
+	f = fopen(actx.cert_path, "r");
+	if (f == NULL)
+		return (-1);
+	if (fseek(f, 0, SEEK_END) != 0 || (sz = ftell(f)) <= 0) {
+		fclose(f);
+		return (-1);
+	}
+	rewind(f);
+	pem = malloc((size_t)sz + 1);
+	if (pem == NULL || fread(pem, 1, (size_t)sz, f) != (size_t)sz) {
+		free(pem);
+		fclose(f);
+		return (-1);
+	}
+	pem[sz] = '\0';
+	fclose(f);
+
+	payload = acme_revoke_payload(pem);
+	free(pem);
+	if (payload == NULL)
+		return (-1);
+
+	memset(&r, 0, sizeof(r));
+	rc = acme_post(actx.url_revoke, payload, &r);
+	free(payload);
+	/* 200 = revoked; 409 alreadyRevoked is treated as success (idempotent). */
+	ok = (rc == 0 && (r.code == 200 || r.code == 409));
+	http_result_free(&r);
+	return (ok ? 0 : -1);
 }
