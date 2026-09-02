@@ -473,6 +473,83 @@ ATF_TC_BODY(ensemble_services_no_compose_branding, tc)
 	free(out);
 }
 
+/* ----- per-kind converter correctness ----- */
+
+ATF_TC(ensemble_convert_pvc_uses_declared_size);
+ATF_TC_HEAD(ensemble_convert_pvc_uses_declared_size, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "PVC conversion emits the declared storage size");
+}
+ATF_TC_BODY(ensemble_convert_pvc_uses_declared_size, tc)
+{
+	const char *yaml =
+	    "kind: PersistentVolumeClaim\n"
+	    "metadata:\n"
+	    "  name: pgdata\n"
+	    "spec:\n"
+	    "  resources:\n"
+	    "    requests:\n"
+	    "      storage: 20Gi\n";
+	struct convert_options opts;
+	memset(&opts, 0, sizeof(opts));
+	char *out = NULL;
+	int rc = ensemble_convert_persistentvolumeclaim(yaml, &out, &opts);
+	ATF_CHECK_EQ(rc, CONVERT_SUCCESS);
+	ATF_REQUIRE(out != NULL);
+	ATF_CHECK(strstr(out, "size: 20Gi") != NULL);
+	free(out);
+}
+
+ATF_TC(ensemble_convert_pvc_no_fabricated_size);
+ATF_TC_HEAD(ensemble_convert_pvc_no_fabricated_size, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "PVC without a storage request must not invent a default size");
+}
+ATF_TC_BODY(ensemble_convert_pvc_no_fabricated_size, tc)
+{
+	const char *yaml =
+	    "kind: PersistentVolumeClaim\n"
+	    "metadata:\n"
+	    "  name: pgdata\n";
+	struct convert_options opts;
+	memset(&opts, 0, sizeof(opts));
+	char *out = NULL;
+	int rc = ensemble_convert_persistentvolumeclaim(yaml, &out, &opts);
+	ATF_CHECK_EQ(rc, CONVERT_SUCCESS);
+	ATF_REQUIRE(out != NULL);
+	/* No fabricated size, and no stray "size:" key at all. */
+	ATF_CHECK(strstr(out, "1Gi") == NULL);
+	ATF_CHECK(strstr(out, "size:") == NULL);
+	ATF_CHECK(strstr(out, "TODO") != NULL);
+	free(out);
+}
+
+ATF_TC(ensemble_convert_configmap_null_namespace);
+ATF_TC_HEAD(ensemble_convert_configmap_null_namespace, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "A zero-initialized options struct yields namespace 'default', "
+	    "never a NULL passed to a format string");
+}
+ATF_TC_BODY(ensemble_convert_configmap_null_namespace, tc)
+{
+	const char *yaml =
+	    "kind: ConfigMap\n"
+	    "metadata:\n"
+	    "  name: appcfg\n";
+	struct convert_options opts;
+	memset(&opts, 0, sizeof(opts));	/* opts.namespace == NULL */
+	char *out = NULL;
+	int rc = ensemble_convert_configmap(yaml, &out, &opts);
+	ATF_CHECK_EQ(rc, CONVERT_SUCCESS);
+	ATF_REQUIRE(out != NULL);
+	ATF_CHECK(strstr(out, "namespace: default") != NULL);
+	ATF_CHECK(strstr(out, "(null)") == NULL);
+	free(out);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, ensemble_services_two_services);
@@ -502,6 +579,10 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ensemble_convert_multi_single_doc);
 	ATF_TP_ADD_TC(tp, ensemble_convert_multi_two_docs);
 	ATF_TP_ADD_TC(tp, ensemble_convert_multi_skips_unknown);
+
+	ATF_TP_ADD_TC(tp, ensemble_convert_pvc_uses_declared_size);
+	ATF_TP_ADD_TC(tp, ensemble_convert_pvc_no_fabricated_size);
+	ATF_TP_ADD_TC(tp, ensemble_convert_configmap_null_namespace);
 
 	return (atf_no_error());
 }

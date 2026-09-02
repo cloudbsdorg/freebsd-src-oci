@@ -177,6 +177,22 @@ yaml_get_field(const char *yaml, const char *field)
 }
 
 /*
+ * Resolve the effective namespace for a converted object: the object's own
+ * namespace if present, otherwise the option default, otherwise "default".
+ * Guards against a NULL opts->namespace (e.g. a zero-initialized options
+ * struct from an API caller), which would otherwise be passed to a "%s".
+ */
+static const char *
+ensemble_resolve_namespace(const char *namespace, struct convert_options *opts)
+{
+	if (namespace != NULL)
+		return (namespace);
+	if (opts != NULL && opts->namespace != NULL)
+		return (opts->namespace);
+	return ("default");
+}
+
+/*
  * Convert Ensemble Deployment to native format
  */
 int
@@ -318,7 +334,13 @@ ensemble_convert_configmap(const char *yaml, char **output,
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
-	
+	const char *ns = ensemble_resolve_namespace(namespace, opts);
+
+	if (strstr(yaml, "data:") != NULL)
+		fprintf(stderr, "warning: ConfigMap '%s': 'data' was not "
+		    "converted; add the key/value pairs to the native config\n",
+		    name ? name : "unknown");
+
 	char *result;
 	asprintf(&result,
 	    "# Converted from Ensemble ConfigMap\n"
@@ -330,10 +352,10 @@ ensemble_convert_configmap(const char *yaml, char **output,
 	    "  # Note: Add config data below\n"
 	    "  # data:\n"
 	    "  #   key: value\n",
-	    namespace ? namespace : "default",
+	    ns,
 	    name ? name : "unknown",
 	    name ? name : "unknown",
-	    namespace ? namespace : opts->namespace);
+	    ns);
 	
 	free(name);
 	free(namespace);
@@ -353,7 +375,13 @@ ensemble_convert_secret(const char *yaml, char **output,
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
-	
+	const char *ns = ensemble_resolve_namespace(namespace, opts);
+
+	if (strstr(yaml, "data:") != NULL)
+		fprintf(stderr, "warning: Secret '%s': 'data' was not "
+		    "converted; add the base64-encoded values to the native "
+		    "config\n", name ? name : "unknown");
+
 	char *result;
 	asprintf(&result,
 	    "# Converted from Ensemble Secret\n"
@@ -366,10 +394,10 @@ ensemble_convert_secret(const char *yaml, char **output,
 	    "  # type: opaque | ensemble.io/tls | etc.\n"
 	    "  # data:\n"
 	    "  #   key: <base64-encoded-value>\n",
-	    namespace ? namespace : "default",
+	    ns,
 	    name ? name : "unknown",
 	    name ? name : "unknown",
-	    namespace ? namespace : opts->namespace);
+	    ns);
 	
 	free(name);
 	free(namespace);
@@ -389,7 +417,13 @@ ensemble_convert_ingress(const char *yaml, char **output,
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
-	
+	const char *ns = ensemble_resolve_namespace(namespace, opts);
+
+	if (strstr(yaml, "rules:") != NULL || strstr(yaml, "host:") != NULL)
+		fprintf(stderr, "warning: Ingress '%s': routing rules were not "
+		    "converted; add host/path routes to the network config\n",
+		    name ? name : "unknown");
+
 	char *result;
 	asprintf(&result,
 	    "# Converted from Ensemble Ingress\n"
@@ -408,10 +442,10 @@ ensemble_convert_ingress(const char *yaml, char **output,
 	    "    #       - path: /\n"
 	    "    #         service: myservice\n"
 	    "    #         port: 80\n",
-	    namespace ? namespace : "default",
+	    ns,
 	    name ? name : "unknown",
 	    name ? name : "unknown",
-	    namespace ? namespace : opts->namespace,
+	    ns,
 	    name ? name : "unknown");
 	
 	free(name);
@@ -433,7 +467,24 @@ ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
 	char *storage_str = yaml_get_field(yaml, "storage");
-	
+	const char *ns = ensemble_resolve_namespace(namespace, opts);
+	const char *vol_name = name ? name : "data";
+	char sizebuf[128];
+
+	/*
+	 * Emit the declared storage request. If the claim omits it, do not
+	 * invent a size — leave a TODO the operator must fill in, and say so.
+	 */
+	if (storage_str != NULL) {
+		snprintf(sizebuf, sizeof(sizebuf), "    size: %s\n", storage_str);
+	} else {
+		fprintf(stderr, "warning: PersistentVolumeClaim '%s': no "
+		    "storage size declared; set 'size:' in the native config\n",
+		    name ? name : "unknown");
+		snprintf(sizebuf, sizeof(sizebuf),
+		    "    # TODO: set size (no storage request in source)\n");
+	}
+
 	char *result;
 	asprintf(&result,
 	    "# Converted from Ensemble PersistentVolumeClaim\n"
@@ -444,16 +495,16 @@ ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
 	    "volumes:\n"
 	    "  - name: %s\n"
 	    "    driver: zfs\n"
-	    "    size: %s\n"
+	    "%s"
 	    "    # access_mode: ReadWriteOnce | ReadOnlyMany | ReadWriteMany\n"
 	    "    access_mode: ReadWriteOnce\n",
-	    namespace ? namespace : "default",
+	    ns,
 	    name ? name : "unknown",
 	    name ? name : "unknown",
-	    namespace ? namespace : opts->namespace,
-	    name ? name : "data",
-	    storage_str ? storage_str : "1Gi");
-	
+	    ns,
+	    vol_name,
+	    sizebuf);
+
 	free(name);
 	free(namespace);
 	free(storage_str);
