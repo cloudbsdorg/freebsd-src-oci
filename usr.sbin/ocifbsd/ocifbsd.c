@@ -51,6 +51,7 @@
 #include "image/pull.h"
 #include "image/push.h"
 #include "image/load.h"
+#include "image/build.h"
 #include "image/zfs_store.h"
 #include "network/netcfg.h"
 #include "network/network.h"
@@ -1371,6 +1372,55 @@ cmd_run(int argc, char **argv)
  * pull — resolve an OCI reference; without --dry-run, fetch via
  * registry_pull(3) into the local store path.
  */
+static int
+cmd_build(int argc, char **argv)
+{
+	const char *file = "Containerfile";
+	const char *tag = NULL;
+	const char *context = ".";
+	int ch, verbose = 0;
+
+	static struct option longopts[] = {
+		{ "file",	required_argument,	NULL, 'f' },
+		{ "tag",	required_argument,	NULL, 't' },
+		{ "verbose",	no_argument,		NULL, 'v' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "f:t:vh", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'f':
+			file = optarg;
+			break;
+		case 't':
+			tag = optarg;
+			break;
+		case 'v':
+			verbose = 1;
+			break;
+		case 'h':
+			usage("build [-f Containerfile] -t name[:tag] [context]");
+			return (0);
+		default:
+			usage("build [-f Containerfile] -t name[:tag] [context]");
+			return (1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+	if (argc >= 1)
+		context = argv[0];
+	if (tag == NULL) {
+		fprintf(stderr, "error: build requires -t name[:tag]\n");
+		usage("build [-f Containerfile] -t name[:tag] [context]");
+		return (1);
+	}
+	return (image_build(file, context, tag, verbose));
+}
+
 static int
 cmd_pull(int argc, char **argv)
 {
@@ -2830,6 +2880,7 @@ static struct command commands[] = {
 	{ "stop",	cmd_stop,	"Gracefully stop a container" },
 	{ "pause",	cmd_pause,	"Pause a running container" },
 	{ "resume",	cmd_resume,	"Resume a paused container" },
+	{ "build",	cmd_build,	"Build an image from a Containerfile" },
 	{ "pull",	cmd_pull,	"Resolve or pull an OCI image" },
 	{ "push",	cmd_push,	"Push a local image to a registry" },
 	{ "load",	cmd_load,	"Import a local OCI image archive" },

@@ -4,7 +4,7 @@
 #
 
 SRCS=		zfs_store.c pull.c registries.c unpack.c push.c reference.c paths.c \
-		whiteout.c load.c
+		whiteout.c load.c build.c
 
 LIB=		ocifbsd_image
 SHLIB_NAME=	ocifbsd_image.so.1
