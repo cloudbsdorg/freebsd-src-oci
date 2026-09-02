@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "include/ocifbsd.h"
@@ -1118,6 +1119,24 @@ struct proxy_backend {
 	char	*port;
 };
 
+/*
+ * Circuit-breaker health, shared across the pre-forked accept workers and their
+ * per-connection children via anonymous shared memory. After
+ * PROXY_CB_THRESHOLD consecutive dial failures a backend is tripped "open" and
+ * skipped entirely until dead_until, so a downed replica costs one failure to
+ * detect and then zero — no per-connection dial timeout — instead of stalling
+ * every connection that happens to land on it. Once the cooldown elapses a
+ * single connection is allowed through (half-open); if it connects the backend
+ * is reset to healthy, if it fails the breaker re-trips immediately.
+ */
+#define	PROXY_CB_THRESHOLD	3	/* consecutive fails before tripping */
+#define	PROXY_CB_COOLDOWN	10	/* seconds a tripped backend is skipped */
+
+struct proxy_health {
+	int	fails;		/* consecutive dial failures */
+	time_t	dead_until;	/* skip until this wall-clock time (0 = healthy) */
+};
+
 /* Load-balancing algorithms. */
 enum proxy_algo {
 	ALGO_ROUNDROBIN,	/* even rotation (default) */
@@ -1290,17 +1309,21 @@ proxy_reap(int sig)
  */
 static void
 proxy_accept_loop(int lfd, struct proxy_backend *backends, int nbackends,
-    enum proxy_algo algo, int *conns, int timeout_ms)
+    enum proxy_algo algo, int *conns, struct proxy_health *health,
+    int timeout_ms)
 {
 	int rr = 0;
 
 	signal(SIGCHLD, proxy_reap);
 	signal(SIGPIPE, SIG_IGN);
+	/* Distinct RNG stream per pre-forked worker for the random algo. */
+	srand((unsigned)(getpid() ^ (int)time(NULL)));
 	for (;;) {
 		struct sockaddr_storage ss;
 		socklen_t sslen = sizeof(ss);
 		int cfd = accept(lfd, (struct sockaddr *)&ss, &sslen);
 		int start;
+		time_t now;
 		pid_t pid;
 
 		if (cfd < 0) {
@@ -1308,21 +1331,26 @@ proxy_accept_loop(int lfd, struct proxy_backend *backends, int nbackends,
 				continue;
 			break;
 		}
+		now = time(NULL);
 		switch (algo) {
 		case ALGO_RANDOM:
-			start = (int)(random() % nbackends);
+			start = (int)((unsigned)rand() % (unsigned)nbackends);
 			break;
 		case ALGO_SOURCEHASH:
 			start = (int)(proxy_addr_hash((struct sockaddr *)&ss,
 			    sslen) % (unsigned long)nbackends);
 			break;
 		case ALGO_LEASTCONN: {
-			int m = 0;
+			int m = -1;
 
-			for (int i = 1; i < nbackends; i++)
-				if (conns[i] < conns[m])
+			/* Fewest active connections among live backends. */
+			for (int i = 0; i < nbackends; i++) {
+				if (health != NULL && health[i].dead_until > now)
+					continue;
+				if (m < 0 || conns[i] < conns[m])
 					m = i;
-			start = m;
+			}
+			start = (m >= 0) ? m : 0;
 			break;
 		}
 		case ALGO_ROUNDROBIN:
@@ -1336,14 +1364,51 @@ proxy_accept_loop(int lfd, struct proxy_backend *backends, int nbackends,
 		if (pid == 0) {
 			int bfd = -1, tries, chosen = -1;
 
+			/*
+			 * Phase 1: honor the circuit breaker. Skip any backend
+			 * currently tripped open — no dial, no timeout — so a
+			 * dead replica is short-circuited after the first
+			 * failure detects it. Update shared health as we go: a
+			 * connect resets the backend to healthy, a failure
+			 * counts toward tripping it.
+			 */
 			for (tries = 0; tries < nbackends; tries++) {
 				int idx = (start + tries) % nbackends;
 
+				if (health != NULL && health[idx].dead_until > now)
+					continue;
 				bfd = proxy_dial(backends[idx].host,
 				    backends[idx].port, timeout_ms);
 				if (bfd >= 0) {
+					if (health != NULL) {
+						health[idx].fails = 0;
+						health[idx].dead_until = 0;
+					}
 					chosen = idx;
 					break;
+				}
+				if (health != NULL &&
+				    ++health[idx].fails >= PROXY_CB_THRESHOLD)
+					health[idx].dead_until =
+					    now + PROXY_CB_COOLDOWN;
+			}
+			/*
+			 * Phase 2: every backend was tripped. Rather than drop
+			 * the client, make one last-resort pass that ignores the
+			 * breaker — a half-open probe across all of them.
+			 */
+			if (bfd < 0 && health != NULL) {
+				for (tries = 0; tries < nbackends; tries++) {
+					int idx = (start + tries) % nbackends;
+
+					bfd = proxy_dial(backends[idx].host,
+					    backends[idx].port, timeout_ms);
+					if (bfd >= 0) {
+						health[idx].fails = 0;
+						health[idx].dead_until = 0;
+						chosen = idx;
+						break;
+					}
 				}
 			}
 			if (bfd < 0)
@@ -1368,6 +1433,7 @@ cmd_proxy(int argc, char **argv)
 	char lhost[256], lport[16];
 	enum proxy_algo algo = ALGO_ROUNDROBIN;
 	int *conns = NULL;	/* shared active-connection counts (least-conn) */
+	struct proxy_health *health = NULL;	/* shared circuit-breaker state */
 	int workers = 0;	/* accept workers; 0 => one per CPU */
 
 	static struct option longopts[] = {
@@ -1498,6 +1564,17 @@ cmd_proxy(int argc, char **argv)
 		}
 	}
 
+	/*
+	 * Circuit-breaker health is shared by every worker and child regardless
+	 * of algorithm, so a backend tripped by one connection is skipped by
+	 * all the others. A failed mapping just disables the breaker (health
+	 * stays NULL and every backend is always eligible).
+	 */
+	health = mmap(NULL, sizeof(struct proxy_health) * (size_t)nbackends,
+	    PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
+	if (health == MAP_FAILED)
+		health = NULL;
+
 	if (workers <= 0) {
 		long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 
@@ -1510,8 +1587,11 @@ cmd_proxy(int argc, char **argv)
 		    algo == ALGO_LEASTCONN ? "least-conn" : "round-robin";
 
 		printf("ocifbsd proxy: listening on %s -> %d backend(s), "
-		    "algo=%s, %d accept workers, failover on\n",
-		    listen_spec, nbackends, an, workers);
+		    "algo=%s, %d accept workers, failover + circuit-breaker "
+		    "(%d fails/%ds cooldown)%s\n",
+		    listen_spec, nbackends, an, workers,
+		    PROXY_CB_THRESHOLD, PROXY_CB_COOLDOWN,
+		    health != NULL ? "" : " [breaker disabled]");
 		fflush(stdout);
 	}
 
@@ -1525,7 +1605,7 @@ cmd_proxy(int argc, char **argv)
 	for (int w = 0; w < workers; w++) {
 		if (fork() == 0) {
 			proxy_accept_loop(lfd, backends, nbackends, algo, conns,
-			    timeout_ms);
+			    health, timeout_ms);
 			_exit(0);
 		}
 	}
@@ -1541,7 +1621,7 @@ cmd_proxy(int argc, char **argv)
 		/* A worker died; respawn one to keep the pool full. */
 		if (fork() == 0) {
 			proxy_accept_loop(lfd, backends, nbackends, algo, conns,
-			    timeout_ms);
+			    health, timeout_ms);
 			_exit(0);
 		}
 	}
@@ -2001,7 +2081,7 @@ cmd_build(int argc, char **argv)
 	const char *file = "Containerfile";
 	const char *tag = NULL;
 	const char *context = ".";
-	int ch, verbose = 0;
+	int ch, bverbose = 0;
 
 	static struct option longopts[] = {
 		{ "file",	required_argument,	NULL, 'f' },
@@ -2022,7 +2102,7 @@ cmd_build(int argc, char **argv)
 			tag = optarg;
 			break;
 		case 'v':
-			verbose = 1;
+			bverbose = 1;
 			break;
 		case 'h':
 			usage("build [-f Containerfile] -t name[:tag] [context]");
@@ -2041,7 +2121,7 @@ cmd_build(int argc, char **argv)
 		usage("build [-f Containerfile] -t name[:tag] [context]");
 		return (1);
 	}
-	return (image_build(file, context, tag, verbose));
+	return (image_build(file, context, tag, bverbose));
 }
 
 static int
