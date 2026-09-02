@@ -64,6 +64,34 @@ extern int mkdirp(const char *path, mode_t mode);
 #define OCIFBSD_NETWORK_STATE_DIR	"/var/run/ocifbsd/networks"
 
 /*
+ * A network id becomes a path component under the root-owned state dir
+ * (<dir>/<id>.json) that is fopen'd and unlink'd, so it MUST NOT contain '/',
+ * "..", NUL, or a leading '.'. Without this, a network_id like "../../etc/rc"
+ * is arbitrary root file read/overwrite/unlink (path traversal) in
+ * network_get/network_delete/network_connect/etc.
+ */
+static bool
+net_id_is_valid(const char *id)
+{
+	size_t i, len;
+
+	if (id == NULL)
+		return (false);
+	len = strlen(id);
+	if (len == 0 || len > 128)
+		return (false);
+	if (id[0] == '.')
+		return (false);
+	for (i = 0; i < len; i++) {
+		char c = id[i];
+		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		    (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+			return (false);
+	}
+	return (true);
+}
+
+/*
  * Run a command and return status
  */
 static int
@@ -424,7 +452,7 @@ bridge_list_interfaces(const char *bridge, char ***interfaces, int *ninterfaces)
 	*interfaces = NULL;
 	*ninterfaces = 0;
 
-	if (run_cmd_output(&output, 3, "ifconfig", bridge) != 0) {
+	if (run_cmd_output(&output, 2, "ifconfig", bridge) != 0) {
 		free(output);
 		return (-1);
 	}
@@ -466,7 +494,7 @@ bridge_exists(const char *name)
 	char *output = NULL;
 	bool exists = false;
 
-	if (run_cmd_output(&output, 3, "ifconfig", name) == 0) {
+	if (run_cmd_output(&output, 2, "ifconfig", name) == 0) {
 		if (strstr(output, "does not exist") == NULL)
 			exists = true;
 	}
@@ -607,7 +635,7 @@ epair_exists(const char *epair)
 	char *output = NULL;
 	bool exists = false;
 
-	if (run_cmd_output(&output, 3, "ifconfig", epair) == 0) {
+	if (run_cmd_output(&output, 2, "ifconfig", epair) == 0) {
 		if (strstr(output, "does not exist") == NULL)
 			exists = true;
 	}
@@ -743,6 +771,8 @@ network_create(struct network_config *config)
 int
 network_delete(const char *network_id)
 {
+	if (!net_id_is_valid(network_id))
+		return (-1);
 	char state_file[PATH_MAX];
 	char bridge_name[64] = "";	/* must be empty if not parsed below */
 
@@ -785,6 +815,8 @@ int
 network_connect(const char *network_id, const char *container_id,
     struct endpoint **ep)
 {
+	if (!net_id_is_valid(network_id))
+		return (-1);
 	struct endpoint *endpoint = NULL;
 	char state_file[PATH_MAX];
 	char bridge_name[64] = "";
@@ -941,6 +973,8 @@ json_str_field(const char *line, const char *key, char *out, size_t outlen)
 struct network_config *
 network_get(const char *network_id)
 {
+	if (!net_id_is_valid(network_id))
+		return (NULL);
 	struct network_config *config = NULL;
 	char state_file[PATH_MAX];
 
@@ -1316,6 +1350,8 @@ find_quoted_in_range(const char *start, const char *limit, const char *needle)
 int
 dns_add_server(const char *network_id, const char *server)
 {
+	if (!net_id_is_valid(network_id))
+		return (-1);
 	char state_file[PATH_MAX];
 	char buf[4096];
 	char new_buf[5120];
@@ -1389,6 +1425,8 @@ dns_add_server(const char *network_id, const char *server)
 int
 dns_remove_server(const char *network_id, const char *server)
 {
+	if (!net_id_is_valid(network_id))
+		return (-1);
 	char state_file[PATH_MAX];
 	char buf[4096];
 	char new_buf[5120];
@@ -1497,7 +1535,7 @@ parse_iface_stats(const char *iface, uint64_t *rx_bytes, uint64_t *tx_bytes)
 	*rx_bytes = 0;
 	*tx_bytes = 0;
 
-	if (iface == NULL || run_cmd_output(&output, 3, "ifconfig", iface) != 0) {
+	if (iface == NULL || run_cmd_output(&output, 2, "ifconfig", iface) != 0) {
 		free(output);
 		return (-1);
 	}
@@ -1529,6 +1567,8 @@ parse_iface_stats(const char *iface, uint64_t *rx_bytes, uint64_t *tx_bytes)
 int
 network_stats(const char *network_id, uint64_t *rx_bytes, uint64_t *tx_bytes)
 {
+	if (!net_id_is_valid(network_id))
+		return (-1);
 	char state_file[PATH_MAX];
 	char bridge[64] = {0};
 	char *fgets_ret;
@@ -1592,6 +1632,8 @@ endpoint_stats(const char *endpoint_id, uint64_t *rx_bytes, uint64_t *tx_bytes)
 int
 network_inspect(const char *network_id, char **json_output)
 {
+	if (!net_id_is_valid(network_id))
+		return (-1);
 	struct network_config *config;
 	char *json;
 	size_t len;
