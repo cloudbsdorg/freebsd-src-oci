@@ -32,6 +32,7 @@
  */
 
 #include <sys/param.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <json-c/json.h>
 #include <errno.h>
@@ -91,13 +92,25 @@ generate_stack_id(char *id, size_t len)
 /*
  * Get stack state file path
  */
+/*
+ * Base directory for orchestration state; OCIFBSD_ORCH_DIR overrides the
+ * OCIFBSD_ORCH_VAR_DIR default (mirrors pod.c) for tests and unprivileged use.
+ */
+static const char *
+orch_var_dir(void)
+{
+	const char *e = getenv("OCIFBSD_ORCH_DIR");
+
+	return (e != NULL && e[0] != '\0') ? e : OCIFBSD_ORCH_VAR_DIR;
+}
+
 static char *
 get_stack_state_path(const char *name, const char *namespace)
 {
 	char *path;
-	
-	asprintf(&path, "%s/stacks/%s/%s.json", 
-	    OCIFBSD_ORCH_VAR_DIR, namespace, name);
+
+	asprintf(&path, "%s/stacks/%s/%s.json",
+	    orch_var_dir(), namespace, name);
 	return (path);
 }
 
@@ -113,12 +126,25 @@ save_stack_state(struct stack *stack)
 	path = get_stack_state_path(stack->name, stack->namespace);
 	if (path == NULL)
 		return (-1);
-	
-	if (mkdirp(path, 0755) != 0 && errno != EEXIST) {
-		free(path);
-		return (-1);
+
+	/*
+	 * Create the PARENT directory only. mkdirp on the full path would make
+	 * the state file itself a directory (fopen then fails), so the stack was
+	 * never persisted for a later CLI process. Same bug as pods.
+	 */
+	{
+		char *slash = strrchr(path, '/');
+
+		if (slash != NULL) {
+			*slash = '\0';
+			if (mkdirp(path, 0755) != 0 && errno != EEXIST) {
+				free(path);
+				return (-1);
+			}
+			*slash = '/';
+		}
 	}
-	
+
 	fp = fopen(path, "w");
 	free(path);
 	
@@ -128,13 +154,70 @@ save_stack_state(struct stack *stack)
 	fprintf(fp, "{\n");
 	fprintf(fp, "  \"name\": \"%s\",\n", stack->name);
 	fprintf(fp, "  \"namespace\": \"%s\",\n", stack->namespace);
-	fprintf(fp, "  \"version\": \"%s\",\n", stack->spec->version);
+	/* A stack reconstructed from disk has no spec (services aren't
+	 * persisted), so guard the version dereference. */
+	fprintf(fp, "  \"version\": \"%s\",\n",
+	    stack->spec != NULL ? stack->spec->version : "");
 	if (stack->status)
 		fprintf(fp, "  \"state\": \"%s\"\n", stack->status->state);
 	fprintf(fp, "}\n");
-	
+
 	fclose(fp);
 	return (0);
+}
+
+/*
+ * Reconstruct a stack from its on-disk state file (name/namespace/state).
+ * The spec (services) is not persisted, so the loaded stack carries metadata
+ * + status only. Returns a newly allocated stack or NULL if no state file
+ * exists. Lets stack list/get/delete see stacks created by an earlier CLI
+ * process rather than only this process's in-memory registry. Does not call
+ * stack_get/stack_list, so there is no recursion.
+ */
+static struct stack *
+stack_load_disk(const char *name, const char *namespace)
+{
+	char *path;
+	FILE *fp;
+	char buf[1024];
+	struct stack *stack;
+	struct stack_status *status;
+	const char *ns = namespace ? namespace : "default";
+
+	path = get_stack_state_path(name, ns);
+	if (path == NULL)
+		return (NULL);
+	fp = fopen(path, "r");
+	free(path);
+	if (fp == NULL)
+		return (NULL);
+
+	stack = calloc(1, sizeof(*stack));
+	status = calloc(1, sizeof(*status));
+	if (stack == NULL || status == NULL) {
+		free(stack);
+		free(status);
+		fclose(fp);
+		return (NULL);
+	}
+	strlcpy(stack->name, name, sizeof(stack->name));
+	strlcpy(stack->namespace, ns, sizeof(stack->namespace));
+	strlcpy(status->state, "unknown", sizeof(status->state));
+
+	while (fgets(buf, sizeof(buf), fp) != NULL) {
+		char tmp[64];
+
+		if (strstr(buf, "\"state\":") != NULL &&
+		    sscanf(strstr(buf, "\"state\":"), "\"state\": \"%63[^\"]\"",
+		    tmp) == 1)
+			strlcpy(status->state, tmp, sizeof(status->state));
+	}
+	fclose(fp);
+
+	strlcpy(status->name, stack->name, sizeof(status->name));
+	strlcpy(status->namespace, stack->namespace, sizeof(status->namespace));
+	stack->status = status;
+	return (stack);
 }
 
 /*
@@ -351,10 +434,21 @@ stack_delete(struct stack *stack)
 		}
 	}
 	pthread_mutex_unlock(&stack_registry_lock);
-	
+
+	/* Remove the on-disk state so the stack does not reappear in a later
+	 * list/get from another process. */
+	{
+		char *path = get_stack_state_path(stack->name, stack->namespace);
+
+		if (path != NULL) {
+			(void)unlink(path);
+			free(path);
+		}
+	}
+
 	orch_event_publish("Normal", "Deleted", stack->namespace,
 	    "Stack %s deleted", stack->name);
-	
+
 	stack_free(stack);
 	return (ret);
 }
@@ -376,7 +470,15 @@ stack_get(const char *name, const char *namespace)
 		}
 	}
 	pthread_mutex_unlock(&stack_registry_lock);
-	
+
+	/* Fall back to on-disk state for stacks from an earlier process. */
+	{
+		struct stack *disk = stack_load_disk(name, ns);
+
+		if (disk != NULL)
+			return (disk);
+	}
+
 	errno = ENOENT;
 	return (NULL);
 }
@@ -391,7 +493,7 @@ stack_list(const char *namespace, int *count)
 	const char *ns = namespace ? namespace : "default";
 	int alloc = 16;
 	int n = 0;
-	
+
 	*count = 0;
 	result = calloc(alloc, sizeof(struct stack *));
 	if (result == NULL)
@@ -408,7 +510,57 @@ stack_list(const char *namespace, int *count)
 		}
 	}
 	pthread_mutex_unlock(&stack_registry_lock);
-	
+
+	/* Add stacks persisted on disk by earlier processes, deduped by name. */
+	{
+		char dirpath[PATH_MAX];
+		DIR *d;
+		struct dirent *e;
+
+		snprintf(dirpath, sizeof(dirpath), "%s/stacks/%s",
+		    orch_var_dir(), ns);
+		d = opendir(dirpath);
+		if (d != NULL) {
+			while ((e = readdir(d)) != NULL) {
+				char sname[256];
+				char *dot;
+				struct stack *ls;
+				int dup = 0, k;
+
+				if (e->d_name[0] == '.')
+					continue;
+				strlcpy(sname, e->d_name, sizeof(sname));
+				dot = strstr(sname, ".json");
+				if (dot == NULL)
+					continue;
+				*dot = '\0';
+				for (k = 0; k < n; k++) {
+					if (strcmp(result[k]->name, sname) == 0) {
+						dup = 1;
+						break;
+					}
+				}
+				if (dup)
+					continue;
+				ls = stack_load_disk(sname, ns);
+				if (ls == NULL)
+					continue;
+				if (n >= alloc) {
+					struct stack **grown = realloc(result,
+					    alloc * 2 * sizeof(struct stack *));
+					if (grown == NULL) {
+						stack_free(ls);
+						break;
+					}
+					result = grown;
+					alloc *= 2;
+				}
+				result[n++] = ls;
+			}
+			closedir(d);
+		}
+	}
+
 	*count = n;
 	return (result);
 }

@@ -688,10 +688,17 @@ cmd_stack_list(int argc, char **argv)
 	printf("%-30s %-15s %-10s %s\n", "----", "-------", "-----", "---------");
 	
 	for (int i = 0; i < count; i++) {
+		/*
+		 * A stack reconstructed from disk carries metadata + status but
+		 * no spec (services are not persisted), so spec may be NULL.
+		 */
 		printf("%-30s %-15s %-10s %s\n",
 		    stacks[i]->name,
-		    stacks[i]->spec->version,
-		    stacks[i]->status->state,
+		    (stacks[i]->spec != NULL &&
+		     stacks[i]->spec->version[0] != '\0') ?
+		    stacks[i]->spec->version : "-",
+		    (stacks[i]->status != NULL) ?
+		    stacks[i]->status->state : "-",
 		    stacks[i]->namespace);
 	}
 	
