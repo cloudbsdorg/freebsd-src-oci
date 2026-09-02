@@ -192,12 +192,18 @@ auth_init(void)
         encryption_key_initialized = 1;
     }
     
-    /* Create default users if they don't exist */
-    auth_user_create("admin", NULL);  /* NULL = generate random password */
-    
+    /*
+     * Mark initialized and release the lock BEFORE creating default users:
+     * auth_user_create() takes auth_lock itself, and auth_lock is a
+     * non-recursive PTHREAD_MUTEX_INITIALIZER, so calling it while still
+     * holding the lock self-deadlocked on the very first init.
+     */
     __sync_fetch_and_add(&auth_initialized, 1);
     pthread_mutex_unlock(&auth_lock);
-    
+
+    /* Create default users if they don't exist (locks auth_lock itself). */
+    auth_user_create("admin", NULL);  /* NULL = generate random password */
+
     return (0);
 }
 
