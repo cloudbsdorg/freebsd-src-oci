@@ -36,7 +36,7 @@ ATF_TESTS_C=	parser_test ensemble_test utils_test oci2jail_test hooks_test \
 		cluster_mtls_test node_agent_test \
 		controller_test pipeline_test rctl_test mac_test \
 		network_test alerting_test namespace_test cert_acme_test \
-		pam_jwt_test auth_crypto_test cni_test
+		pam_jwt_test auth_crypto_test cni_test zfs_store_test
 ATF_TESTS_SH=	cli_test lifecycle_test perfstress_test network_cli_test
 
 # convert/ sources compile at WARNS=3; match for #include tests
@@ -82,5 +82,6 @@ LIBADD.cluster_mtls_test+=	crypto ssl pthread
 LIBADD.cert_acme_test+=		crypto ssl	# acme.c uses OpenSSL (X509/EVP)
 LIBADD.pam_jwt_test+=		pam util crypto md	# pam_auth.c deps
 LIBADD.auth_crypto_test+=	pam crypto md	# security-daemon/auth.c deps
+LIBADD.zfs_store_test+=		md util	# zfs_store.c: sha256 + libutil
 
 .include <bsd.test.mk>

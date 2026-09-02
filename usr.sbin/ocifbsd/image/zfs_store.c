@@ -60,8 +60,21 @@ extern int copy_file(const char *from, const char *to, int mode);
 /*
  * Configuration
  */
-static const char *zfs_pool = OCIFBSD_ZFS_POOL;
 static char *mountpoint_base = "/var/lib/ocifbsd";
+
+/*
+ * The ZFS pool that holds the ocifbsd datasets. Defaults to OCIFBSD_ZFS_POOL
+ * ("zroot") but can be overridden with OCIFBSD_ZFS_POOL in the environment —
+ * the same open-default-plus-override pattern as OCIFBSD_DATA_DIR, which also
+ * lets a test point the store at a throwaway file-backed pool.
+ */
+static const char *
+zfs_pool_name(void)
+{
+	const char *e = getenv("OCIFBSD_ZFS_POOL");
+
+	return (e != NULL && e[0] != '\0') ? e : OCIFBSD_ZFS_POOL;
+}
 
 static int
 run_zfs(int argc, ...)
@@ -295,14 +308,14 @@ zfs_store_ensure_dataset(const char *dataset, const char *mountpoint)
 const char *
 zfs_get_pool(void)
 {
-	return (zfs_pool);
+	return (zfs_pool_name());
 }
 
 const char *
 zfs_get_images_dataset(void)
 {
 	static char buf[PATH_MAX];
-	snprintf(buf, sizeof(buf), "%s/%s", zfs_pool, OCIFBSD_ZFS_IMAGES);
+	snprintf(buf, sizeof(buf), "%s/%s", zfs_pool_name(), OCIFBSD_ZFS_IMAGES);
 	return (buf);
 }
 
@@ -310,7 +323,7 @@ const char *
 zfs_get_layers_dataset(void)
 {
 	static char buf[PATH_MAX];
-	snprintf(buf, sizeof(buf), "%s/%s", zfs_pool, OCIFBSD_ZFS_LAYERS);
+	snprintf(buf, sizeof(buf), "%s/%s", zfs_pool_name(), OCIFBSD_ZFS_LAYERS);
 	return (buf);
 }
 
@@ -318,7 +331,7 @@ const char *
 zfs_get_volumes_dataset(void)
 {
 	static char buf[PATH_MAX];
-	snprintf(buf, sizeof(buf), "%s/%s", zfs_pool, OCIFBSD_ZFS_VOLUMES);
+	snprintf(buf, sizeof(buf), "%s/%s", zfs_pool_name(), OCIFBSD_ZFS_VOLUMES);
 	return (buf);
 }
 
@@ -376,25 +389,18 @@ int
 zfs_destroy_dataset(const char *dataset, bool recursive)
 {
 	int ret;
-	char *argv[6];
 
-	argv[0] = "zfs";
-	argv[1] = "destroy";
-	argv[2] = (char *)dataset;
-	argv[3] = recursive ? "-r" : NULL;
-	argv[4] = "-f";
-	argv[5] = NULL;
+	/*
+	 * zfs(8) requires the flags to precede the dataset operand: the previous
+	 * order, `zfs destroy <dataset> -r -f`, was rejected as a usage error
+	 * (it printed the "zfs allow" hint) and every recursive destroy failed.
+	 */
+	if (recursive)
+		ret = run_zfs(5, "zfs", "destroy", "-r", "-f",
+		    (char *)dataset);
+	else
+		ret = run_zfs(4, "zfs", "destroy", "-f", (char *)dataset);
 
-	/* Build actual argc */
-	int actual_argc = 3;
-	if (argv[3] != NULL) {
-		argv[4] = "-f";
-		argv[5] = NULL;
-		actual_argc = 5;
-	}
-
-	ret = run_zfs(actual_argc, argv[0], argv[1], argv[2],
-	    argv[3] ? argv[3] : "", argv[4] ? argv[4] : "");
 	if (ret != 0 && ret != 1)
 		return (-1);
 
@@ -705,7 +711,8 @@ zfs_store_clone_layer(const char *src_digest, const char *dst_digest)
 	    sizeof(dst_dataset));
 
 	/* Clone the source dataset */
-	ret = run_zfs(5, "zfs", "clone", src_dataset, dst_dataset);
+	/* 4 trailing args: "zfs","clone",src,dst (argc was wrongly 5). */
+	ret = run_zfs(4, "zfs", "clone", src_dataset, dst_dataset);
 	if (ret != 0)
 		return (-1);
 
@@ -831,7 +838,10 @@ zfs_store_snapshot(const char *dataset, const char *snapshot)
 	int ret;
 
 	snprintf(snap, sizeof(snap), "%s@%s", dataset, snapshot);
-	ret = run_zfs(4, "zfs", "snapshot", snap);
+	/* argc must match the trailing args: "zfs", "snapshot", snap == 3. The
+	 * previous 4 made run_zfs read an undefined 4th va_arg and pass it to
+	 * zfs(8), which then rejected the command. */
+	ret = run_zfs(3, "zfs", "snapshot", snap);
 	if (ret != 0 && ret != 1)
 		return (-1);
 
@@ -976,7 +986,9 @@ zfs_volume_create(const char *name, uint64_t size, bool encrypted)
 	make_dataset_name(zfs_get_volumes_dataset(), name, dataset,
 	    sizeof(dataset));
 
-	ret = run_zfs(5, "zfs", "create", "-V", "1G", "-p", dataset);
+	/* 6 trailing args: "zfs","create","-V","1G","-p",dataset (argc was
+	 * wrongly 5, which dropped the dataset operand). */
+	ret = run_zfs(6, "zfs", "create", "-V", "1G", "-p", dataset);
 	if (ret != 0 && ret != 1)
 		return (-1);
 
