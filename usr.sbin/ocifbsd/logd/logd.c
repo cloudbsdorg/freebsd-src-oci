@@ -513,17 +513,27 @@ log_format_entry(struct log_entry *entry, int format)
     strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", tm);
 
     switch (format) {
-    case LOG_FORMAT_JSON:
+    case LOG_FORMAT_JSON: {
+        /*
+         * hostname and message are attacker-influenceable free-form text;
+         * escape them so an embedded quote/newline cannot forge a log record
+         * or break a JSON consumer (log injection). severity/source come from
+         * fixed enum tables and need no escaping.
+         */
+        static char emsg[sizeof(entry->message) * 6];
+        static char ehost[sizeof(entry->hostname) * 6];
+
         snprintf(buf, sizeof(buf),
             "{\"timestamp\":\"%s\",\"severity\":\"%s\",\"source\":\"%s\","
             "\"hostname\":\"%s\",\"message\":\"%s\",\"id\":%lu}",
             ts,
             severity_name(entry->severity),
             source_name(entry->source),
-            entry->hostname,
-            entry->message,
+            ocifbsd_json_escape(entry->hostname, ehost, sizeof(ehost)),
+            ocifbsd_json_escape(entry->message, emsg, sizeof(emsg)),
             (unsigned long)entry->id);
         break;
+    }
 
     case LOG_FORMAT_TEXT:
         snprintf(buf, sizeof(buf), "%s %s[%s]: %s",
@@ -1046,6 +1056,10 @@ int
 alert_trigger(struct alert_rule *rule, struct log_entry *entry)
 {
     char payload[4096];
+    /* Escape free-form fields so they cannot inject webhook-payload JSON. */
+    char ename[sizeof(rule->name) * 6];
+    char emsg[sizeof(entry->message) * 6];
+    char esrc[sizeof(entry->source_name) * 6];
 
     if (rule == NULL)
         return (-1);
@@ -1054,8 +1068,11 @@ alert_trigger(struct alert_rule *rule, struct log_entry *entry)
     snprintf(payload, sizeof(payload),
         "{\"alert\":\"%s\",\"severity\":%d,\"message\":\"%s\","
         "\"source\":\"%s\",\"timestamp\":%ld}",
-        rule->name, entry->severity, entry->message,
-        entry->source_name, (long)entry->timestamp);
+        ocifbsd_json_escape(rule->name, ename, sizeof(ename)),
+        entry->severity,
+        ocifbsd_json_escape(entry->message, emsg, sizeof(emsg)),
+        ocifbsd_json_escape(entry->source_name, esrc, sizeof(esrc)),
+        (long)entry->timestamp);
 
     /* Enqueue webhook if configured */
     if (rule->notify_webhook && rule->webhook_url[0] != '\0') {

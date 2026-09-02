@@ -644,7 +644,13 @@ api_json_error(struct api_response *resp, int code, const char *error)
     
     strlcpy(resp->status_message, msg, sizeof(resp->status_message));
     
-    snprintf(body, sizeof(body), "{\"error\": \"%s\"}", error);
+    /* Escape the caller-supplied message so it cannot break the JSON body. */
+    {
+        char eerr[1024];
+
+        snprintf(body, sizeof(body), "{\"error\": \"%s\"}",
+            ocifbsd_json_escape(error, eerr, sizeof(eerr)));
+    }
     return api_response_set_body(resp, body, strlen(body), "application/json");
 }
 

@@ -952,14 +952,22 @@ cert_save_registry(void)
         return (-1);
 
     RB_FOREACH(cert, cert_tree, &cert_registry) {
+        /* cn comes from a CSR and the paths are filesystem paths: escape so
+         * a crafted value cannot inject into the status JSON. */
+        char ecn[sizeof(cert->cn) * 6];
+        char ekey[sizeof(cert->key_path) * 6];
+        char ecrt[sizeof(cert->cert_path) * 6];
+
         fprintf(fp,
             "{\"name\":\"%s\",\"type\":%d,\"cn\":\"%s\","
             "\"status\":%d,\"created\":%ld,\"expires\":%ld,\"last_rotated\":%ld,"
             "\"key_path\":\"%s\",\"cert_path\":\"%s\"}\n",
-            cert->name, cert->type, cert->cn,
+            cert->name, cert->type,
+            ocifbsd_json_escape(cert->cn, ecn, sizeof(ecn)),
             cert->status, (long)cert->created, (long)cert->expires,
             (long)cert->last_rotated,
-            cert->key_path, cert->cert_path);
+            ocifbsd_json_escape(cert->key_path, ekey, sizeof(ekey)),
+            ocifbsd_json_escape(cert->cert_path, ecrt, sizeof(ecrt)));
     }
 
     fclose(fp);
@@ -1241,10 +1249,13 @@ cert_status_json(char **json_out)
     }
     fputc('[', ms);
     for (int i = 0; i < count; i++) {
+        char ecn[sizeof(certs[i]->cn) * 6];
+
         fprintf(ms, "%s{\"name\":\"%s\",\"type\":%d,\"cn\":\"%s\","
             "\"status\":%d,\"expires\":%ld}",
             i > 0 ? "," : "",
-            certs[i]->name, certs[i]->type, certs[i]->cn,
+            certs[i]->name, certs[i]->type,
+            ocifbsd_json_escape(certs[i]->cn, ecn, sizeof(ecn)),
             certs[i]->status, (long)certs[i]->expires);
     }
     fputc(']', ms);

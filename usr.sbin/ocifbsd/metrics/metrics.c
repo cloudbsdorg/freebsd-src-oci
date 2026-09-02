@@ -1064,8 +1064,10 @@ metrics_get_alerts_json(void)
     p += n; remaining -= (size_t)n;
 
     for (i = 0; i < n_alerts; i++) {
+        char emsg[1024];
+
         n = snprintf(p, remaining, "    {\"message\": \"%s\"}%s\n",
-            active_alerts[i],
+            ocifbsd_json_escape(active_alerts[i], emsg, sizeof(emsg)),
             i < n_alerts - 1 ? "," : "");
         if (n < 0 || (size_t)n >= remaining) { free(json); pthread_mutex_unlock(&alert_lock); return (NULL); }
         p += n; remaining -= (size_t)n;

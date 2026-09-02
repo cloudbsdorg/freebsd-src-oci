@@ -292,6 +292,67 @@ ocifbsd_realloc_grow(void **p, size_t n)
 	*p = t;
 	return (0);
 }
+/*
+ * Escape s for embedding as the BODY of a JSON string — i.e. between the
+ * surrounding quotes, so it drops into the common "\"key\":\"%s\"" idiom as
+ * ocifbsd_json_escape(s, buf, sizeof(buf)). Returns buf, always NUL-terminated
+ * (an empty string for NULL). '"', '\\' and control characters (< 0x20) are
+ * escaped so an untrusted value — a filesystem path, an error message, a
+ * registry-supplied field — cannot terminate the string early and inject
+ * structure into the output. Output is truncated (never overflowed) if buf is
+ * too small; size it at 6x the worst-case source length for full fidelity.
+ */
+static inline const char *
+ocifbsd_json_escape(const char *s, char *buf, size_t buflen)
+{
+	static const char hex[] = "0123456789abcdef";
+	size_t o = 0;
+
+	if (buf == NULL || buflen == 0)
+		return ("");
+	if (s == NULL) {
+		buf[0] = '\0';
+		return (buf);
+	}
+	for (; *s != '\0'; s++) {
+		unsigned char c = (unsigned char)*s;
+		char seq[2];
+		const char *esc;
+		size_t el;
+
+		switch (c) {
+		case '"':  esc = "\\\""; el = 2; break;
+		case '\\': esc = "\\\\"; el = 2; break;
+		case '\n': esc = "\\n";  el = 2; break;
+		case '\r': esc = "\\r";  el = 2; break;
+		case '\t': esc = "\\t";  el = 2; break;
+		default:
+			if (c < 0x20) {
+				/* Control char with no short escape: \uXXXX. */
+				if (o + 6 >= buflen)
+					goto done;
+				buf[o++] = '\\';
+				buf[o++] = 'u';
+				buf[o++] = '0';
+				buf[o++] = '0';
+				buf[o++] = hex[(c >> 4) & 0xf];
+				buf[o++] = hex[c & 0xf];
+				continue;
+			}
+			seq[0] = (char)c;
+			esc = seq;
+			el = 1;
+			break;
+		}
+		if (o + el >= buflen)
+			goto done;
+		for (size_t k = 0; k < el; k++)
+			buf[o++] = esc[k];
+	}
+done:
+	buf[o] = '\0';
+	return (buf);
+}
 int	safe_write(int fd, const void *buf, size_t n);
 char   *read_file(const char *path, size_t *len);
 int	write_file(const char *path, const void *data, size_t len);

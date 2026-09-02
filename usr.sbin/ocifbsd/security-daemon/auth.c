@@ -975,16 +975,29 @@ audit_log(const char *user, const char *action, const char *resource,
     pthread_mutex_lock(&audit_lock);
     
     if (audit_file != NULL) {
+        /*
+         * Escape every free-form field: an attacker who can steer a username,
+         * resource, or details string could otherwise embed a quote/newline
+         * and forge audit records. Serialized by audit_lock, so the static
+         * scratch buffers are safe.
+         */
+        static char euser[sizeof(entry->user) * 6];
+        static char eaction[sizeof(entry->action) * 6];
+        static char eres[sizeof(entry->resource) * 6];
+        static char ename[sizeof(entry->resource_name) * 6];
+        static char eresult[sizeof(entry->result) * 6];
+        static char edetails[sizeof(entry->details) * 6];
+
         snprintf(line, sizeof(line),
             "{\"id\":%lu,\"ts\":%ld,\"user\":\"%s\",\"action\":\"%s\",\"resource\":\"%s\",\"name\":\"%s\",\"result\":\"%s\",\"details\":\"%s\"}\n",
             entry->id,
             (long)entry->timestamp,
-            entry->user,
-            entry->action,
-            entry->resource,
-            entry->resource_name,
-            entry->result,
-            entry->details);
+            ocifbsd_json_escape(entry->user, euser, sizeof(euser)),
+            ocifbsd_json_escape(entry->action, eaction, sizeof(eaction)),
+            ocifbsd_json_escape(entry->resource, eres, sizeof(eres)),
+            ocifbsd_json_escape(entry->resource_name, ename, sizeof(ename)),
+            ocifbsd_json_escape(entry->result, eresult, sizeof(eresult)),
+            ocifbsd_json_escape(entry->details, edetails, sizeof(edetails)));
         fputs(line, audit_file);
         fflush(audit_file);
     }
@@ -1064,15 +1077,22 @@ audit_export_json(FILE *fp, time_t start, time_t end)
     
     fprintf(fp, "{\"audit\":[\n");
     for (i = 0; i < count; i++) {
+        /* Escape free-form fields against forged/again-injected records. */
+        char euser[sizeof(entries[i]->user) * 6];
+        char eaction[sizeof(entries[i]->action) * 6];
+        char eres[sizeof(entries[i]->resource) * 6];
+        char ename[sizeof(entries[i]->resource_name) * 6];
+        char eresult[sizeof(entries[i]->result) * 6];
+
         fprintf(fp,
             "{\"id\":%lu,\"ts\":%ld,\"user\":\"%s\",\"action\":\"%s\",\"resource\":\"%s\",\"name\":\"%s\",\"result\":\"%s\"}%s\n",
             entries[i]->id,
             (long)entries[i]->timestamp,
-            entries[i]->user,
-            entries[i]->action,
-            entries[i]->resource,
-            entries[i]->resource_name,
-            entries[i]->result,
+            ocifbsd_json_escape(entries[i]->user, euser, sizeof(euser)),
+            ocifbsd_json_escape(entries[i]->action, eaction, sizeof(eaction)),
+            ocifbsd_json_escape(entries[i]->resource, eres, sizeof(eres)),
+            ocifbsd_json_escape(entries[i]->resource_name, ename, sizeof(ename)),
+            ocifbsd_json_escape(entries[i]->result, eresult, sizeof(eresult)),
             i < count - 1 ? "," : "");
     }
     fprintf(fp, "]}\n");

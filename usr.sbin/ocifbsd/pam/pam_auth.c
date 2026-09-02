@@ -1336,13 +1336,34 @@ pam_log_audit(struct audit_entry *entry)
 
     pthread_mutex_lock(&auth_lock);
 
-    fprintf(audit_fp, "{\"timestamp\":%ld,\"user\":\"%s\",\"action\":\"%s\","
-        "\"resource\":\"%s\",\"result\":\"%s\",\"client\":\"%s\"",
-        (long)entry->timestamp, entry->username, entry->action,
-        entry->resource, entry->result, entry->client_addr);
+    /*
+     * Escape all free-form fields so a crafted username/resource/details
+     * cannot forge audit records via an embedded quote or newline. Serialized
+     * by auth_lock, so the static scratch buffers are safe.
+     */
+    {
+        static char euser[sizeof(entry->username) * 6];
+        static char eaction[sizeof(entry->action) * 6];
+        static char eres[sizeof(entry->resource) * 6];
+        static char eresult[sizeof(entry->result) * 6];
+        static char eclient[sizeof(entry->client_addr) * 6];
+        static char edetails[8192];
 
-    if (entry->details)
-        fprintf(audit_fp, ",\"details\":\"%s\"", entry->details);
+        fprintf(audit_fp,
+            "{\"timestamp\":%ld,\"user\":\"%s\",\"action\":\"%s\","
+            "\"resource\":\"%s\",\"result\":\"%s\",\"client\":\"%s\"",
+            (long)entry->timestamp,
+            ocifbsd_json_escape(entry->username, euser, sizeof(euser)),
+            ocifbsd_json_escape(entry->action, eaction, sizeof(eaction)),
+            ocifbsd_json_escape(entry->resource, eres, sizeof(eres)),
+            ocifbsd_json_escape(entry->result, eresult, sizeof(eresult)),
+            ocifbsd_json_escape(entry->client_addr, eclient, sizeof(eclient)));
+
+        if (entry->details)
+            fprintf(audit_fp, ",\"details\":\"%s\"",
+                ocifbsd_json_escape(entry->details, edetails,
+                sizeof(edetails)));
+    }
 
     fprintf(audit_fp, "}\n");
     fflush(audit_fp);

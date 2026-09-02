@@ -1926,11 +1926,25 @@ container_inspect(struct ocifbsd_container *c, char **json_out)
 {
 	char *json;
 	int len;
+	/*
+	 * bundle_path/rootfs/config_path are filesystem paths, which on FreeBSD
+	 * may contain '"' and other bytes that would break the JSON string.
+	 * Escape them once, up front, so the size pass and the fill pass below
+	 * see identical strings (id/name are validated to a safe charset).
+	 */
+	char ebundle[PATH_MAX * 6], erootfs[PATH_MAX * 6], econfig[PATH_MAX * 6];
 
 	if (c == NULL || json_out == NULL) {
 		errno = EINVAL;
 		return (-1);
 	}
+
+	ocifbsd_json_escape(c->bundle_path ? c->bundle_path : "", ebundle,
+	    sizeof(ebundle));
+	ocifbsd_json_escape(c->rootfs ? c->rootfs : "", erootfs,
+	    sizeof(erootfs));
+	ocifbsd_json_escape(c->config_path ? c->config_path : "", econfig,
+	    sizeof(econfig));
 
 	/* asprintf() is hidden by -D_XOPEN_SOURCE=700. Use a two-pass
 	 * snprintf(NULL, 0) to size, malloc, then snprintf again to fill.
@@ -1955,9 +1969,9 @@ container_inspect(struct ocifbsd_container *c, char **json_out)
 	    (long)c->started_at,
 	    (long)c->finished_at,
 	    c->exit_code,
-	    c->bundle_path ? c->bundle_path : "",
-	    c->rootfs ? c->rootfs : "",
-	    c->config_path ? c->config_path : "");
+	    ebundle,
+	    erootfs,
+	    econfig);
 	if (len < 0)
 		return (-1);
 	json = malloc(len + 1);
@@ -1985,9 +1999,9 @@ container_inspect(struct ocifbsd_container *c, char **json_out)
 	    (long)c->started_at,
 	    (long)c->finished_at,
 	    c->exit_code,
-	    c->bundle_path ? c->bundle_path : "",
-	    c->rootfs ? c->rootfs : "",
-	    c->config_path ? c->config_path : "");
+	    ebundle,
+	    erootfs,
+	    econfig);
 
 	if (len < 0) {
 		errno = ENOMEM;
