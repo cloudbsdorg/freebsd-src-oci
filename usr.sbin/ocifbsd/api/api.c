@@ -685,30 +685,22 @@ api_auth_middleware(struct api_request *req, struct api_response *resp)
         *end = '\0';
     
     /*
-     * Token validation is not yet wired up. The validation logic
-     * exists in security-daemon/auth.c (auth_token_validate), but
-     * it is not exposed as a shared library that the API server
-     * can link against. To enable real token validation:
+     * Token validation is not wired up here: the validator lives in
+     * security-daemon/auth.c (auth_token_validate) and is not exposed as a
+     * library this module can link against. Rather than the old behavior —
+     * accepting ANY token, a fail-OPEN security hole — fail CLOSED: a caller
+     * that presents credentials we cannot verify must be denied, never
+     * treated as authenticated. Requests with no Authorization header remain
+     * anonymous (handled above) so unauthenticated/public endpoints still
+     * work, but a presented-but-unverifiable token is a 401.
      *
-     *   1. Extract security-daemon/auth.c into a shared library
-     *      (e.g., usr.sbin/ocifbsd/auth/ with NOINST库=yes or
-     *      SHLIB_NAME=ocifbsd_auth)
-     *   2. Add the library to api/Makefile: DPADD+= ${LIBAUTH}
-     *   3. Include <ocifbsd/auth.h> here
-     *   4. Call: struct user_identity *user = calloc(1, sizeof(*user));
-     *            if (auth_token_validate(token, user) != 0) {
-     *                resp->status = 401;
-     *                return (-1);
-     *            }
-     *            req->user = user;
-     *            return (0);
-     *
-     * Until that refactor, the middleware accepts any token.
-     * This is a SECURITY ISSUE for production deployment.
-     * See MIGRATION.md for the full plan.
+     * To enable real token validation, extract security-daemon/auth.c into a
+     * linkable library and call auth_token_validate(token, user) here,
+     * setting req->user on success.
      */
     (void)token;
-    return (0);
+    resp->status = 401;
+    return (-1);
 }
 
 /*
