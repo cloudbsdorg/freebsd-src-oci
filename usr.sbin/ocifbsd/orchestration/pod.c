@@ -169,12 +169,23 @@ save_pod_state(struct pod *pod)
 		}
 	}
 
-	fp = fopen(path, "w");
-	free(path);
-	
-	if (fp == NULL)
+	/*
+	 * Write to a temp file and rename(2) into place so a concurrent reader
+	 * (the design reads state cross-process) never sees a half-written or
+	 * truncated JSON file. fopen("w") truncated in place.
+	 */
+	char *tmppath;
+	if (asprintf(&tmppath, "%s.tmp", path) == -1) {
+		free(path);
 		return (-1);
-	
+	}
+	fp = fopen(tmppath, "w");
+	if (fp == NULL) {
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
+
 	fprintf(fp, "{\n");
 	fprintf(fp, "  \"uid\": \"%s\",\n", pod->uid);
 	fprintf(fp, "  \"name\": \"%s\",\n", pod->name);
@@ -203,6 +214,14 @@ save_pod_state(struct pod *pod)
 	fprintf(fp, "}\n");
 
 	fclose(fp);
+	if (rename(tmppath, path) != 0) {
+		unlink(tmppath);
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
+	free(tmppath);
+	free(path);
 	return (0);
 }
 

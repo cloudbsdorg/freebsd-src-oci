@@ -146,11 +146,19 @@ save_stack_state(struct stack *stack)
 		}
 	}
 
-	fp = fopen(path, "w");
-	free(path);
-	
-	if (fp == NULL)
+	/* Atomic replace via temp file + rename(2) so a cross-process
+	 * reader never sees a truncated/half-written state file. */
+	char *tmppath;
+	if (asprintf(&tmppath, "%s.tmp", path) == -1) {
+		free(path);
 		return (-1);
+	}
+	fp = fopen(tmppath, "w");
+	if (fp == NULL) {
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
 	
 	fprintf(fp, "{\n");
 	fprintf(fp, "  \"name\": \"%s\",\n", stack->name);
@@ -164,6 +172,14 @@ save_stack_state(struct stack *stack)
 	fprintf(fp, "}\n");
 
 	fclose(fp);
+	if (rename(tmppath, path) != 0) {
+		unlink(tmppath);
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
+	free(tmppath);
+	free(path);
 	return (0);
 }
 
@@ -649,10 +665,18 @@ save_service_state(struct service *service)
 		}
 		*slash = '/';
 	}
-	fp = fopen(path, "w");
-	free(path);
-	if (fp == NULL)
+	/* Atomic replace via temp file + rename(2) (see save_stack_state). */
+	char *tmppath;
+	if (asprintf(&tmppath, "%s.tmp", path) == -1) {
+		free(path);
 		return (-1);
+	}
+	fp = fopen(tmppath, "w");
+	if (fp == NULL) {
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
 
 	fprintf(fp, "{\n");
 	fprintf(fp, "  \"name\": \"%s\",\n", service->name);
@@ -681,6 +705,14 @@ save_service_state(struct service *service)
 	fprintf(fp, "}\n");
 
 	fclose(fp);
+	if (rename(tmppath, path) != 0) {
+		unlink(tmppath);
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
+	free(tmppath);
+	free(path);
 	return (0);
 }
 
