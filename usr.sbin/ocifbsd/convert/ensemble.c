@@ -259,7 +259,25 @@ ensemble_convert_service(const char *yaml, char **output,
 	char *target_port_str = yaml_get_field(yaml, "targetPort");
 	char *type = yaml_get_field(yaml, "type");
 	
+	const char *svc_name = name ? name : "unknown";
+	char selbuf[160] = "";
+	char portbuf[200] = "";
 	char *result;
+
+	/*
+	 * Emit only what the Service declares — no invented selector, port
+	 * name, or port number. A Service maps a published port to a target
+	 * (container) port; emit the target port when present.
+	 */
+	if (selector != NULL)
+		snprintf(selbuf, sizeof(selbuf), "    selector: %s\n", selector);
+	if (target_port_str != NULL || port_name != NULL)
+		snprintf(portbuf, sizeof(portbuf),
+		    "    ports:\n"
+		    "      - container: %s\n"
+		    "        protocol: tcp\n",
+		    target_port_str ? target_port_str : port_name);
+
 	asprintf(&result,
 	    "# Converted from Ensemble Service\n"
 	    "# Original: %s/%s\n"
@@ -268,20 +286,15 @@ ensemble_convert_service(const char *yaml, char **output,
 	    "name: %s\n"
 	    "namespace: %s\n"
 	    "services:\n"
-	    "  - name: %s-svc\n"
-	    "    selector: %s\n"
-	    "    ports:\n"
-	    "      - name: %s\n"
-	    "        container: %s\n"
-	    "        protocol: tcp\n",
+	    "  - name: %s\n"
+	    "%s%s",
 	    namespace ? namespace : "default",
-	    name ? name : "unknown",
-	    name ? name : "unknown",
+	    svc_name,
+	    svc_name,
 	    namespace ? namespace : opts->namespace,
-	    name ? name : "unknown",
-	    selector ? selector : name ? name : "app",
-	    port_name ? port_name : "http",
-	    target_port_str ? target_port_str : "80");
+	    svc_name,
+	    selbuf,
+	    portbuf);
 	
 	free(name);
 	free(namespace);
@@ -487,7 +500,8 @@ ensemble_convert_multi(const char *yaml, char **output,
 	size_t result_cap = 0;
 	size_t result_len = 0;
 	const char *p;
-	
+	int docs = 0;
+
 	/* Add header */
 	asprintf(&result,
 	    "# Native OCI FreeBSD Configuration\n"
@@ -567,8 +581,18 @@ ensemble_convert_multi(const char *yaml, char **output,
 		}
 		
 		if (ret == CONVERT_SUCCESS && converted != NULL) {
+			/*
+			 * Separate each converted object with a YAML document
+			 * marker. Each per-kind converter emits a self-contained
+			 * config (its own name:/services:), so without "---" the
+			 * concatenation would repeat top-level keys and a parser
+			 * would keep only the last object. As documents, all are
+			 * preserved.
+			 */
+			const char *sep = (docs > 0) ? "---\n" : "";
+			size_t seplen = strlen(sep);
 			size_t clen = strlen(converted);
-			size_t needed = result_len + clen + 64;
+			size_t needed = result_len + seplen + clen + 64;
 			if (needed > result_cap) {
 				size_t new_cap = needed * 2;
 				char *new_result = realloc(result, new_cap);
@@ -581,9 +605,14 @@ ensemble_convert_multi(const char *yaml, char **output,
 				result = new_result;
 				result_cap = new_cap;
 			}
+			if (seplen > 0) {
+				memcpy(result + result_len, sep, seplen);
+				result_len += seplen;
+			}
 			memcpy(result + result_len, converted, clen);
 			result_len += clen;
 			result[result_len] = '\0';
+			docs++;
 		}
 		
 		free(converted);
