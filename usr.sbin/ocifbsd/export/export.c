@@ -359,18 +359,66 @@ import_from_feb(const char *feb_path, const char *target_name)
         return (-1);
     }
 
-    /* Read metadata */
-    metadata = malloc(header.metadata_size + 1);
-    if (metadata) {
-        fread(metadata, header.metadata_size, 1, fp);
-        metadata[header.metadata_size] = '\0';
+    /*
+     * The metadata/image sizes come from the untrusted .feb header. Validate
+     * them against the actual remaining file length before allocating: a
+     * size of 0xFFFFFFFF made malloc(size + 1) wrap to malloc(0) and the
+     * subsequent fread overflow the heap; a large image_size was a ~4 GB
+     * allocation DoS. Cap metadata, and require every fread to deliver the
+     * requested bytes.
+     */
+    {
+        long here = ftell(fp);
+        long end;
+        unsigned long remaining;
+        const unsigned long META_MAX = 64UL * 1024 * 1024;   /* 64 MiB */
+
+        if (here < 0 || fseek(fp, 0, SEEK_END) != 0) {
+            fclose(fp);
+            return (-1);
+        }
+        end = ftell(fp);
+        if (end < here || fseek(fp, here, SEEK_SET) != 0) {
+            fclose(fp);
+            return (-1);
+        }
+        remaining = (unsigned long)(end - here);
+
+        if ((unsigned long)header.metadata_size > META_MAX ||
+            (unsigned long)header.metadata_size > remaining) {
+            fclose(fp);
+            return (-1);
+        }
+        remaining -= (unsigned long)header.metadata_size;
+        if ((unsigned long)header.image_size > remaining) {
+            fclose(fp);
+            return (-1);
+        }
     }
+
+    /* Read metadata */
+    metadata = malloc((size_t)header.metadata_size + 1);
+    if (metadata == NULL) {
+        fclose(fp);
+        return (-1);
+    }
+    if (header.metadata_size > 0 &&
+        fread(metadata, header.metadata_size, 1, fp) != 1) {
+        free(metadata);
+        fclose(fp);
+        return (-1);
+    }
+    metadata[header.metadata_size] = '\0';
 
     /* Read image data */
     if (header.image_size > 0) {
         image_data = malloc(header.image_size);
-        if (image_data) {
-            fread(image_data, header.image_size, 1, fp);
+        if (image_data == NULL ||
+            fread(image_data, header.image_size, 1, fp) != 1) {
+            free(image_data);
+            free(metadata);
+            fclose(fp);
+            return (-1);
         }
     }
 

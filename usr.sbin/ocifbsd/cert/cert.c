@@ -376,11 +376,18 @@ cert_create_ca(const char *name, int validity_days)
     snprintf(key_path, sizeof(key_path), "%s/%s.key", cert_dir, name);
     snprintf(cert_path, sizeof(cert_path), "%s/%s.crt", cert_dir, name);
 
-    fp = fopen(key_path, "w");
+    /* Create the private-key file 0600 from the start. fopen("w") creates it
+     * 0644 (& ~umask) and the trailing chmod leaves a TOCTOU window in which
+     * the EC private key is world/group-readable. */
+    {
+        int kfd = open(key_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        fp = (kfd >= 0) ? fdopen(kfd, "w") : NULL;
+        if (fp == NULL && kfd >= 0)
+            close(kfd);
+    }
     if (fp) {
         PEM_write_PrivateKey(fp, pkey, NULL, NULL, 0, NULL, NULL);
         fclose(fp);
-        chmod(key_path, 0600);
     }
 
     fp = fopen(cert_path, "w");
@@ -812,12 +819,18 @@ cert_save(const char *name, const char *key_pem, const char *cert_pem)
     snprintf(key_path, sizeof(key_path), "%s/%s.key", cert_dir, name);
     snprintf(cert_path, sizeof(cert_path), "%s/%s.crt", cert_dir, name);
 
-    fp = fopen(key_path, "w");
+    /* Create the key file 0600 from the start (avoid the fopen-then-chmod
+     * TOCTOU window that exposes the private key). */
+    {
+        int kfd = open(key_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        fp = (kfd >= 0) ? fdopen(kfd, "w") : NULL;
+        if (fp == NULL && kfd >= 0)
+            close(kfd);
+    }
     if (fp == NULL)
         return (-1);
     fputs(key_pem, fp);
     fclose(fp);
-    chmod(key_path, 0600);
 
     fp = fopen(cert_path, "w");
     if (fp == NULL)
