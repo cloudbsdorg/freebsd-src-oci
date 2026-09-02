@@ -1762,12 +1762,26 @@ registry_pull(struct registry *reg, const char *reference,
 			    "warning: cannot create rootfs %s: %s\n",
 			    rootfs, strerror(errno));
 		} else {
+			/*
+			 * Apply whiteouts while unpacking. Passing NULL used
+			 * default_opts (strip_whiteouts=false), so a file the
+			 * image author deleted in an upper layer via a ".wh."
+			 * marker SURVIVED into the merged rootfs — e.g. a secret
+			 * or setuid binary removed upstream reappeared in the
+			 * container. load.c already does this; pull.c did not.
+			 */
+			struct unpack_options opts;
+
+			memset(&opts, 0, sizeof(opts));
+			opts.keep_permissions = true;
+			opts.expand_whiteouts = true;
+			opts.strip_whiteouts = true;
 			for (i = 0; i < manifest->nlayers; i++) {
 				snprintf(layer_path, sizeof(layer_path),
 				    "%s/layers/%s.layer", destdir,
 				    manifest->layers[i]->digest);
 				if (unpack_layer(layer_path, rootfs,
-				    NULL) != 0) {
+				    &opts) != 0) {
 					fprintf(stderr,
 					    "warning: unpack layer %d failed\n",
 					    i);

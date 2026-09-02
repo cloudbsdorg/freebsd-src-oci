@@ -205,6 +205,13 @@ split_parent(const char *relpath, char *pbuf, size_t pbufsz)
 #define WHITEOUT_PREFIX		".wh."
 #define WHITEOUT_PREFIX_LEN	4
 
+/*
+ * Upper bound on the decompressed size of a single extracted file, to bound a
+ * decompression bomb from an untrusted layer. 8 GiB is far above any real
+ * base-image file yet stops a tiny blob from inflating to fill the disk.
+ */
+#define OCIFBSD_MAX_UNPACK_FILE_BYTES	((uintmax_t)8 * 1024 * 1024 * 1024)
+
 /* is_whiteout / get_whiteout_target live in whiteout.c */
 
 /*
@@ -521,13 +528,29 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
 			return (-1);
 		}
 		{
+		/*
+		 * Cap the decompressed size of a single file. A few-KB gzip
+		 * layer can otherwise expand to exhaust the host disk as root
+		 * (a decompression bomb); the compressed blob digest bounds the
+		 * download, not the inflated stream.
+		 */
 		char buf[8192];
 		ssize_t n;
+		uintmax_t written = 0;
 		while ((n = archive_read_data(ar, buf, sizeof(buf))) > 0) {
+			written += (uintmax_t)n;
+			if (written > OCIFBSD_MAX_UNPACK_FILE_BYTES) {
+				fprintf(stderr, "error: extracted file exceeds "
+				    "%ju-byte limit (decompression bomb?)\n",
+				    (uintmax_t)OCIFBSD_MAX_UNPACK_FILE_BYTES);
+				ret = -1;
+				break;
+			}
 			if (write(fd, buf, n) != n) {
 				fprintf(stderr, "error: write failed: %s\n",
 				    strerror(errno));
 				ret = -1;
+				break;
 			}
 		}
 		}
