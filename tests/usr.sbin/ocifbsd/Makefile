@@ -35,7 +35,7 @@ ATF_TESTS_C=	parser_test ensemble_test utils_test oci2jail_test hooks_test \
 		cluster_pki_test control_plane_test \
 		cluster_mtls_test node_agent_test \
 		controller_test pipeline_test rctl_test mac_test \
-		network_test alerting_test
+		network_test alerting_test namespace_test
 ATF_TESTS_SH=	cli_test lifecycle_test
 
 # convert/ sources compile at WARNS=3; match for #include tests

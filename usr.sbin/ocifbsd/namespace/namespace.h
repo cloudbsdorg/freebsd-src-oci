@@ -88,7 +88,7 @@ struct namespace {
     struct ns_resource_limits limits;
     
     /* Security */
-    char mac_label[256];        /* MAC label (e.g., "prod/*") */
+    char mac_label[256];        /* MAC label, e.g. prod/high */
     int security_level;         /* securelevel */
     
     /* Network policy */

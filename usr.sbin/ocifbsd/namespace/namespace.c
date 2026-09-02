@@ -35,8 +35,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
-#include <sys/json.h>
 #include <sys/socket.h>
+#include <dirent.h>
 #include <sys/sysctl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -54,6 +54,32 @@
 
 #include "namespace.h"
 #include "../include/ocifbsd.h"
+#include "../security/rctl.h"	/* struct rctl_limits */
+
+/*
+ * Base directory for namespace state. The code referenced OCIFBSD_VAR_DIR,
+ * which was never defined (so the module did not compile); alias it to the
+ * data dir.
+ */
+#ifndef OCIFBSD_VAR_DIR
+#define OCIFBSD_VAR_DIR OCIFBSD_DATA_DIR
+#endif
+
+/* Forward declarations — these helpers are defined lower in the file but used
+ * before their definitions (implicit-declaration errors otherwise). */
+int ns_compare(struct namespace *a, struct namespace *b);
+static int create_namespace_jail(struct namespace *ns);
+static int delete_namespace_jail(struct namespace *ns);
+static int apply_namespace_rctl(struct namespace *ns);
+static int get_pod_rctl(const char *pod_name, struct rctl_limits *rlim);
+
+/*
+ * Define the red-black tree functions. namespace.h declares them with
+ * RB_PROTOTYPE but no translation unit generated them, so ns_tree_RB_FIND
+ * etc. were undefined — the module could never link into a binary. Generate
+ * them here.
+ */
+RB_GENERATE(ns_tree, namespace, entry, ns_compare)
 
 /* Global namespace registry */
 static struct ns_tree namespace_registry;
@@ -245,8 +271,6 @@ struct namespace *
 ns_create(const char *name)
 {
     struct namespace *ns, *existing;
-    SHA256_CTX ctx;
-    uint8_t hash[SHA256_DIGEST_LENGTH];
 
     init_namespace_registry();
 
@@ -489,32 +513,34 @@ ns_set_limits(struct namespace *ns, struct ns_resource_limits *limits)
 int
 ns_get_usage(struct namespace *ns, struct ns_resource_limits *usage)
 {
-    struct rctl_limits *rlim;
-    struct vmspace *vm;
-    struct proc *p;
     uint64_t total_memory = 0;
     uint64_t total_cpu = 0;
     uint64_t total_procs = 0;
     uint64_t total_files = 0;
-    
+
     if (ns == NULL || usage == NULL)
         return (-1);
-    
+
     memset(usage, 0, sizeof(struct ns_resource_limits));
-    
-    /* Aggregate usage from all pods in namespace */
+
+    /*
+     * Aggregate per-pod resource figures. get_pod_rctl() is currently a stub
+     * that zeroes the rctl_limits, so these totals are 0 until real RACCT
+     * usage collection is wired; sum the fields that struct rctl_limits
+     * actually defines (the code previously read non-existent *_usage members
+     * and so never compiled).
+     */
     char **pods;
     int pod_count;
-    
+
     if (ns_list_pods(ns, &pods, &pod_count) == 0) {
         for (int i = 0; i < pod_count; i++) {
-            /* Get pod resource usage */
             struct rctl_limits pod_rctl;
             if (get_pod_rctl(pods[i], &pod_rctl) == 0) {
-                total_memory += pod_rctl.memory_usage;
-                total_cpu += pod_rctl.cpu_usage;
-                total_procs += pod_rctl.process_count;
-                total_files += pod_rctl.file_count;
+                total_memory += pod_rctl.memory_limit;
+                total_cpu += pod_rctl.cpu_quota;
+                total_procs += pod_rctl.proc_limit;
+                total_files += pod_rctl.file_limit;
             }
             free(pods[i]);
         }
@@ -684,7 +710,6 @@ ns_configure_network(struct namespace *ns, struct ns_network_policy *policy)
 int
 ns_apply_firewall_rules(struct namespace *ns)
 {
-    FILE *pfctl;
     char anchor_name[256];
     char rules_file[PATH_MAX];
     FILE *fp;
@@ -1065,15 +1090,20 @@ get_pod_rctl(const char *pod_name, struct rctl_limits *rlim)
         return (-1);
     }
 
+    /*
+     * Parse rctl(8) usage output into the rctl_limits fields (the struct has
+     * no separate *_usage members; these fields carry the observed values,
+     * summed the same way by ns_get_usage).
+     */
     while (fgets(buf, sizeof(buf), fp) != NULL) {
         if (strstr(buf, "vmemoryuse")) {
-            sscanf(buf, "%*s %*s %lu", &rlim->memory_usage);
+            sscanf(buf, "%*s %*s %lu", &rlim->memory_limit);
         } else if (strstr(buf, "pcpu")) {
-            sscanf(buf, "%*s %*s %lu", &rlim->cpu_usage);
+            sscanf(buf, "%*s %*s %lu", &rlim->cpu_quota);
         } else if (strstr(buf, "nproc")) {
-            sscanf(buf, "%*s %*s %lu", &rlim->process_count);
+            sscanf(buf, "%*s %*s %lu", &rlim->proc_limit);
         } else if (strstr(buf, "openfiles")) {
-            sscanf(buf, "%*s %*s %lu", &rlim->file_count);
+            sscanf(buf, "%*s %*s %lu", &rlim->file_limit);
         }
     }
 
