@@ -105,6 +105,8 @@ struct log_ringbuf {
     uint64_t         tail;           /* Oldest entry position */
     uint64_t         count;          /* Current entry count */
     uint64_t         total_written;  /* Total entries written (monotonic) */
+    bool             entries_mmapped;/* true: entries via mmap; false: calloc */
+    size_t           entries_bytes;  /* byte size of the entries mapping */
     pthread_mutex_t  lock;
 };
 

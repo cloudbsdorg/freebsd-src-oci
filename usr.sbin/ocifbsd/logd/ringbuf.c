@@ -60,24 +60,34 @@ ringbuf_create(uint64_t size)
     rb->count = 0;
     rb->total_written = 0;
 
-    /* Allocate entries array */
+    /* Allocate entries array. Record whether it came from mmap or the calloc
+     * fallback so it is released with the matching call — the error path and
+     * ringbuf_destroy previously always munmap'd, which is UB on a calloc'd
+     * buffer. */
     alloc_size = size * sizeof(struct log_entry);
+    rb->entries_bytes = alloc_size;
     rb->entries = mmap(NULL, alloc_size,
-        PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0);
+        PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 
     if (rb->entries == MAP_FAILED) {
-        /* Fall back to malloc */
+        /* Fall back to calloc */
         rb->entries = calloc(size, sizeof(struct log_entry));
         if (rb->entries == NULL) {
             free(rb);
             return (NULL);
         }
+        rb->entries_mmapped = false;
+    } else {
+        rb->entries_mmapped = true;
     }
 
     /* Allocate ID array for tracking */
     rb->ids = calloc(size, sizeof(uint64_t));
     if (rb->ids == NULL) {
-        munmap(rb->entries, alloc_size);
+        if (rb->entries_mmapped)
+            munmap(rb->entries, alloc_size);
+        else
+            free(rb->entries);
         free(rb);
         return (NULL);
     }
@@ -98,8 +108,10 @@ ringbuf_destroy(struct log_ringbuf *rb)
 
     pthread_mutex_destroy(&rb->lock);
 
-    size_t alloc_size = rb->size * sizeof(struct log_entry);
-    munmap(rb->entries, alloc_size);
+    if (rb->entries_mmapped)
+        munmap(rb->entries, rb->entries_bytes);
+    else
+        free(rb->entries);
     free(rb->ids);
     free(rb);
 }
