@@ -972,7 +972,8 @@ alert_process_entry(struct log_entry *entry)
     pthread_mutex_lock(&logd_state_lock);
 
     RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
-        if (!rule->enabled || rule->silenced)
+        /* enabled + silence-expiry policy (auto-unsilences a timed silence) */
+        if (!alert_rule_active(rule, time(NULL)))
             continue;
 
         /* Check severity */
@@ -1074,7 +1075,11 @@ alert_silence(const char *name, time_t until)
     rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
     if (rule) {
         rule->silenced = true;
-        /* Store silence duration for later */
+        /*
+         * Record when the silence expires so alert_worker can auto-unsilence.
+         * A non-positive `until` means silence until manually cleared.
+         */
+        rule->silenced_until = (until > 0) ? until : 0;
     }
 
     pthread_mutex_unlock(&logd_state_lock);

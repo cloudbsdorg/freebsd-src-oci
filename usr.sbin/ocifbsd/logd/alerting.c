@@ -51,4 +51,27 @@
 
 #include "logd.h"
 
-/* Alerting implementations are stubs - main logic in logd.c */
+/*
+ * Whether an alert rule should be evaluated against incoming log entries
+ * right now: it must be enabled, and either not silenced or past the end of a
+ * timed silence (which this clears in place). Factored out of logd.c's
+ * alert_worker so the silence-expiry policy is pure and unit-testable
+ * (logd.c itself carries main() and cannot be #include'd by a test).
+ */
+bool
+alert_rule_active(struct alert_rule *rule, time_t now)
+{
+	if (rule == NULL || !rule->enabled)
+		return (false);
+	if (rule->silenced) {
+		/* A timed silence (silenced_until != 0) expires; a manual
+		 * silence (0) stays until explicitly cleared. */
+		if (rule->silenced_until != 0 && now >= rule->silenced_until) {
+			rule->silenced = false;
+			rule->silenced_until = 0;
+		} else {
+			return (false);
+		}
+	}
+	return (true);
+}

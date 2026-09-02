@@ -138,6 +138,7 @@ struct alert_rule {
     int             current_count;
     bool            enabled;
     bool            silenced;        /* Temporarily disabled */
+    time_t          silenced_until;  /* auto-unsilence at this time (0 = manual) */
 
     /* Actions */
     bool            notify_webhook;
@@ -278,6 +279,7 @@ int     forwarder_send(struct log_entry *entry);
 int     forwarder_flush(void);
 
 /* Alerting */
+bool    alert_rule_active(struct alert_rule *rule, time_t now);
 int     alert_rule_add(struct alert_rule *rule);
 int     alert_rule_remove(const char *name);
 int     alert_rule_update(struct alert_rule *rule);
