@@ -216,6 +216,8 @@ int cluster_node_remove(const char *node_id);
 struct cluster_node *cluster_node_get(const char *node_id);
 void cluster_node_put(struct cluster_node *node);
 struct cluster_node **cluster_nodes_list(int *count);
+/* Release an array returned by cluster_nodes_list (drops each node's ref). */
+void cluster_nodes_free(struct cluster_node **nodes, int count);
 struct cluster_node **cluster_nodes_by_role(int role, int *count);
 
 /* Gossip protocol */

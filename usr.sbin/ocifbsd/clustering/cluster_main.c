@@ -112,7 +112,7 @@ print_status(const char *node)
 	int n = 0;
 	struct cluster_node **nl = cluster_nodes_list(&n);
 
-	free(nl);
+	cluster_nodes_free(nl, n);
 	raft_get_leader(leader, sizeof(leader));
 	printf("node=%s role=%s term=%llu leader=%s members=%d "
 	    "log=%d commit=%llu snapshot=%llu\n",

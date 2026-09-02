@@ -87,7 +87,7 @@ main(int argc, char **argv)
 
 		int nc = 0;
 		struct cluster_node **nl = cluster_nodes_list(&nc);
-		free(nl);
+		cluster_nodes_free(nl, nc);
 
 		raft_get_leader(leader, sizeof(leader));
 		printf("[%s] role=%-9s term=%llu leader=%-12s "

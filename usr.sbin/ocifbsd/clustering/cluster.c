@@ -630,18 +630,47 @@ cluster_nodes_list(int *count)
             alloc *= 2;
             void *_new = realloc(result, alloc * sizeof(struct cluster_node *));
             if (_new == NULL) {
+                /* Release the refs taken so far (unlock first: put locks). */
+                int i;
                 pthread_mutex_unlock(&node_registry_lock);
+                for (i = 0; i < n; i++)
+                    cluster_node_put(result[i]);
+                free(result);
                 *count = 0;
                 return (NULL);
             }
             result = _new;
         }
+        /*
+         * Take a counted reference on every node we hand out. Without this a
+         * concurrent cluster_node_remove could free a node (refcount 0) while
+         * a caller still dereferences the returned pointer after the registry
+         * lock is dropped — a cross-thread use-after-free. Callers must
+         * release the array with cluster_nodes_free().
+         */
+        node->refcount++;
         result[n++] = node;
     }
     pthread_mutex_unlock(&node_registry_lock);
-    
+
     *count = n;
     return (result);
+}
+
+/*
+ * Release an array returned by cluster_nodes_list: drop each node's reference
+ * (freeing any that were removed while referenced) and free the array.
+ */
+void
+cluster_nodes_free(struct cluster_node **nodes, int count)
+{
+    int i;
+
+    if (nodes == NULL)
+        return;
+    for (i = 0; i < count; i++)
+        cluster_node_put(nodes[i]);
+    cluster_nodes_free(nodes, count);
 }
 
 /*
@@ -662,7 +691,7 @@ cluster_nodes_by_role(int role, int *count)
     
     result = calloc(alloc, sizeof(struct cluster_node *));
     if (result == NULL) {
-        free(all);
+        cluster_nodes_free(all, all_count);
         *count = 0;
         return (NULL);
     }
@@ -673,7 +702,7 @@ cluster_nodes_by_role(int role, int *count)
                 alloc *= 2;
                 void *_new = realloc(result, alloc * sizeof(struct cluster_node *));
                 if (_new == NULL) {
-                    free(all);
+                    cluster_nodes_free(all, all_count);
                     *count = 0;
                     return (NULL);
                 }
@@ -683,7 +712,7 @@ cluster_nodes_by_role(int role, int *count)
         }
     }
     
-    free(all);
+    cluster_nodes_free(all, all_count);
     *count = n;
     return (result);
 }
@@ -1074,7 +1103,7 @@ gossip_broadcast(uint8_t type, const void *payload, size_t len)
             gossip_send_message(nodes[i]->node_id, type, payload, len);
     }
     
-    free(nodes);
+    cluster_nodes_free(nodes, count);
     return (0);
 }
 
@@ -1373,7 +1402,7 @@ raft_cluster_size(void)
     int count = 0;
     struct cluster_node **nodes = cluster_nodes_list(&count);
 
-    free(nodes);
+    cluster_nodes_free(nodes, count);
     return (count + 1);
 }
 
@@ -1551,7 +1580,7 @@ raft_on_vote_resp(const char *from, const struct raft_vote_resp *r)
                 peers[i]->raft_match_index = 0;
             }
             pthread_mutex_unlock(&cluster_lock);
-            free(peers);
+            cluster_nodes_free(peers, count);
         }
         cluster_emit_event(6, local_node->node_id, "became leader");
     }
@@ -1783,7 +1812,7 @@ raft_replicate_to_peers(void)
         len = sizeof(*req) + (size_t)nsent * sizeof(struct raft_wire_entry);
         gossip_send_message(target, GOSSIP_MSG_APPEND_REQ, buf, len);
     }
-    free(peers);
+    cluster_nodes_free(peers, count);
 }
 
 /*
@@ -1846,7 +1875,7 @@ raft_advance_commit(void)
         }
     }
     pthread_mutex_unlock(&cluster_lock);
-    free(peers);
+    cluster_nodes_free(peers, count);
 
     raft_maybe_compact();       /* leader compacts once entries commit */
 }
@@ -2370,7 +2399,7 @@ cluster_nodes_json(char **json_out, size_t *json_len)
     json_size = 4096 + (size_t)count * 1024;
     json = malloc(json_size);
     if (json == NULL) {
-        free(nodes);
+        cluster_nodes_free(nodes, count);
         return (-1);
     }
 
@@ -2379,7 +2408,7 @@ cluster_nodes_json(char **json_out, size_t *json_len)
     int n;
 
     n = snprintf(p, remaining, "{\n  \"nodes\": [\n");
-    if (n < 0 || (size_t)n >= remaining) { free(json); free(nodes); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); cluster_nodes_free(nodes, count); return (-1); }
     p += n; remaining -= (size_t)n;
 
     for (i = 0; i < count; i++) {
@@ -2393,14 +2422,14 @@ cluster_nodes_json(char **json_out, size_t *json_len)
             (long)nodes[i]->last_seen,
             i < count - 1 ? "," : "");
         pthread_mutex_unlock(&nodes[i]->lock);
-        if (n < 0 || (size_t)n >= remaining) { free(json); free(nodes); return (-1); }
+        if (n < 0 || (size_t)n >= remaining) { free(json); cluster_nodes_free(nodes, count); return (-1); }
         p += n; remaining -= (size_t)n;
     }
 
     n = snprintf(p, remaining, "  ]\n}");
-    if (n < 0 || (size_t)n >= remaining) { free(json); free(nodes); return (-1); }
+    if (n < 0 || (size_t)n >= remaining) { free(json); cluster_nodes_free(nodes, count); return (-1); }
 
-    free(nodes);
+    cluster_nodes_free(nodes, count);
     *json_out = json;
     if (json_len != NULL)
         *json_len = strlen(json);
@@ -2436,7 +2465,7 @@ cluster_health_json(char **json_out, size_t *json_len)
             }
             pthread_mutex_unlock(&nodes[i]->lock);
         }
-        free(nodes);
+        cluster_nodes_free(nodes, count);
     }
     
     char *json;
