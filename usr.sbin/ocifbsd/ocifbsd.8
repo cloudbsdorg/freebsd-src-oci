@@ -238,6 +238,81 @@ useful for tests or an unprivileged, self-contained instance.
 Override the path to the registry alias table
 .Pq see Sx FILES .
 .El
+.Sh CONFIGURATION EXTENSIONS
+Beyond the standard OCI runtime fields, the bundle
+.Pa config.json
+recognizes a
+.Li freebsd
+object and honors a subset of
+.Li linux.resources .
+All are opt-in: an absent field leaves the corresponding behavior at its
+open default.
+.Ss FreeBSD networking (the Li freebsd No object)
+.Bl -tag -width ".Li defaultGateway4" -compact
+.It Li vnet
+Boolean.
+When true the container runs in its own network stack
+.Pq Xr vnet 9 .
+The runtime creates an
+.Xr epair 4
+pair, moves one end into the jail, and destroys it again on
+.Cm delete .
+.It Li ip4 , Li ip6
+Array of CIDR addresses assigned to the container interface inside the
+jail
+.Pq the first is configured automatically when Xr ifconfig 8 is present in the image .
+.It Li defaultGateway4 , Li defaultGateway6
+Array; the first entry becomes the container's default route.
+.It Li bridge
+Name of a host
+.Xr if_bridge 4
+to which the host side of the epair is added, giving the container external
+reachability.
+The bridge is created if it does not exist and is left in place on
+.Cm delete
+.Pq it may be shared .
+.It Li macLabel
+A
+.Xr mac 4
+label
+.Pq for example Dq Li biba/high
+applied to the container's init process via
+.Xr mac_set_proc 3 .
+It takes effect only when the matching labeling policy is loaded
+.Pq policies load at boot, e.g. Li mac_biba_load=YES ;
+otherwise
+.Cm start
+warns that the label will not be enforced.
+.El
+.Ss Resource limits (Li linux.resources )
+When present, the runtime maps these onto
+.Xr rctl 8
+rules on the jail, applied at
+.Cm start
+and removed at
+.Cm delete .
+This requires
+.Li kern.racct.enable=1 ;
+without it
+.Cm start
+warns and proceeds unbounded.
+.Bl -tag -width ".Li cpu.quota/period" -compact
+.It Li memory.limit
+Bytes; mapped to the jail
+.Li memoryuse
+limit.
+.It Li cpu.quota , Li cpu.period
+Microseconds; the quotient
+.Pq quota / period No \(mu 100
+becomes the jail
+.Li pcpu
+percentage
+.Pq a value over 100 spans multiple cores .
+.It Li pidsLimit
+Process count; mapped to the jail
+.Li nproc
+limit.
+.El
 .Sh FILES
 .Bl -tag -width ".Pa /var/run/ocifbsd" -compact
 .It Pa /var/run/ocifbsd/
@@ -280,7 +355,12 @@ ocifbsd run --name web /path/to/bundle
 .Ed
 .Sh SEE ALSO
 .Xr jail 3 ,
+.Xr mac_set_proc 3 ,
+.Xr epair 4 ,
+.Xr if_bridge 4 ,
+.Xr mac 4 ,
 .Xr ocifbsd.conf 5 ,
+.Xr ifconfig 8 ,
 .Xr jail 8 ,
 .Xr mount 8 ,
 .Xr rctl 8
