@@ -191,7 +191,25 @@ ensemble_convert_deployment(const char *yaml, char **output,
 	char *container_port_str = yaml_get_field(yaml, "containerPort");
 	
 	int replicas = replicas_str ? atoi(replicas_str) : 1;
-	
+	const char *svc_name = name ? name : (app ? app : "unknown");
+	char portbuf[160] = "";
+
+	/*
+	 * Emit only fields the manifest actually declares — do not invent a
+	 * default port or image. A ports block is written only when the
+	 * Deployment names a containerPort; a missing image is flagged rather
+	 * than replaced with a plausible-but-wrong value.
+	 */
+	if (container_port_str != NULL)
+		snprintf(portbuf, sizeof(portbuf),
+		    "    ports:\n"
+		    "      - container: %s\n"
+		    "        protocol: tcp\n",
+		    container_port_str);
+	if (image == NULL)
+		fprintf(stderr, "warning: Deployment '%s': no container image "
+		    "found; set 'image' in the native config\n", svc_name);
+
 	/* Build simplified output */
 	char *result;
 	asprintf(&result,
@@ -204,17 +222,15 @@ ensemble_convert_deployment(const char *yaml, char **output,
 	    "  - name: %s\n"
 	    "    image: %s\n"
 	    "    replicas: %d\n"
-	    "    ports:\n"
-	    "      - container: %s\n"
-	    "        protocol: tcp\n",
+	    "%s",
 	    namespace ? namespace : "default",
-	    name ? name : (app ? app : "unknown"),
-	    name ? name : (app ? app : "unknown"),
+	    svc_name,
+	    svc_name,
 	    namespace ? namespace : opts->namespace,
-	    name ? name : (app ? app : "unknown"),
-	    image ? image : "nginx:latest",
+	    svc_name,
+	    image ? image : "# TODO: set image",
 	    replicas,
-	    container_port_str ? container_port_str : "80");
+	    portbuf);
 	
 	free(name);
 	free(namespace);

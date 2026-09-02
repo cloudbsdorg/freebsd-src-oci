@@ -251,7 +251,8 @@ ATF_TC(ensemble_convert_deployment_minimal);
 ATF_TC_HEAD(ensemble_convert_deployment_minimal, tc)
 {
 	atf_tc_set_md_var(tc, "descr",
-	    "ensemble_convert_deployment with empty input fills defaults");
+	    "ensemble_convert_deployment does not fabricate an image or port "
+	    "for a manifest that declares none");
 }
 ATF_TC_BODY(ensemble_convert_deployment_minimal, tc)
 {
@@ -264,14 +265,21 @@ ATF_TC_BODY(ensemble_convert_deployment_minimal, tc)
 	ATF_REQUIRE(out != NULL);
 	ATF_CHECK(strstr(out, "name: unknown") != NULL);
 	/*
-	 * When the YAML has no `namespace:` field, the function falls
-	 * back to opts->namespace. The header comment line uses the
-	 * literal "default" instead, but the body uses opts->namespace.
+	 * When the YAML has no `namespace:` field, the body falls back to
+	 * opts->namespace. replicas defaults to 1 (a Deployment implies at
+	 * least one replica — a sensible default, not fabricated config).
 	 */
 	ATF_CHECK(strstr(out, "namespace: ns1") != NULL);
 	ATF_CHECK(strstr(out, "replicas: 1") != NULL);
-	ATF_CHECK(strstr(out, "image: nginx:latest") != NULL);
-	ATF_CHECK(strstr(out, "container: 80") != NULL);
+	/* An image is NOT invented; a placeholder flags the missing field. */
+	ATF_CHECK_MSG(strstr(out, "nginx:latest") == NULL,
+	    "converter fabricated a default image");
+	ATF_CHECK(strstr(out, "TODO: set image") != NULL);
+	/* No port is invented when the manifest declares none. */
+	ATF_CHECK_MSG(strstr(out, "container: 80") == NULL,
+	    "converter fabricated a default port");
+	ATF_CHECK_MSG(strstr(out, "ports:") == NULL,
+	    "converter emitted a ports block for a portless deployment");
 	free(out);
 }
 
