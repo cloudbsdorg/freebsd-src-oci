@@ -776,8 +776,51 @@ ATF_TC_BODY(netcfg_overlay_preserves_explicit, tc)
 	oci_free_spec(spec);
 }
 
+ATF_TC(jailparams_maclabel_not_a_param);
+ATF_TC_HEAD(jailparams_maclabel_not_a_param, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "freebsd.macLabel is parsed onto the spec but must NOT emit a "
+	    "'security.mac.label' jail parameter, which jail(8) rejects as "
+	    "unknown and which broke creation of any labeled bundle");
+}
+ATF_TC_BODY(jailparams_maclabel_not_a_param, tc)
+{
+	struct oci_runtime_spec *spec;
+	struct jailparam *params;
+	size_t nparams, i;
+	int saw_bad = 0;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" },\n"
+	    "  \"freebsd\": { \"macLabel\": \"biba/high\" }\n"
+	    "}\n");
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	/* The label is parsed and carried on the spec. */
+	ATF_REQUIRE(spec->freebsd != NULL);
+	ATF_CHECK_STREQ("biba/high", spec->freebsd->mac_label);
+
+	/* ... but it must not appear as an (invalid) jail parameter. */
+	params = oci_spec_to_jail_params(spec, &nparams);
+	ATF_REQUIRE(params != NULL);
+	for (i = 0; i < nparams; i++) {
+		if (params[i].jp_name != NULL &&
+		    strcmp(params[i].jp_name, "security.mac.label") == 0)
+			saw_bad = 1;
+	}
+	ATF_CHECK(!saw_bad);
+
+	jailparam_free(params, nparams);
+	oci_free_spec(spec);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
+	ATF_TP_ADD_TC(tp, jailparams_maclabel_not_a_param);
 	ATF_TP_ADD_TC(tp, parse_minimal);
 	ATF_TP_ADD_TC(tp, parse_user_int);
 	ATF_TP_ADD_TC(tp, parse_mounts);

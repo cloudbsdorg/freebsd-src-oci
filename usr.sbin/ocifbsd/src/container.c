@@ -369,6 +369,11 @@ warn_unenforced_security(const struct oci_runtime_spec *spec)
 		fprintf(stderr, "warning: linux.maskedPaths (%d) recorded but "
 		    "NOT yet enforced; those paths are not masked\n",
 		    spec->n_masked_paths);
+	if (spec->freebsd != NULL && spec->freebsd->mac_label != NULL)
+		fprintf(stderr, "warning: freebsd.macLabel '%s' recorded but "
+		    "NOT yet enforced; a MAC label needs a loaded labeling "
+		    "policy and setpmac on the init process\n",
+		    spec->freebsd->mac_label);
 }
 
 /*

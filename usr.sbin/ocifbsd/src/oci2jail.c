@@ -1050,11 +1050,16 @@ oci_spec_to_jail_params(const struct oci_runtime_spec *spec, size_t *nparams)
 			return (NULL);
 	}
 
-	/* MAC label */
-	if (spec->freebsd && spec->freebsd->mac_label) {
-		ADD_PARAM("security.mac.label", spec->freebsd->mac_label);
-		ADD_PARAM("allow.chflags", "1");
-	}
+	/*
+	 * MAC label: there is no "security.mac.label" jail parameter (jail(8)
+	 * rejects it as unknown, which previously made *any* bundle that set
+	 * freebsd.macLabel fail to create). A jail's MAC label is applied to the
+	 * init process via the MAC framework (setpmac/mac_set_proc) before
+	 * jail_attach, only when a labeling policy is loaded — not through a jail
+	 * parameter. The label is parsed and carried on the spec, and the
+	 * runtime warns that it is recorded-but-unenforced (see
+	 * warn_unenforced_security) rather than emitting an invalid parameter.
+	 */
 
 	/*
 	 * Persist without processes so create→start works as two steps.
