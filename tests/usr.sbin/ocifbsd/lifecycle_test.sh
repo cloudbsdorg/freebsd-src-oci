@@ -83,18 +83,30 @@ create_start_kill_delete_body()
 		atf_fail "create did not print a 64-hex id (got: ${cid})"
 	fi
 
-	# state after create should mention created or the id
+	# state after create must follow the OCI runtime `state` schema:
+	# ociVersion, id, status (created), and bundle.
 	atf_check -s exit:0 -e ignore -o save:state1.out \
 	    "${bin}" state "${cid}"
-	if ! grep -qiE "created|${cid}" state1.out; then
-		atf_fail "state after create unexpected: $(cat state1.out)"
-	fi
+	for field in ociVersion '"id"' created bundle; do
+		if ! grep -q "${field}" state1.out; then
+			atf_fail "state missing OCI field ${field}: $(cat state1.out)"
+		fi
+	done
 
 	# start (may print id on stdout)
 	atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
 
 	# running: jail should exist
 	atf_check -s exit:0 -o match:"ocifbsd-" jls -n name
+
+	# state after start must report running and carry the process pid.
+	atf_check -s exit:0 -e ignore -o save:state2.out \
+	    "${bin}" state "${cid}"
+	for field in running '"pid"' ociVersion; do
+		if ! grep -q "${field}" state2.out; then
+			atf_fail "running state missing ${field}: $(cat state2.out)"
+		fi
+	done
 
 	# kill (SIGTERM default)
 	atf_check -s exit:0 -e ignore -o ignore "${bin}" kill "${cid}"

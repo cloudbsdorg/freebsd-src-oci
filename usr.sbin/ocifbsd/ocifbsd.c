@@ -903,12 +903,28 @@ cmd_state(int argc, char **argv)
 		return (1);
 	}
 
-	/* Print state as JSON (pretty when --pretty). */
+	/*
+	 * Print the container state in the schema the OCI runtime spec defines
+	 * for the `state` operation: ociVersion, id, status, bundle, and pid
+	 * (the latter required only when the container is created or running).
+	 * Pretty by default; --compact for one line.
+	 */
 	{
-		char buf[256];
+		char buf[PATH_MAX + 256];
+		const char *bundle = c->bundle_path ? c->bundle_path : "";
+		const char *status = ocifbsd_state_to_string(c->state);
 
-		snprintf(buf, sizeof(buf), "{\"id\":\"%s\",\"status\":\"%s\"}",
-		    c->id, ocifbsd_state_to_string(c->state));
+		if (c->init_pid > 0) {
+			snprintf(buf, sizeof(buf),
+			    "{\"ociVersion\":\"1.0.2\",\"id\":\"%s\","
+			    "\"status\":\"%s\",\"pid\":%d,\"bundle\":\"%s\"}",
+			    c->id, status, (int)c->init_pid, bundle);
+		} else {
+			snprintf(buf, sizeof(buf),
+			    "{\"ociVersion\":\"1.0.2\",\"id\":\"%s\","
+			    "\"status\":\"%s\",\"bundle\":\"%s\"}",
+			    c->id, status, bundle);
+		}
 		emit_json(buf);
 	}
 
