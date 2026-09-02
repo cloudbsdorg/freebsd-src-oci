@@ -344,24 +344,22 @@ record_applied_mount(struct ocifbsd_container *c, const char *target)
 /*
  * Warn about OCI security-context restrictions this bundle requests but that
  * ocifbsd does not enforce yet, so an operator is never misled into believing a
- * container is hardened when it is not. Parsing these fields is intentionally a
- * no-op today (FreeBSD nullfs cannot self-overlay a path read-only/nosuid; the
- * enforcement needs the rootfs-mount rework — see docs/security-restrictions.md).
- * Fields that ARE enforced (process.rlimits, freebsd.rctl_rules, freebsd.vnet)
- * are deliberately not warned about.
+ * container is hardened when it is not. root.readonly, process.noNewPrivileges,
+ * process.rlimits, freebsd.rctl_rules and freebsd.vnet ARE enforced and are not
+ * warned about; only the per-path linux.readonlyPaths / linux.maskedPaths remain
+ * parsed-only (see docs/security-restrictions.md).
  */
 static void
 warn_unenforced_security(const struct oci_runtime_spec *spec)
 {
 	if (spec == NULL)
 		return;
-	if (spec->process.no_new_privileges)
-		fprintf(stderr, "warning: process.noNewPrivileges is recorded "
-		    "but NOT yet enforced on FreeBSD; the container is not "
-		    "hardened by it\n");
-	if (spec->root.readonly)
-		fprintf(stderr, "warning: root.readonly is recorded but NOT yet "
-		    "enforced; the container root remains writable\n");
+	/*
+	 * root.readonly and process.noNewPrivileges ARE enforced (the root is
+	 * established as a read-only / nosuid nullfs mount; see
+	 * establish_secure_rootfs), so they are not warned about. Per-path
+	 * readonlyPaths and maskedPaths are still parsed-only.
+	 */
 	if (spec->n_readonly_paths > 0)
 		fprintf(stderr, "warning: linux.readonlyPaths (%d) recorded but "
 		    "NOT yet enforced; those paths remain writable\n",
@@ -771,6 +769,85 @@ container_reconfigure_network(struct ocifbsd_container *c)
 }
 
 /*
+ * Establish the container root read-only and/or nosuid when the bundle asks
+ * for it (root.readonly / process.noNewPrivileges). FreeBSD nullfs cannot mount
+ * a path over itself, so the flags are applied by nullfs-mounting the bundle
+ * rootfs onto a distinct mountpoint and using that as the jail root.
+ *
+ * The mountpoint lives under the runtime state dir ($STATE_DIR/<id>.jailroot),
+ * deliberately NOT under the bundle or image-store path — otherwise the live
+ * nullfs mount would keep the image directory busy and block `rmi`. It is
+ * deterministic from the container id, so delete (in a fresh process) can
+ * reconstruct and unmount it. spec->root.path and c->rootfs are repointed at
+ * the mountpoint; the original rootfs remains the nullfs source.
+ *
+ * No-op (returns 0) unless a flag is set, so ordinary containers are unchanged.
+ * Returns -1 only if a requested mount could not be established.
+ */
+static int
+establish_secure_rootfs(struct ocifbsd_container *c,
+    struct oci_runtime_spec *spec)
+{
+	char jailroot[PATH_MAX];
+	char opts[64];
+	char *argv[8];
+	int argc = 0;
+	char *dup;
+
+	if (spec == NULL || c == NULL || c->id == NULL)
+		return (0);
+	if (!spec->root.readonly && !spec->process.no_new_privileges)
+		return (0);		/* open default: nothing to do */
+
+	opts[0] = '\0';
+	if (spec->root.readonly)
+		strlcpy(opts, "ro", sizeof(opts));
+	if (spec->process.no_new_privileges) {
+		if (opts[0] != '\0')
+			strlcat(opts, ",", sizeof(opts));
+		strlcat(opts, "nosuid", sizeof(opts));
+	}
+
+	if ((size_t)snprintf(jailroot, sizeof(jailroot), "%s/%s.jailroot",
+	    OCIFBSD_STATE_DIR, c->id) >= sizeof(jailroot))
+		return (-1);
+	if (mkdir(jailroot, 0755) != 0 && errno != EEXIST) {
+		fprintf(stderr, "error: cannot create jail root %s: %s\n",
+		    jailroot, strerror(errno));
+		return (-1);
+	}
+
+	/* mount -t nullfs -o <opts> <original rootfs> <jailroot> */
+	argv[argc++] = __DECONST(char *, "/sbin/mount");
+	argv[argc++] = __DECONST(char *, "-t");
+	argv[argc++] = __DECONST(char *, "nullfs");
+	argv[argc++] = __DECONST(char *, "-o");
+	argv[argc++] = opts;
+	argv[argc++] = spec->root.path;
+	argv[argc++] = jailroot;
+	argv[argc] = NULL;
+	if (run_mount_cmd(argv) != 0) {
+		fprintf(stderr, "error: cannot mount %s root %s -> %s: %s\n",
+		    opts, spec->root.path, jailroot, strerror(errno));
+		(void)rmdir(jailroot);
+		return (-1);
+	}
+
+	/* Repoint the jail root and the container rootfs at the flagged view. */
+	dup = strdup(jailroot);
+	if (dup == NULL)
+		return (-1);
+	free(spec->root.path);
+	spec->root.path = dup;
+	dup = strdup(jailroot);
+	if (dup != NULL) {
+		free(c->rootfs);
+		c->rootfs = dup;
+	}
+	return (0);
+}
+
+/*
  * Create a container from OCI bundle
  */
 int
@@ -897,6 +974,16 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		snprintf(logbuf, sizeof(logbuf), "%s/%s.log",
 		    OCIFBSD_STATE_DIR, c->id);
 		c->log_path = strdup(logbuf);
+	}
+
+	/*
+	 * Apply an opt-in read-only / nosuid root before the jail is created,
+	 * repointing the jail root at the flagged nullfs view. No-op unless the
+	 * bundle requests it, so ordinary containers are unaffected.
+	 */
+	if (establish_secure_rootfs(c, spec) != 0) {
+		container_free(c);
+		return (-1);
 	}
 
 	/*
@@ -1447,6 +1534,19 @@ container_delete(struct ocifbsd_container *c)
 			fprintf(stderr, "warning: failed to remove jail: %s\n",
 			    strerror(errno));
 		}
+	}
+
+	/*
+	 * Tear down the read-only/nosuid root overlay, if any, now that the jail
+	 * that held it busy is gone. c->rootfs is the $STATE_DIR/<id>.jailroot
+	 * nullfs mountpoint; the bundle's real rootfs (the nullfs source) is left
+	 * intact. Reloaded specs carry root.readonly / noNewPrivileges, so this
+	 * fires on a later `delete` from a fresh process too.
+	 */
+	if (c->spec != NULL && c->rootfs != NULL &&
+	    (c->spec->root.readonly || c->spec->process.no_new_privileges)) {
+		umount_path(c->rootfs);
+		(void)rmdir(c->rootfs);
 	}
 
 	/* Unregister from memory */

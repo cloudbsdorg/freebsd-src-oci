@@ -39,10 +39,10 @@ For **jail-wide** accounting limits (as opposed to per-process rlimits), use the
 FreeBSD extension `freebsd.rctl_rules`, which maps to `rctl(4)` and requires
 `kern.racct.enable=1` in the host kernel.
 
-## No new privileges (parsed; enforcement in progress)
+## No new privileges (works today)
 
-`process.noNewPrivileges` is parsed. The intended FreeBSD enforcement is to
-present the container root `nosuid` so set-user-ID / set-group-ID binaries
+`process.noNewPrivileges` is enforced: ocifbsd establishes the container root as
+a `nosuid` nullfs mount, so set-user-ID / set-group-ID binaries in the image
 cannot raise privilege.
 
 ```json
@@ -50,30 +50,26 @@ cannot raise privilege.
   "root": { "path": "rootfs" } }
 ```
 
-Status: FreeBSD `nullfs` refuses to mount a path over itself ("Resource deadlock
-avoided"), so a self-overlay does not work. The correct mechanism is to apply
-`nosuid` on the mount that *establishes* the container root (mounting the rootfs
-source onto a distinct jail-path mountpoint). That rootfs-mount change is the
-tracked follow-up; until it lands, `noNewPrivileges` is recorded but not
-enforced.
+## Read-only root (works today) / read-only paths (parsed)
 
-## Read-only paths / read-only root (parsed; enforcement in progress)
-
-`root.readonly` and `linux.readonlyPaths` are parsed.
+`root.readonly` is enforced: the container root is established as a **read-only**
+nullfs mount (a distinct `$STATE_DIR/<id>.jailroot` mountpoint used as the jail
+root — FreeBSD nullfs cannot overlay a path on itself), so writes anywhere in the
+root fail with `EROFS`. Verified: a container with `root.readonly` runs and a
+write inside returns "Read-only file system".
 
 ```json
 {
   "process": { "args": ["/usr/bin/myapp"] },
   "root": { "path": "rootfs", "readonly": true },
-  "linux": { "readonlyPaths": ["/etc", "/usr/local/etc"] }
+  "linux": { "readonlyPaths": ["/etc"] }
 }
 ```
 
-Status: same FreeBSD `nullfs` self-overlay limitation as above. Making an
-existing subtree read-only in place has no direct `nullfs` equivalent; the
-read-only root is enforced by mounting the rootfs read-only at establishment
-(the same rootfs-mount follow-up). Read-only *subpaths* need a distinct
-read-only source and are tracked with it.
+`root.readonly` and `noNewPrivileges` may be combined (the root is then mounted
+`ro,nosuid`). Per-path `linux.readonlyPaths` (making one existing subtree
+read-only while the rest stays writable) is still parsed-only — it needs a
+distinct read-only source per path and is tracked separately.
 
 ## Masked paths (works via empty overlay)
 
@@ -134,7 +130,8 @@ mismatched keys cannot exchange messages, so the whole cluster must use one key.
 | Jail-wide limits | `freebsd.rctl_rules` | Enforced (`rctl`, needs RACCT) |
 | Masked paths | `linux.maskedPaths` | Enforced (empty overlay) |
 | Network isolation | `freebsd.vnet` | Enforced (VNET) |
-| No new privileges | `process.noNewPrivileges` | Parsed; needs rootfs-mount mode |
-| Read-only root/paths | `root.readonly`, `linux.readonlyPaths` | Parsed; needs rootfs-mount mode |
+| No new privileges | `process.noNewPrivileges` | Enforced (nosuid nullfs root) |
+| Read-only root | `root.readonly` | Enforced (read-only nullfs root) |
+| Read-only sub-paths | `linux.readonlyPaths` | Parsed (per-path overlay pending) |
 
 Leave a field out and that restriction is simply off — the default is open.

@@ -272,10 +272,74 @@ rmi_refuses_in_use_body()
 	"${bin}" delete "${cid}" >/dev/null 2>&1 || true
 }
 
+atf_test_case readonly_nosuid_root cleanup
+readonly_nosuid_root_head()
+{
+	atf_set "descr" "root.readonly + noNewPrivileges are enforced: the jail root is a read-only, nosuid nullfs and a write inside is blocked"
+	atf_set "require.user" "root"
+}
+readonly_nosuid_root_body()
+{
+	local bin bundle rootfs cid name jname
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	[ -x /rescue/sleep ] || atf_skip "/rescue/sleep not available"
+	bundle=$(pwd)/robundle
+	rootfs=${bundle}/rootfs
+	mkdir -p "${rootfs}/bin"
+	cp /rescue/sleep "${rootfs}/bin/sleep"; chmod 755 "${rootfs}/bin/sleep"
+	cp /rescue/sh "${rootfs}/bin/sh"; chmod 755 "${rootfs}/bin/sh"
+	cat > "${bundle}/config.json" <<EOF
+{
+  "ociVersion": "1.0.2",
+  "process": { "user": { "uid": 0, "gid": 0 },
+    "args": [ "/bin/sleep", "120" ], "cwd": "/",
+    "noNewPrivileges": true },
+  "root": { "path": "rootfs", "readonly": true }
+}
+EOF
+	name="rolife$$"
+	atf_check -s exit:0 -e ignore -o save:c.out \
+	    "${bin}" create --name "${name}" "${bundle}"
+	cid=$(tr -d ' \t\r\n' < c.out)
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
+
+	# The jail root must be a read-only, nosuid nullfs overlay.
+	atf_check -s exit:0 -o match:"read-only" \
+	    sh -c "mount | grep '\.jailroot'"
+	atf_check -s exit:0 -o match:"nosuid" \
+	    sh -c "mount | grep '\.jailroot'"
+
+	# A write to the container root must be blocked (read-only fs). Report
+	# BLOCKED/WROTE and always exit 0 so the assertion keys off the output,
+	# not the shell's redirect-failure exit status.
+	jname=$(jls -q name | grep '^ocifbsd-' | head -1)
+	atf_check -s exit:0 -e ignore -o match:"BLOCKED" -o not-match:"WROTE" \
+	    jexec "${jname}" /bin/sh -c \
+	    'if echo x > /rotest 2>/dev/null; then echo WROTE; else echo BLOCKED; fi'
+
+	# Delete tears the overlay down: no jailroot mount is left behind.
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" delete --force "${cid}"
+	if mount | grep -q '\.jailroot'; then
+		atf_fail "jailroot nullfs still mounted after delete"
+	fi
+}
+readonly_nosuid_root_cleanup()
+{
+	local m j
+	for m in $(mount | grep '\.jailroot' | awk '{print $3}'); do
+		umount -f "${m}" 2>/dev/null || true
+	done
+	for j in $(jls -q name 2>/dev/null | grep '^ocifbsd-'); do
+		jail -r "${j}" 2>/dev/null || true
+	done
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case create_start_kill_delete
 	atf_add_test_case create_rejects_missing_bundle
 	atf_add_test_case create_start_with_nullfs
 	atf_add_test_case rmi_refuses_in_use
+	atf_add_test_case readonly_nosuid_root
 }
