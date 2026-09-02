@@ -173,6 +173,7 @@ struct oci_freebsd {
 	int	allow_socket_af;	/* Allow socket address families */
 	char	**securelevel;		/* Securelevel */
 	int	n_securelevel;		/* Count of securelevel entries */
+	char	*bridge;		/* host bridge to attach the vnet epair to */
 };
 
 struct oci_runtime_spec {

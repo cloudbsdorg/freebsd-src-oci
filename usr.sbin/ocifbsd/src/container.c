@@ -418,7 +418,7 @@ static void
 setup_container_network(const struct ocifbsd_container *c)
 {
 	const struct oci_freebsd *fb;
-	const char *ip = NULL, *gw = NULL;
+	const char *ip = NULL, *gw = NULL, *bridge = NULL;
 	char *side_a = NULL;
 	char path[PATH_MAX];
 	FILE *f;
@@ -432,8 +432,9 @@ setup_container_network(const struct ocifbsd_container *c)
 		ip = fb->ip4[0];
 	if (fb->n_default_gateway4 > 0)
 		gw = fb->default_gateway4[0];
+	bridge = fb->bridge;
 
-	if (vnet_wire_jail(c->jid, ip, gw, NULL, &side_a) != 0) {
+	if (vnet_wire_jail(c->jid, ip, gw, bridge, &side_a) != 0) {
 		fprintf(stderr, "warning: VNET setup failed for %s; the "
 		    "container has an isolated network stack\n", c->id);
 		return;

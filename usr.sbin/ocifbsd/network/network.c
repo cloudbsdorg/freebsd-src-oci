@@ -298,20 +298,43 @@ network_cleanup(void)
 int
 bridge_create(const char *name)
 {
-	int ret;
+	char *out = NULL;
+	char created[IFNAMSIZ];
+	size_t len;
 
 	/* Check if bridge already exists */
 	if (bridge_exists(name))
 		return (0);  /* Already exists, OK */
 
-	/* Create the bridge */
-	ret = run_cmd(4, "ifconfig", "bridge", "create", name);
-	if (ret != 0)
+	/*
+	 * `ifconfig bridge create <name>` does not name the bridge — the unit is
+	 * kernel-assigned and a bare name argument is rejected ("bad value").
+	 * Create an auto-assigned bridge, read its name, then rename it to the
+	 * requested name. (The previous code used the rejected form, so creating
+	 * a bridge always failed.)
+	 */
+	if (net_capture_argv(&out, (char *const[]){ "ifconfig", "bridge",
+	    "create", NULL }) != 0 || out == NULL) {
+		free(out);
 		return (-1);
+	}
+	len = strcspn(out, " \t\r\n");
+	if (len == 0 || len >= sizeof(created)) {
+		free(out);
+		return (-1);
+	}
+	memcpy(created, out, len);
+	created[len] = '\0';
+	free(out);
+
+	if (strcmp(created, name) != 0 &&
+	    run_cmd(4, "ifconfig", created, "name", name) != 0) {
+		(void)run_cmd(3, "ifconfig", created, "destroy");
+		return (-1);
+	}
 
 	/* Bring it up */
-	ret = run_cmd(3, "ifconfig", name, "up");
-	if (ret != 0)
+	if (run_cmd(3, "ifconfig", name, "up") != 0)
 		return (-1);
 
 	return (0);

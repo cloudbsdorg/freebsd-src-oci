@@ -477,6 +477,65 @@ vnet_epair_wired_and_cleaned_cleanup()
 	rm -f /var/run/ocifbsd/*.epair 2>/dev/null || true
 }
 
+atf_test_case vnet_bridge_attach cleanup
+vnet_bridge_attach_head()
+{
+	atf_set "descr" "a freebsd.bridge container has its host epair added as " \
+	    "a member of the named bridge, removed on delete"
+	atf_set "require.user" "root"
+}
+vnet_bridge_attach_body()
+{
+	local bin bundle rootfs cid name
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	[ -x /rescue/sleep ] || atf_skip "/rescue/sleep not available"
+	[ -x /rescue/ifconfig ] || atf_skip "/rescue/ifconfig not available"
+
+	bundle=$(pwd)/brbundle
+	rootfs=${bundle}/rootfs
+	mkdir -p "${rootfs}/bin" "${rootfs}/sbin"
+	cp /rescue/sleep "${rootfs}/bin/sleep"; chmod 755 "${rootfs}/bin/sleep"
+	cp /rescue/ifconfig "${rootfs}/sbin/ifconfig"
+	chmod 755 "${rootfs}/sbin/ifconfig"
+	cat > "${bundle}/config.json" <<EOF
+{
+  "ociVersion": "1.0.2",
+  "process": { "user": { "uid": 0, "gid": 0 },
+    "args": [ "/bin/sleep", "120" ], "cwd": "/" },
+  "root": { "path": "rootfs", "readonly": false },
+  "freebsd": { "vnet": true, "ip4": [ "192.0.2.30/24" ],
+    "bridge": "ocibr0" }
+}
+EOF
+	name="brlife$$"
+	atf_check -s exit:0 -e ignore -o save:c.out \
+	    "${bin}" create --name "${name}" "${bundle}"
+	cid=$(tr -d ' \t\r\n' < c.out)
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
+
+	# The bridge exists (created by the runtime) and has an epair member.
+	atf_check -s exit:0 -o match:"member: epair" \
+	    sh -c "ifconfig ocibr0"
+
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" delete --force "${cid}"
+	# The epair member is gone after delete (destroying it left the bridge).
+	atf_check -s exit:0 -o not-match:"member: epair" \
+	    sh -c "ifconfig ocibr0 2>/dev/null || true"
+}
+vnet_bridge_attach_cleanup()
+{
+	local j e
+	for j in $(jls -q name 2>/dev/null | grep '^ocifbsd-'); do
+		jail -r "${j}" 2>/dev/null || true
+	done
+	for e in $(ifconfig -l | tr ' ' '\n' | grep '^epair'); do
+		ifconfig "${e}" destroy 2>/dev/null || true
+	done
+	ifconfig ocibr0 destroy 2>/dev/null || true
+	rm -f /var/run/ocifbsd/*.epair 2>/dev/null || true
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case create_start_kill_delete
@@ -486,4 +545,5 @@ atf_init_test_cases()
 	atf_add_test_case readonly_nosuid_root
 	atf_add_test_case rctl_limits_applied_and_cleaned
 	atf_add_test_case vnet_epair_wired_and_cleaned
+	atf_add_test_case vnet_bridge_attach
 }

@@ -181,6 +181,11 @@ parse_freebsd_ext(struct json_object *val)
 	fbsd->ip4 = json_get_string_array(val, "ip4", &fbsd->n_ip4);
 	fbsd->ip6 = json_get_string_array(val, "ip6", &fbsd->n_ip6);
 	fbsd->dns = json_get_string_array(val, "dns", &fbsd->n_dns);
+	fbsd->default_gateway4 = json_get_string_array(val, "defaultGateway4",
+	    &fbsd->n_default_gateway4);
+	fbsd->default_gateway6 = json_get_string_array(val, "defaultGateway6",
+	    &fbsd->n_default_gateway6);
+	fbsd->bridge = json_get_string(val, "bridge");
 
 	return (fbsd);
 }
@@ -718,6 +723,17 @@ oci_free_spec(struct oci_runtime_spec *spec)
 				free(spec->freebsd->dns[i]);
 			free(spec->freebsd->dns);
 		}
+		if (spec->freebsd->default_gateway4) {
+			for (i = 0; spec->freebsd->default_gateway4[i]; i++)
+				free(spec->freebsd->default_gateway4[i]);
+			free(spec->freebsd->default_gateway4);
+		}
+		if (spec->freebsd->default_gateway6) {
+			for (i = 0; spec->freebsd->default_gateway6[i]; i++)
+				free(spec->freebsd->default_gateway6[i]);
+			free(spec->freebsd->default_gateway6);
+		}
+		free(spec->freebsd->bridge);
 		free(spec->freebsd);
 	}
 

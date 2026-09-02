@@ -183,6 +183,40 @@ ATF_TC_BODY(parse_freebsd_ext, tc)
 	oci_free_spec(spec);
 }
 
+ATF_TC(parse_freebsd_bridge_and_gateway);
+ATF_TC_HEAD(parse_freebsd_bridge_and_gateway, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "freebsd.bridge and freebsd.defaultGateway4 are parsed onto the "
+	    "spec so the VNET wiring can attach a bridge and default route");
+}
+ATF_TC_BODY(parse_freebsd_bridge_and_gateway, tc)
+{
+	struct oci_runtime_spec *spec;
+
+	make_rootfs("rootfs");
+	write_config("config.json",
+	    "{\n"
+	    "  \"process\": { \"args\": [ \"/bin/true\" ] },\n"
+	    "  \"root\": { \"path\": \"rootfs\" },\n"
+	    "  \"freebsd\": {\n"
+	    "    \"vnet\": true,\n"
+	    "    \"ip4\": [ \"192.0.2.5/24\" ],\n"
+	    "    \"defaultGateway4\": [ \"192.0.2.1\" ],\n"
+	    "    \"bridge\": \"ocibr0\"\n"
+	    "  }\n"
+	    "}\n");
+
+	spec = oci_parse_config("config.json");
+	ATF_REQUIRE(spec != NULL);
+	ATF_REQUIRE(spec->freebsd != NULL);
+	ATF_CHECK_STREQ("ocibr0", spec->freebsd->bridge);
+	ATF_REQUIRE(spec->freebsd->default_gateway4 != NULL);
+	ATF_CHECK_EQ(1, spec->freebsd->n_default_gateway4);
+	ATF_CHECK_STREQ("192.0.2.1", spec->freebsd->default_gateway4[0]);
+	oci_free_spec(spec);
+}
+
 ATF_TC(parse_security_context);
 ATF_TC_HEAD(parse_security_context, tc)
 {
@@ -825,6 +859,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, parse_user_int);
 	ATF_TP_ADD_TC(tp, parse_mounts);
 	ATF_TP_ADD_TC(tp, parse_freebsd_ext);
+	ATF_TP_ADD_TC(tp, parse_freebsd_bridge_and_gateway);
 	ATF_TP_ADD_TC(tp, parse_security_context);
 	ATF_TP_ADD_TC(tp, parse_security_defaults_open);
 	ATF_TP_ADD_TC(tp, path_is_safe);
