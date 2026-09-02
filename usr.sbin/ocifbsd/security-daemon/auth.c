@@ -54,6 +54,31 @@
 #include <syslog.h>
 
 #include "auth.h"
+
+/*
+ * crypt(3) is declared in <unistd.h> only under __BSD_VISIBLE, which this TU's
+ * feature-test macros can suppress. Declare it explicitly (it lives in
+ * libcrypt, added to LIBADD). FreeBSD has crypt(3) but not the OpenBSD
+ * crypt_newhash/crypt_checkpass, so we hash/verify with crypt(3) + a "$6$"
+ * (SHA-512) salt.
+ */
+char	*crypt(const char *key, const char *salt);
+
+/*
+ * Build a random "$6$<16-char salt>$" SHA-512 crypt salt into out.
+ */
+static void
+auth_make_salt(char out[20])
+{
+	static const char b64[] =
+	    "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	int i;
+
+	out[0] = '$'; out[1] = '6'; out[2] = '$';
+	for (i = 0; i < 16; i++)
+		out[3 + i] = b64[arc4random_uniform(64)];
+	out[19] = '\0';
+}
 #include "../include/ocifbsd.h"
 
 /* Base dirs the code referenced without defining. */
@@ -276,11 +301,29 @@ auth_user_create(const char *username, const char *password)
         user->n_roles = 1;
     }
     
-    /* If password provided, hash and store it */
+    /*
+     * Hash and store the password. A NULL password means "no password
+     * login" — store the sentinel "*", which crypt_checkpass never matches,
+     * so the account can still authenticate by token/cert but not by
+     * password. A real password is hashed with the system's preferred scheme
+     * (SHA-512 crypt) via crypt_newhash(3).
+     */
     if (password != NULL) {
-        /* Password storage would go here */
+        char salt[20];
+        char *h;
+
+        auth_make_salt(salt);
+        h = crypt(password, salt);
+        if (h != NULL)
+            strlcpy(user->password_hash, h,
+                sizeof(user->password_hash));
+        else
+            strlcpy(user->password_hash, "*",
+                sizeof(user->password_hash));
+    } else {
+        strlcpy(user->password_hash, "*", sizeof(user->password_hash));
     }
-    
+
     pthread_mutex_unlock(&auth_lock);
     
     /* Audit log */
@@ -400,33 +443,38 @@ auth_authenticate(const char *username, const char *password)
     }
     
     /*
-     * Password verification is not yet implemented because
-     * struct user_identity has no password_hash field. To fix:
-     *
-     *   1. Add to struct user_identity (in auth.h):
-     *        char password_hash[256];  (crypt(3) output)
-     *
-     *   2. Add auth_user_add() function that takes a plaintext
-     *      password, calls crypt(password, salt) to hash it, and
-     *      stores the result in password_hash.
-     *
-     *   3. Replace this comment with:
-     *        if (strcmp(user->password_hash, crypt(password,
-     *            user->password_hash)) != 0) {
-     *            errno = EACCES;
-     *            return (-1);
-     *        }
-     *
-     * Until that refactor, the function accepts any password.
-     * This is a SECURITY ISSUE for production deployment.
-     * See MIGRATION.md and SECURITY.md for the full plan.
+     * Verify the password against the stored crypt(3) hash in constant time
+     * via crypt_checkpass(3) (returns 0 only on a match). An empty or "*"
+     * hash is an account with no password login and never matches — so this
+     * no longer accepts an arbitrary password, which was a critical auth
+     * bypass (any known user authenticated with any password).
      */
-    (void)password;
-    
+    if (password == NULL || user->password_hash[0] == '\0' ||
+        strcmp(user->password_hash, "*") == 0) {
+        errno = EACCES;
+        return (-1);
+    }
+
+    /*
+     * crypt(3) uses the stored hash as its salt, so a matching password
+     * reproduces the exact stored string. Serialize the call under auth_lock
+     * (crypt(3) returns a static buffer) and compare in constant time.
+     */
     pthread_mutex_lock(&auth_lock);
-    user->last_login = time(NULL);
+    {
+        char *h = crypt(password, user->password_hash);
+        size_t hlen = strlen(user->password_hash);
+
+        if (h == NULL || strlen(h) != hlen ||
+            timingsafe_bcmp(h, user->password_hash, hlen) != 0) {
+            pthread_mutex_unlock(&auth_lock);
+            errno = EACCES;
+            return (-1);
+        }
+        user->last_login = time(NULL);
+    }
     pthread_mutex_unlock(&auth_lock);
-    
+
     return (0);
 }
 

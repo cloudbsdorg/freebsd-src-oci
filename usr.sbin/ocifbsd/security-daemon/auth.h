@@ -89,6 +89,12 @@ struct user_identity {
     time_t last_login;
     time_t password_expires;
     bool enabled;
+    /*
+     * crypt(3)-format password hash. "*" (or empty) means no password login
+     * is possible (the account authenticates by token/cert only) — never a
+     * match. Set by auth_user_create; checked by auth_authenticate.
+     */
+    char password_hash[128];
 };
 
 /* Token/session */

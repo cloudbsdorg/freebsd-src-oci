@@ -95,11 +95,32 @@ ATF_TC_BODY(decrypt_rejects_bad_input, tc)
 	ATF_CHECK(secret_decrypt(buf, 33, &out, &outlen) != 0);
 }
 
+ATF_TC(password_auth_verifies);
+ATF_TC_HEAD(password_auth_verifies, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "auth_authenticate accepts only the correct password and denies a "
+	    "wrong one and a no-password (NULL) account");
+}
+ATF_TC_BODY(password_auth_verifies, tc)
+{
+	/* Password account: only the right password authenticates. */
+	ATF_REQUIRE_EQ(0, auth_user_create("alice_pw", "s3cr3t!"));
+	ATF_CHECK(auth_authenticate("alice_pw", "wrong") != 0);
+	ATF_CHECK(auth_authenticate("alice_pw", "s3cr3t!") == 0);
+
+	/* NULL-password account: password login is always denied. */
+	ATF_REQUIRE_EQ(0, auth_user_create("bob_nopw", NULL));
+	ATF_CHECK(auth_authenticate("bob_nopw", "anything") != 0);
+	ATF_CHECK(auth_authenticate("bob_nopw", "") != 0);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, encrypt_decrypt_roundtrip);
 	ATF_TP_ADD_TC(tp, distinct_iv_per_call);
 	ATF_TP_ADD_TC(tp, decrypt_rejects_bad_input);
+	ATF_TP_ADD_TC(tp, password_auth_verifies);
 
 	return (atf_no_error());
 }
