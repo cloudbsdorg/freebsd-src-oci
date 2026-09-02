@@ -259,6 +259,7 @@ gc_worker(void *arg)
             if (ret == 0) {
                 item->status = GC_STATUS_COMPLETE;
                 stats.items_collected++;
+                free(item);  /* dequeued + done: was leaked */
             } else {
                 item->status = GC_STATUS_FAILED;
                 item->attempts++;
@@ -267,6 +268,7 @@ gc_worker(void *arg)
                     TAILQ_INSERT_TAIL(&gc_queue, item, next);
                 } else {
                     stats.items_failed++;
+                    free(item);  /* permanently failed: was leaked */
                 }
             }
             pthread_mutex_unlock(&gc_lock);
@@ -916,7 +918,14 @@ gc_image_space(int high_percent, int low_percent)
     if (statfs(OCIFBSD_IMAGE_DIR, &fs) != 0)
         return (-1);
 
-    used_percent = 100 - (int)((fs.f_bavail * 100) / fs.f_blocks);
+    /* Guard against a zero block count (div-by-zero) and use f_bfree — true
+     * free blocks — rather than f_bavail, which excludes the superuser
+     * reserve and skews utilization. */
+    if (fs.f_blocks == 0)
+        used_percent = 0;
+    else
+        used_percent = 100 -
+            (int)((fs.f_bfree * 100) / fs.f_blocks);
 
     if (used_percent >= high_percent) {
         /* Aggressive GC */
