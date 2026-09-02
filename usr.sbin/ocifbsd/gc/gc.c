@@ -181,9 +181,15 @@ gc_init(struct gc_config *cfg)
         config.image_ttl = 86400 * 7;      /* 7 days */
         config.image_high_threshold = 85;
         config.image_low_threshold = 75;
-        config.gc_orphaned_volumes = true;
-        config.gc_orphaned_networks = true;
-        config.gc_unused_networks = true;
+        /*
+         * Volume and network GC are off by default: the runtime has no
+         * standalone volume/network object model to collect (see
+         * gc_delete_volume/gc_delete_network). Enable only when a backend
+         * exists, else GC would queue work it cannot perform.
+         */
+        config.gc_orphaned_volumes = false;
+        config.gc_orphaned_networks = false;
+        config.gc_unused_networks = false;
         config.node_grace_period = 300;     /* 5 minutes */
         config.gc_orphaned_pods = true;
         config.gc_failed_jobs = true;
@@ -375,37 +381,39 @@ gc_delete_image(const char *name)
 static int
 gc_delete_volume(const char *name)
 {
-    int ret;
-
     if (config.dry_run) {
         syslog(LOG_INFO, "[DRY RUN] Would delete volume: %s", name);
         return (0);
     }
 
-    char *argv[] = { OCIFBSD_BIN, "volume", "rm", (char *)name, NULL };
-    ret = safe_execv(OCIFBSD_BIN, argv);
-
-    return (ret == 0 ? 0 : -1);
+    /*
+     * The runtime has no standalone volume object model and no "ocifbsd
+     * volume rm" subcommand, so there is nothing to collect. Skip cleanly
+     * (rather than exec a non-existent command that always errors) until a
+     * volume backend exists. Volume GC is disabled by default in gc_init().
+     */
+    syslog(LOG_INFO, "volume GC not supported (no volume backend); "
+        "skipping %s", name);
+    return (0);
 }
 
 /*
- * Delete a network by delegating to the ocifbsd runtime CLI
- * ("ocifbsd network rm <name>"); honors dry-run.
+ * Delete a network. The runtime exposes no "ocifbsd network rm" subcommand
+ * (network config is per-container via "network list|set"), so there is no
+ * standalone network object to collect. Skip cleanly; honors dry-run.
+ * Network GC is disabled by default in gc_init().
  */
 static int
 gc_delete_network(const char *name)
 {
-    int ret;
-
     if (config.dry_run) {
         syslog(LOG_INFO, "[DRY RUN] Would delete network: %s", name);
         return (0);
     }
 
-    char *argv[] = { OCIFBSD_BIN, "network", "rm", (char *)name, NULL };
-    ret = safe_execv(OCIFBSD_BIN, argv);
-
-    return (ret == 0 ? 0 : -1);
+    syslog(LOG_INFO, "network GC not supported (no standalone network "
+        "object); skipping %s", name);
+    return (0);
 }
 
 /*
