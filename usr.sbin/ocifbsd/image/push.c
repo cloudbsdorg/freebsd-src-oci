@@ -119,6 +119,34 @@ header_callback(char *buffer, size_t size, size_t nitems, void *userdata)
 }
 
 /*
+ * Build a registry URL honoring the registry's scheme and port, the same way
+ * the pull path does. reg->host may already carry ":port" (as set from the
+ * parsed reference, e.g. "192.168.1.154:5000"); in that case the port must not
+ * be appended again. An insecure registry (reg->tls == false) uses http, so a
+ * plain-HTTP registry works — previously push hardcoded "https://%s:%d" with a
+ * host that already held the port, yielding a wrong scheme and a doubled port.
+ */
+static char *
+push_url(struct registry *reg, const char *path)
+{
+	const char *scheme = reg->tls ? "https" : "http";
+	char *url = NULL;
+
+	if (strchr(reg->host, ':') != NULL) {
+		if (asprintf(&url, "%s://%s%s", scheme, reg->host, path) == -1)
+			return (NULL);
+	} else if ((reg->tls && reg->port == 443) ||
+	    (!reg->tls && reg->port == 80)) {
+		if (asprintf(&url, "%s://%s%s", scheme, reg->host, path) == -1)
+			return (NULL);
+	} else if (asprintf(&url, "%s://%s:%d%s", scheme, reg->host,
+	    reg->port, path) == -1) {
+		return (NULL);
+	}
+	return (url);
+}
+
+/*
  * Upload session management
  */
 struct upload_session *
@@ -136,15 +164,23 @@ upload_start(struct registry *reg, const char *repo)
 	sess->host = strdup(reg->host);
 
 	/* Build upload initiation URL */
-	if (asprintf(&url, "https://%s:%d/v2/%s/blobs/uploads/",
-	    reg->host, reg->port, repo) == -1) {
+	{
+		char *path = NULL;
+		if (asprintf(&path, "/v2/%s/blobs/uploads/", repo) == -1) {
+			free(sess);
+			return (NULL);
+		}
+		url = push_url(reg, path);
+		free(path);
+	}
+	if (url == NULL) {
 		free(sess);
 		return (NULL);
 	}
 
 	CURL *curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, reg->tls ? 1L : 0L);
 	curl_easy_setopt(curl, CURLOPT_POST, 1L);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
@@ -555,6 +591,21 @@ push_image(struct registry *reg, const char *reference,
 		goto cleanup;
 	}
 
+	/*
+	 * The image config is itself a blob referenced by the manifest's config
+	 * descriptor; it must be uploaded like any layer or the pushed manifest
+	 * would reference a blob the registry never received (a conformant
+	 * registry rejects such a manifest). This was previously skipped — only
+	 * layers were pushed.
+	 */
+	fprintf(stderr, "pushing config: %s\n", config_digest);
+	if (push_layer(reg, config_path, config_digest, cb, opaque) != 0) {
+		fprintf(stderr, "error: failed to push config %s\n",
+		    config_digest);
+		ret = -1;
+		goto cleanup;
+	}
+
 	/* Build an array of pointers to the layer descriptors. */
 	if (nlayers > 0) {
 		layer_ptrs = calloc(nlayers, sizeof(*layer_ptrs));
@@ -649,8 +700,14 @@ push_manifest(struct registry *reg, const char *repo, const char *tag,
 	int ret = -1;
 
 	/* Build manifest URL */
-	if (asprintf(&url, "https://%s:%d/v2/%s/manifests/%s",
-	    reg->host, reg->port, repo, tag) == -1)
+	{
+		char *path = NULL;
+		if (asprintf(&path, "/v2/%s/manifests/%s", repo, tag) == -1)
+			return (-1);
+		url = push_url(reg, path);
+		free(path);
+	}
+	if (url == NULL)
 		return (-1);
 
 	struct mem_reader reader = { manifest_json, strlen(manifest_json), 0 };
