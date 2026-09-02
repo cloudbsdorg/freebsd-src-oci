@@ -417,24 +417,48 @@ export_get_container_image(const char *name, uint8_t **data, size_t *size)
 {
     char root_path[PATH_MAX];
     FILE *fp;
+    struct stat st;
+    long sz;
     int ret = -1;
 
     snprintf(root_path, sizeof(root_path), "%s/containers/%s/root",
         OCIFBSD_DATA_DIR, name);
 
+    /*
+     * This path is expected to be a flat disk-image file. A jail container's
+     * rootfs is a directory tree (c->rootfs in the runtime), so fread here
+     * would read nothing/garbage and ftell on a directory yields a bogus
+     * size fed straight to malloc. Fail clearly instead of producing a
+     * corrupt export; archiving a directory rootfs is not supported yet.
+     */
+    if (stat(root_path, &st) != 0) {
+        syslog(LOG_ERR, "export: container root not found: %s", root_path);
+        return (-1);
+    }
+    if (!S_ISREG(st.st_mode)) {
+        syslog(LOG_ERR, "export: %s is not a flat image file "
+            "(directory-rootfs export is not supported yet)", root_path);
+        return (-1);
+    }
+
     fp = fopen(root_path, "r");
     if (fp == NULL)
         return (-1);
 
-    /* Get file size */
-    fseek(fp, 0, SEEK_END);
-    *size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
+    /* Get file size, guarding against a negative/failed ftell. */
+    if (fseek(fp, 0, SEEK_END) != 0 || (sz = ftell(fp)) <= 0) {
+        fclose(fp);
+        return (-1);
+    }
+    rewind(fp);
+    *size = (size_t)sz;
 
     *data = malloc(*size);
-    if (*data) {
-        fread(*data, 1, *size, fp);
+    if (*data != NULL && fread(*data, 1, *size, fp) == *size) {
         ret = 0;
+    } else {
+        free(*data);
+        *data = NULL;
     }
 
     fclose(fp);
