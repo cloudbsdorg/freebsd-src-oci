@@ -519,7 +519,9 @@ stack_list(const char *namespace, int *count)
 		if (strcmp(stack_registry[i]->namespace, ns) == 0) {
 			if (n >= alloc) {
 				alloc *= 2;
-				result = realloc(result, alloc * sizeof(struct stack *));
+				if (ocifbsd_realloc_grow((void **)&result,
+				    alloc * sizeof(struct stack *)) != 0)
+					break;
 			}
 			result[n++] = stack_registry[i];
 		}
@@ -1143,7 +1145,9 @@ service_list(const char *namespace, int *count)
 		if (strcmp(service_registry[i]->namespace, ns) == 0) {
 			if (n >= alloc) {
 				alloc *= 2;
-				result = realloc(result, alloc * sizeof(struct service *));
+				if (ocifbsd_realloc_grow((void **)&result,
+				    alloc * sizeof(struct service *)) != 0)
+					break;
 			}
 			result[n++] = service_registry[i];
 		}

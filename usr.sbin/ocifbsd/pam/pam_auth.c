@@ -1264,7 +1264,8 @@ pam_remove_role_binding(const char *role)
             role_bindings[i] = role_bindings[i + 1];
         }
         num_role_bindings--;
-        role_bindings = realloc(role_bindings, num_role_bindings * sizeof(*role_bindings));
+        (void)ocifbsd_realloc_grow((void **)&role_bindings,
+            (num_role_bindings ? num_role_bindings : 1) * sizeof(*role_bindings));
     }
 
     pthread_mutex_unlock(&auth_lock);
@@ -1360,8 +1361,8 @@ pam_query_audit(const char *username, time_t start, time_t end, int *count)
 
             if (ts >= start && ts <= end) {
                 if (username == NULL || strcmp(user, username) == 0) {
-                    entries = realloc(entries, (n + 1) * sizeof(*entries));
-                    if (entries) {
+                    if (ocifbsd_realloc_grow((void **)&entries,
+                        (n + 1) * sizeof(*entries)) == 0) {
                         entries[n] = calloc(1, sizeof(**entries));
                         if (entries[n]) {
                             entries[n]->timestamp = ts;

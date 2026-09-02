@@ -1010,10 +1010,8 @@ metrics_check_thresholds(void)
             /* Add alert */
             pthread_mutex_lock(&alert_lock);
             
-            active_alerts = realloc(active_alerts,
-                (n_alerts + 1) * sizeof(char *));
-            
-            if (active_alerts != NULL) {
+            if (ocifbsd_realloc_grow((void **)&active_alerts,
+                (n_alerts + 1) * sizeof(char *)) == 0) {
                 char alert[512];
                 snprintf(alert, sizeof(alert),
                     "ALERT %s %s threshold: value=%.2f %s warning=%.2f critical=%.2f",

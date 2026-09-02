@@ -377,8 +377,13 @@ find_whiteouts(const char *dir, struct whiteout_info **info)
 		if (is_whiteout(ent->fts_name)) {
 			target = get_whiteout_target(ent->fts_name);
 			if (target != NULL) {
-				wi->files = realloc(wi->files,
+				char **nf = realloc(wi->files,
 				    (wi->nfiles + 1) * sizeof(char *));
+				if (nf == NULL) {
+					free(target);
+					continue;
+				}
+				wi->files = nf;
 				wi->files[wi->nfiles++] = target;
 			}
 		}
@@ -758,8 +763,11 @@ unpack_image(const char *imagedir, const char *dest,
 			snprintf(path, sizeof(path), "%s/%s",
 			    layers_dir, ent->d_name);
 
-			tarballs = realloc(tarballs,
+			char **nt = realloc(tarballs,
 			    (ntarballs + 1) * sizeof(char *));
+			if (nt == NULL)
+				continue;
+			tarballs = nt;
 			tarballs[ntarballs++] = strdup(path);
 		}
 	}

@@ -2583,7 +2583,9 @@ cluster_find_services(const char *name, const char *ns, int *count)
             (ns == NULL || strcmp(service_registry[i]->namespace, ns) == 0)) {
             if (n >= alloc) {
                 alloc *= 2;
-                result = realloc(result, alloc * sizeof(struct service_endpoint *));
+                if (ocifbsd_realloc_grow((void **)&result,
+                    alloc * sizeof(struct service_endpoint *)) != 0)
+                    break;
             }
             result[n++] = service_registry[i];
         }

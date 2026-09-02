@@ -284,8 +284,12 @@ auth_user_create(const char *username, const char *password)
     user->password_expires = time(NULL) + 90 * 24 * 60 * 60;  /* 90 days */
     
     /* Add to user database */
-    user_db.users = realloc(user_db.users,
-        (user_db.n_users + 1) * sizeof(struct user_identity *));
+    if (ocifbsd_realloc_grow((void **)&user_db.users,
+        (user_db.n_users + 1) * sizeof(struct user_identity *)) != 0) {
+        free(user);
+        pthread_mutex_unlock(&auth_lock);
+        return (-1);
+    }
     user_db.users[user_db.n_users++] = user;
     
     /* Set default role based on username */
