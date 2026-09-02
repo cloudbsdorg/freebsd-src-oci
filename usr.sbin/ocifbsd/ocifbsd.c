@@ -1214,18 +1214,30 @@ proxy_dial(const char *host, const char *port, int timeout_ms)
 	return (fd);
 }
 
-/* Splice bytes both ways until either side closes. */
+/*
+ * Splice bytes both ways with correct half-close semantics: when one side
+ * sends EOF we half-close only the *other* side's write end and keep relaying
+ * the opposite direction until it too closes. Tearing both sides down on the
+ * first EOF (as a naive pump does) truncates an in-flight response whenever the
+ * client half-closes after sending its request — which HTTP clients routinely
+ * do, and which surfaces as intermittent upstream 5xx.
+ */
 static void
 proxy_pump(int a, int b)
 {
 	struct pollfd pfd[2];
 	char buf[65536];
+	int a_readable = 1, b_readable = 1;
 
-	pfd[0].fd = a;
-	pfd[1].fd = b;
 	for (;;) {
-		pfd[0].events = pfd[1].events = POLLIN;
-		pfd[0].revents = pfd[1].revents = 0;
+		if (!a_readable && !b_readable)
+			return;
+		pfd[0].fd = a;
+		pfd[0].events = a_readable ? POLLIN : 0;
+		pfd[0].revents = 0;
+		pfd[1].fd = b;
+		pfd[1].events = b_readable ? POLLIN : 0;
+		pfd[1].revents = 0;
 		if (poll(pfd, 2, -1) < 0) {
 			if (errno == EINTR)
 				continue;
@@ -1235,16 +1247,26 @@ proxy_pump(int a, int b)
 			if (pfd[i].revents & (POLLIN | POLLHUP | POLLERR)) {
 				int from = pfd[i].fd, to = pfd[1 - i].fd;
 				ssize_t n = read(from, buf, sizeof(buf));
-				ssize_t off = 0;
 
-				if (n <= 0)
-					return;
-				while (off < n) {
-					ssize_t w = write(to, buf + off,
-					    (size_t)(n - off));
-					if (w <= 0)
-						return;
-					off += w;
+				if (n > 0) {
+					ssize_t off = 0;
+
+					while (off < n) {
+						ssize_t w = write(to, buf + off,
+						    (size_t)(n - off));
+						if (w <= 0)
+							return;
+						off += w;
+					}
+				} else {
+					/* EOF/error on `from`: half-close the
+					 * peer's write side, stop reading here,
+					 * but keep draining the other way. */
+					(void)shutdown(to, SHUT_WR);
+					if (i == 0)
+						a_readable = 0;
+					else
+						b_readable = 0;
 				}
 			}
 		}
