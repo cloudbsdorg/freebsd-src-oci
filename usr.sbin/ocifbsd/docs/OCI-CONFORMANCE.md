@@ -2,13 +2,17 @@
 SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 REVYTECH, Inc.
 -->
-# OCI Runtime Specification conformance
+# OCI conformance
 
-This document records how `ocifbsd` maps to the
+This document records how `ocifbsd` maps to the OCI specifications and where
+FreeBSD semantics differ from the Linux-centric parts. It has two parts: the
 [OCI Runtime Specification](https://github.com/opencontainers/runtime-spec)
-v1.0.2, and where FreeBSD semantics differ from the Linux-centric parts of
-the spec. The guiding rule (see `.plan/021.0`) is **map honestly to FreeBSD
-primitives or return a clear error** — never emulate Linux badly.
+v1.0.2 (below) and the
+[OCI Image Specification](https://github.com/opencontainers/image-spec) v1.0.0
+(second half). The guiding rule (see `.plan/021.0`) is **map honestly to
+FreeBSD primitives or return a clear error** — never emulate Linux badly.
+
+## Runtime Specification
 
 The official `oci-runtime-tools` conformance harness is written in Go and is
 not part of the FreeBSD base system; running it would violate this project's
@@ -71,3 +75,45 @@ status values.
 
 These are deliberate: the runtime maps what FreeBSD can honestly enforce and
 warns (or no-ops) rather than pretending to enforce Linux-only controls.
+
+## Image Specification
+
+This section records how the image subsystem (`image/`) maps to the
+[OCI Image Specification](https://github.com/opencontainers/image-spec) v1.0.0
+and the compatible Docker Registry HTTP API v2. As with the runtime side, the
+same self-contained constraint applies: parsing and verification use the
+vendored json-c and libcurl plus base `libmd`/`libarchive`, with no ports.
+
+## Pull / resolve
+
+| Concern | Status | Notes |
+|---------|--------|-------|
+| Reference parsing | Conformant | `registry[:port]/repo[:tag|@digest]`; bare names default to `docker.io` and the `library/` namespace (`image_parse_test:registry_init_docker_hub`). |
+| Registry API v2 | Conformant | Manifest and blob fetch over libcurl against the Docker Registry v2 endpoints; Docker Hub is remapped to `registry-1.docker.io`. |
+| Manifest (schema 2) | Conformant | `application/vnd.docker.distribution.manifest.v2+json` and the OCI `application/vnd.oci.image.manifest.v1+json` layout: config descriptor + ordered layer list (`image_parse_test:parse_manifest_v2`, `parse_manifest_empty_layers`). |
+| Image config | Conformant | `Entrypoint`+`Cmd`, `Env`, `WorkingDir` merged into the runtime config (`image_parse_test:parse_config_entrypoint_cmd`). |
+| Content digests | Conformant | `sha256:` digests computed with `libmd` and verified against fetched content; a mismatch fails the pull (`image_parse_test:compute_and_verify_digest`, `verify_layer_missing_file`). |
+| Malformed input | Conformant | Invalid JSON / empty references are rejected rather than crashing (`parse_manifest_bad_json`, `registry_init_invalid`). |
+
+## Layers & filesystem
+
+| Concern | Status | Notes |
+|---------|--------|-------|
+| Layer media types | Conformant | gzip'd tar layers (`...layer.v1.tar+gzip` / OCI `...layer.v1.tar+gzip`) unpacked with `libarchive`. |
+| Ordered application | Conformant | Layers applied in manifest order over a single `rootfs/`. |
+| Whiteouts | Conformant | `.wh.<name>` and `.wh..wh..opq` opaque markers handled per the layer spec (`whiteout_test`). |
+| Path-traversal safety | Conformant | Entries escaping the destination (`..`, absolute paths) are rejected during unpack (`unpack_layer_test`). |
+| Store layout | Conformant | `/var/lib/ocifbsd/<registry>/<repo>/<tag>/` holding a runtime `config.json` and a populated `rootfs/`; `images` lists usable roots, `rmi` removes them. |
+
+## Honest gaps (image)
+
+- **Signatures / provenance**: cothority/Notary/sigstore verification is not
+  implemented; digests are verified but image *signatures* are not.
+- **Multi-arch indexes**: `application/vnd.oci.image.index.v1+json` (fat
+  manifests) resolve to the host architecture; cross-arch selection beyond the
+  build host is not exercised.
+- **Push**: `push.c` implements the upload path but is unverified against a
+  live registry (see tasks 2.7 / 2.12) — it is not yet asserted conformant.
+- **Live Docker Hub pull**: the pull→unpack→store pipeline is proven by a real
+  unpacked image in the store and by the parser/unpack unit tests; a fresh
+  end-to-end network fetch is gated on a routable test host (task 2.11).
