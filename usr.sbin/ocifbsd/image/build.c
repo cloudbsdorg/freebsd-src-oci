@@ -611,10 +611,22 @@ image_build(const char *containerfile, const char *context, const char *tag,
 		fprintf(stderr, "build: cannot create %s\n", destdir);
 		goto out;
 	}
-	/* Fresh rootfs: remove any stale one, then copy the base in. */
+	/*
+	 * Fresh rootfs: remove any stale one, then copy the base in. A previous
+	 * build may have left devfs mounted under it, and a FreeBSD base rootfs
+	 * contains schg-flagged binaries (su, login, ...); both defeat a plain
+	 * rm -rf. Unmount dev and clear the immutable flags first.
+	 */
 	{
+		char devdir[PATH_MAX];
+		char *const um[] = { "umount", "-f", devdir, NULL };
+		char *const chf[] = { "chflags", "-R", "noschg", destrootfs,
+		    NULL };
 		char *const rm[] = { "rm", "-rf", destrootfs, NULL };
 
+		snprintf(devdir, sizeof(devdir), "%s/dev", destrootfs);
+		(void)run_cmd(NULL, NULL, NULL, um);
+		(void)run_cmd(NULL, NULL, NULL, chf);
 		(void)run_cmd(NULL, NULL, NULL, rm);
 	}
 	if (verbose)

@@ -602,6 +602,49 @@ container_apply_mounts(struct ocifbsd_container *c)
 		return (-1);
 	}
 	spec = c->spec;
+
+	/*
+	 * Always provide /dev. A container with no devfs mount has no
+	 * /dev/null, /dev/random, etc., and most services (php-fpm, sshd, and
+	 * many daemons) fail to initialize ("open(\"/dev/null\"): No such file
+	 * or directory"). Built/pulled images rarely carry a mounts array, so
+	 * mount devfs at <rootfs>/dev — ruleset 4, the jail-safe device subset —
+	 * unless the spec already mounts something there.
+	 */
+	{
+		bool have_dev = false;
+		char dest[PATH_MAX];
+		char *argv[8];
+		int argc = 0, k;
+
+		for (k = 0; spec != NULL && spec->mounts != NULL &&
+		    k < spec->n_mounts; k++) {
+			const char *d = spec->mounts[k].destination;
+
+			if (d != NULL && strcmp(d, "/dev") == 0) {
+				have_dev = true;
+				break;
+			}
+		}
+		if (!have_dev) {
+			snprintf(dest, sizeof(dest), "%s/dev", c->rootfs);
+			(void)ensure_directory(dest, 0755);
+			argv[argc++] = __DECONST(char *, "/sbin/mount");
+			argv[argc++] = __DECONST(char *, "-t");
+			argv[argc++] = __DECONST(char *, "devfs");
+			argv[argc++] = __DECONST(char *, "-o");
+			argv[argc++] = __DECONST(char *, "ruleset=4");
+			argv[argc++] = __DECONST(char *, "devfs");
+			argv[argc++] = dest;
+			argv[argc] = NULL;
+			if (run_mount_cmd(argv) == 0)
+				(void)record_applied_mount(c, dest);
+			else
+				fprintf(stderr, "warning: default devfs mount at "
+				    "%s failed: %s\n", dest, strerror(errno));
+		}
+	}
+
 	if (spec == NULL || spec->n_mounts <= 0 || spec->mounts == NULL)
 		return (0);
 
