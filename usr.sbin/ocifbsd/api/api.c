@@ -64,6 +64,9 @@ static struct {
     int request_count;
 } *rate_limit_state = NULL;
 static int rate_limit_count = 0;
+/* Upper bound on tracked clients so a spoofed-source flood can't grow the
+ * rate-limit table without bound (expired slots are recycled first). */
+#define API_RATE_LIMIT_MAX	4096
 static pthread_mutex_t rate_limit_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*
@@ -333,8 +336,11 @@ api_route_request(struct api_request *req, struct api_response *resp)
     
     pthread_mutex_lock(&server->lock);
     for (ep = server->endpoints; ep != NULL; ep = ep->next) {
+        /* Match the request method against the endpoint's method. The old
+         * `ep->method == HTTP_GET || ...` short-circuited to true for every
+         * GET-registered route, so it also answered POST/PUT/PATCH/DELETE. */
         if (strcmp(req->path, ep->path) == 0 &&
-            (ep->method == HTTP_GET || strcmp(req->method,
+            strcmp(req->method,
             ep->method == HTTP_GET ? "GET" :
             ep->method == HTTP_POST ? "POST" :
             ep->method == HTTP_PUT ? "PUT" :
@@ -713,14 +719,15 @@ api_rate_limit(const char *client_id, int window_seconds, int max_requests)
 {
     time_t now;
     int i;
-    
+    int reuse = -1;	/* first expired slot we can recycle */
+
     if (client_id == NULL)
         return (0);
-    
+
     time(&now);
-    
+
     pthread_mutex_lock(&rate_limit_lock);
-    
+
     for (i = 0; i < rate_limit_count; i++) {
         if (strcmp(rate_limit_state[i].client_id, client_id) == 0) {
             if (now - rate_limit_state[i].window_start > window_seconds) {
@@ -736,24 +743,41 @@ api_rate_limit(const char *client_id, int window_seconds, int max_requests)
             pthread_mutex_unlock(&rate_limit_lock);
             return (0);
         }
+        /* Remember an expired slot to recycle rather than growing. */
+        if (reuse < 0 &&
+            now - rate_limit_state[i].window_start > window_seconds)
+            reuse = i;
     }
-    
-    /* Add new client */
-    rate_limit_state = realloc(rate_limit_state,
-        (rate_limit_count + 1) * sizeof(rate_limit_state[0]));
-    if (rate_limit_state == NULL) {
+
+    /*
+     * New client. Recycle an expired slot if one exists; otherwise cap the
+     * table so a flood of distinct/spoofed source addresses cannot grow it
+     * without bound (memory-exhaustion DoS). At the cap with nothing to
+     * recycle, fail open (allow) rather than reject legitimate traffic.
+     */
+    if (reuse >= 0) {
+        i = reuse;
+    } else if (rate_limit_count < API_RATE_LIMIT_MAX) {
+        void *_new = realloc(rate_limit_state,
+            (rate_limit_count + 1) * sizeof(rate_limit_state[0]));
+        if (_new == NULL) {
+            pthread_mutex_unlock(&rate_limit_lock);
+            return (0);  /* Allow on allocation failure */
+        }
+        rate_limit_state = _new;
+        i = rate_limit_count++;
+    } else {
         pthread_mutex_unlock(&rate_limit_lock);
-        return (0);  /* Allow on allocation failure */
+        return (0);  /* table full, no expired slot: fail open */
     }
-    
-    strlcpy(rate_limit_state[rate_limit_count].client_id, client_id,
-        sizeof(rate_limit_state[rate_limit_count].client_id));
-    rate_limit_state[rate_limit_count].window_start = now;
-    rate_limit_state[rate_limit_count].request_count = 1;
-    rate_limit_count++;
-    
+
+    strlcpy(rate_limit_state[i].client_id, client_id,
+        sizeof(rate_limit_state[i].client_id));
+    rate_limit_state[i].window_start = now;
+    rate_limit_state[i].request_count = 1;
+
     pthread_mutex_unlock(&rate_limit_lock);
-    
+
     return (0);
 }
 
