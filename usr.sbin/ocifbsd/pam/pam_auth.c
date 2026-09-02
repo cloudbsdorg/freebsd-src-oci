@@ -1049,22 +1049,30 @@ pam_verify_jwt(const char *jwt, char **username, uint32_t *perms, time_t *exp)
         }
     }
 
-    if (perms != NULL || exp != NULL) {
+    if (perms != NULL) {
         char *perms_str = strstr(payload_dec, "\"perms\":");
+
+        if (perms_str && sscanf(perms_str + 8, "%u", &p) == 1)
+            *perms = p;
+    }
+
+    /*
+     * Always enforce the exp claim if present — expiry is a security check
+     * that must run regardless of whether the caller wants the value back.
+     * (It used to be gated on the exp OUT param being non-NULL, so callers
+     * passing NULL — e.g. the refresh-token path — skipped expiry entirely
+     * and accepted expired tokens.)
+     */
+    {
         char *exp_str = strstr(payload_dec, "\"exp\":");
+        long exp_val;
 
-        if (perms_str && sscanf(perms_str + 8, "%u", &p) == 1) {
-            if (perms) *perms = p;
-        }
-
-        if (exp_str) {
-            long exp_val;
-            if (sscanf(exp_str + 6, "%ld", &exp_val) == 1) {
-                if (exp) *exp = (time_t)exp_val;
-                if (exp && *exp < time(NULL)) {
-                    free(token_copy);
-                    return (-1);  /* Token expired */
-                }
+        if (exp_str != NULL && sscanf(exp_str + 6, "%ld", &exp_val) == 1) {
+            if (exp != NULL)
+                *exp = (time_t)exp_val;
+            if ((time_t)exp_val < time(NULL)) {
+                free(token_copy);
+                return (-1);  /* Token expired */
             }
         }
     }
@@ -1074,10 +1082,23 @@ pam_verify_jwt(const char *jwt, char **username, uint32_t *perms, time_t *exp)
         hash, SHA256_DIGEST_LENGTH);
     base64_encode((char *)hash, SHA256_DIGEST_LENGTH, expected_sig, sizeof(expected_sig));
 
-    free(token_copy);
+    /*
+     * Constant-time signature comparison — strcmp() short-circuits on the
+     * first differing byte, leaking how much of a forged signature is correct
+     * (a timing oracle). Compare in time independent of the contents.
+     *
+     * NB: sig points into token_copy, so this must run BEFORE freeing it
+     * (the old code compared sig after free(token_copy) — a use-after-free).
+     */
+    {
+        size_t elen = strlen(expected_sig);
+        int bad = (strlen(sig) != elen ||
+            timingsafe_bcmp(sig, expected_sig, elen) != 0);
 
-    if (strcmp(sig, expected_sig) != 0)
-        return (-1);  /* Invalid signature */
+        free(token_copy);
+        if (bad)
+            return (-1);  /* Invalid signature */
+    }
 
     return (0);
 }
