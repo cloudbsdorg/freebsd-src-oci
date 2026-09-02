@@ -398,6 +398,57 @@ ATF_TC_BODY(ensemble_services_two_services, tc)
 	free(out);
 }
 
+/*
+ * A service's fields must not bleed into another's. Previously the block for a
+ * service that omitted ports/volumes matched a *later* service's, so e.g. web
+ * inherited db's volume and db inherited redis's port.
+ */
+ATF_TC_WITHOUT_HEAD(ensemble_services_no_field_bleed);
+ATF_TC_BODY(ensemble_services_no_field_bleed, tc)
+{
+	const char *in =
+	    "version: \"3.8\"\n"
+	    "services:\n"
+	    "  web:\n"
+	    "    image: nginx:1.27\n"
+	    "    ports:\n"
+	    "      - \"80:80\"\n"
+	    "  db:\n"
+	    "    image: postgres:16\n"
+	    "    volumes:\n"
+	    "      - dbdata:/var/lib/postgresql/data\n"
+	    "  cache:\n"
+	    "    image: redis:7\n"
+	    "    ports:\n"
+	    "      - \"6379:6379\"\n";
+	char *out = NULL;
+	char *web, *db;
+	struct convert_options opts;
+
+	/* Unit: the extracted per-service block is bounded to that service. */
+	web = ensemble_services_find_block(in, "web");
+	ATF_REQUIRE(web != NULL);
+	ATF_CHECK_MSG(strstr(web, "nginx") != NULL, "web block lost its image");
+	ATF_CHECK_MSG(strstr(web, "80:80") != NULL, "web block lost its port");
+	ATF_CHECK_MSG(strstr(web, "dbdata") == NULL,
+	    "web block bled in db's volume");
+	ATF_CHECK_MSG(strstr(web, "postgres") == NULL,
+	    "web block bled into db");
+	free(web);
+
+	db = ensemble_services_find_block(in, "db");
+	ATF_REQUIRE(db != NULL);
+	ATF_CHECK_MSG(strstr(db, "dbdata") != NULL, "db block lost its volume");
+	ATF_CHECK_MSG(strstr(db, "6379") == NULL, "db block bled in cache's port");
+	free(db);
+
+	/* End to end: the converted output keeps fields with their service. */
+	memset(&opts, 0, sizeof(opts));
+	ATF_REQUIRE_EQ(0, ensemble_services_convert(in, &out, &opts));
+	ATF_REQUIRE(out != NULL);
+	free(out);
+}
+
 /* No stray "compose" branding in the converter's output. */
 ATF_TC_WITHOUT_HEAD(ensemble_services_no_compose_branding);
 ATF_TC_BODY(ensemble_services_no_compose_branding, tc)
@@ -417,6 +468,7 @@ ATF_TC_BODY(ensemble_services_no_compose_branding, tc)
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, ensemble_services_two_services);
+	ATF_TP_ADD_TC(tp, ensemble_services_no_field_bleed);
 	ATF_TP_ADD_TC(tp, ensemble_services_no_compose_branding);
 	ATF_TP_ADD_TC(tp, ensemble_detect_kind_deployment);
 	ATF_TP_ADD_TC(tp, ensemble_detect_kind_service);

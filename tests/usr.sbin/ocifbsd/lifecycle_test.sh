@@ -304,11 +304,12 @@ EOF
 	cid=$(tr -d ' \t\r\n' < c.out)
 	atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
 
-	# The jail root must be a read-only, nosuid nullfs overlay.
+	# The jail root must be a read-only, nosuid nullfs overlay (match this
+	# container's own mountpoint, not any stray .jailroot from another run).
 	atf_check -s exit:0 -o match:"read-only" \
-	    sh -c "mount | grep '\.jailroot'"
+	    sh -c "mount | grep '${cid}.jailroot'"
 	atf_check -s exit:0 -o match:"nosuid" \
-	    sh -c "mount | grep '\.jailroot'"
+	    sh -c "mount | grep '${cid}.jailroot'"
 
 	# A write to the container root must be blocked (read-only fs). Report
 	# BLOCKED/WROTE and always exit 0 so the assertion keys off the output,
@@ -320,7 +321,7 @@ EOF
 
 	# Delete tears the overlay down: no jailroot mount is left behind.
 	atf_check -s exit:0 -e ignore -o ignore "${bin}" delete --force "${cid}"
-	if mount | grep -q '\.jailroot'; then
+	if mount | grep -q "${cid}.jailroot"; then
 		atf_fail "jailroot nullfs still mounted after delete"
 	fi
 }

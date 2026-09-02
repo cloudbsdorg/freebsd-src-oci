@@ -250,9 +250,15 @@ ensemble_services_get_value(const char *service_block, const char *key)
 
 /*
  * Locate a service's block: the line "<indent><name>:" (indented under the
- * services: map). Returns a pointer to the start of the name, or NULL.
+ * services: map), and return a malloc'd copy of just that service's block —
+ * from its name line down to (but not including) the next non-blank line at the
+ * same or lower indentation (the next service, or a top-level key such as
+ * volumes:/networks:). Bounding the block is essential: without it a lookup for
+ * "ports"/"volumes" on a service that omits them would match a *later*
+ * service's values and bleed fields across services. Caller frees the result.
+ * Returns NULL if the service is not found or on allocation failure.
  */
-static const char *
+static char *
 ensemble_services_find_block(const char *compose, const char *name)
 {
 	char needle[128];
@@ -262,16 +268,52 @@ ensemble_services_find_block(const char *compose, const char *name)
 	nlen = (size_t)snprintf(needle, sizeof(needle), "%s:", name);
 	while ((sp = strstr(sp, needle)) != NULL) {
 		const char *bol = sp;
+		const char *w, *end;
+		size_t indent, len;
+		char *block;
 
 		while (bol > compose && bol[-1] != '\n')
 			bol--;
 		/* Accept only when just indentation precedes the name. */
-		const char *w = bol;
+		w = bol;
 		while (w < sp && (*w == ' ' || *w == '\t'))
 			w++;
-		if (w == sp)
-			return (sp);
-		sp += nlen;
+		if (w != sp) {
+			sp += nlen;
+			continue;
+		}
+		indent = (size_t)(sp - bol);	/* this service's indent depth */
+
+		/* Advance past the name line, then to the block boundary. */
+		end = strchr(sp, '\n');
+		if (end == NULL)
+			return (strdup(bol));
+		end++;
+		while (*end != '\0') {
+			const char *line = end;
+			size_t li = 0;
+
+			while (line[li] == ' ' || line[li] == '\t')
+				li++;
+			/* A non-blank line at <= this indent ends the block. */
+			if (line[li] != '\0' && line[li] != '\n' &&
+			    li <= indent)
+				break;
+			end = strchr(line, '\n');
+			if (end == NULL) {
+				end = line + strlen(line);
+				break;
+			}
+			end++;
+		}
+
+		len = (size_t)(end - bol);
+		block = malloc(len + 1);
+		if (block == NULL)
+			return (NULL);
+		memcpy(block, bol, len);
+		block[len] = '\0';
+		return (block);
 	}
 	return (NULL);
 }
@@ -324,7 +366,7 @@ ensemble_services_convert_v2(const char *compose, char **output,
 	    "\n");
 	
 	for (int i = 0; i < count; i++) {
-		const char *service_block;
+		char *service_block;
 		char *image, *command, *ports, *volumes, *environment;
 		char *networks, *depends_on;
 
@@ -369,8 +411,9 @@ ensemble_services_convert_v2(const char *compose, char **output,
 		free(environment);
 		free(networks);
 		free(depends_on);
+		free(service_block);
 	}
-	
+
 	/* Free services */
 	for (int i = 0; i < count; i++)
 		free(services[i]);
@@ -410,7 +453,7 @@ ensemble_services_convert_v3(const char *compose, char **output,
 	    "\n");
 	
 	for (int i = 0; i < count; i++) {
-		const char *service_block;
+		char *service_block;
 		char *image, *command, *ports, *volumes, *environment;
 		char *networks, *depends_on, *deploy_replicas;
 
@@ -467,8 +510,9 @@ ensemble_services_convert_v3(const char *compose, char **output,
 		free(networks);
 		free(depends_on);
 		free(deploy_replicas);
+		free(service_block);
 	}
-	
+
 	/* Check for networks section */
 	char *networks = strstr(compose, "networks:");
 	if (networks != NULL) {
