@@ -942,6 +942,42 @@ netcfg_apply_to_spec(const struct netcfg *nc, struct oci_runtime_spec *spec)
 		fb->dns = tmp;
 		fb->n_dns = (int)nc->n_dns;
 	}
+	if (nc->bridge != NULL) {
+		char *b = strdup(nc->bridge);
+
+		if (b != NULL) {
+			free(fb->bridge);
+			fb->bridge = b;
+		}
+	}
+	/*
+	 * Apply the default gateways. Without this the container gets its
+	 * address but no default route, so anything off its own subnet is
+	 * unreachable (a bare `ocifbsd network set --gateway4` had no effect).
+	 * setup_container_network() consumes default_gateway4[0].
+	 */
+	if (nc->gateway4 != NULL) {
+		char **gw = calloc(2, sizeof(char *));	/* [addr, NULL] */
+
+		if (gw != NULL && (gw[0] = strdup(nc->gateway4)) != NULL) {
+			free_str_array_z(fb->default_gateway4);
+			fb->default_gateway4 = gw;
+			fb->n_default_gateway4 = 1;
+		} else {
+			free(gw);
+		}
+	}
+	if (nc->gateway6 != NULL) {
+		char **gw = calloc(2, sizeof(char *));	/* [addr, NULL] */
+
+		if (gw != NULL && (gw[0] = strdup(nc->gateway6)) != NULL) {
+			free_str_array_z(fb->default_gateway6);
+			fb->default_gateway6 = gw;
+			fb->n_default_gateway6 = 1;
+		} else {
+			free(gw);
+		}
+	}
 }
 
 /*

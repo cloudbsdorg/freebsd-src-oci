@@ -2328,6 +2328,7 @@ cmd_network_set(int argc, char **argv)
 
 	enum {
 		OPT_VNET = 256, OPT_IP4, OPT_IP6, OPT_GW4, OPT_GW6, OPT_DNS,
+		OPT_BRIDGE,
 		OPT_CLEAR_IP4, OPT_CLEAR_IP6, OPT_CLEAR_DNS, OPT_CLEAR
 	};
 	static struct option longopts[] = {
@@ -2337,6 +2338,7 @@ cmd_network_set(int argc, char **argv)
 		{ "gateway4",	required_argument,	NULL, OPT_GW4 },
 		{ "gateway6",	required_argument,	NULL, OPT_GW6 },
 		{ "dns",	required_argument,	NULL, OPT_DNS },
+		{ "bridge",	required_argument,	NULL, OPT_BRIDGE },
 		{ "clear-ip4",	no_argument,		NULL, OPT_CLEAR_IP4 },
 		{ "clear-ip6",	no_argument,		NULL, OPT_CLEAR_IP6 },
 		{ "clear-dns",	no_argument,		NULL, OPT_CLEAR_DNS },
@@ -2439,6 +2441,9 @@ cmd_network_set(int argc, char **argv)
 			break;
 		case OPT_DNS:
 			rc = netcfg_add_dns(&nc, optarg);
+			break;
+		case OPT_BRIDGE:
+			rc = netcfg_set_bridge(&nc, optarg);
 			break;
 		case OPT_CLEAR_IP4:
 			netcfg_clear_ip4(&nc);

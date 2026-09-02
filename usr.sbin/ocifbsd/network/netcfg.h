@@ -27,6 +27,7 @@ struct netcfg {
 	char	*gateway6;		/* default IPv6 gateway, or NULL */
 	char	**dns;			/* DNS nameserver addresses */
 	size_t	n_dns;
+	char	*bridge;		/* host bridge to attach the epair to */
 };
 
 /* Lifecycle. */
@@ -52,6 +53,7 @@ int	netcfg_add_ip4(struct netcfg *nc, const char *cidr);
 int	netcfg_add_ip6(struct netcfg *nc, const char *cidr);
 int	netcfg_set_gateway4(struct netcfg *nc, const char *gw);
 int	netcfg_set_gateway6(struct netcfg *nc, const char *gw);
+int	netcfg_set_bridge(struct netcfg *nc, const char *bridge);
 int	netcfg_add_dns(struct netcfg *nc, const char *ns);
 void	netcfg_clear_ip4(struct netcfg *nc);
 void	netcfg_clear_ip6(struct netcfg *nc);

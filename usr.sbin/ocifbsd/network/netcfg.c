@@ -133,6 +133,7 @@ netcfg_free(struct netcfg *nc)
 	str_array_free(nc->dns, nc->n_dns);
 	free(nc->gateway4);
 	free(nc->gateway6);
+	free(nc->bridge);
 	netcfg_init(nc);
 }
 
@@ -244,6 +245,28 @@ netcfg_set_gateway6(struct netcfg *nc, const char *gw)
 	return (set_gateway(&nc->gateway6, gw, AF_INET6));
 }
 
+int
+netcfg_set_bridge(struct netcfg *nc, const char *bridge)
+{
+	char *dup;
+
+	if (nc == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+	if (bridge == NULL || bridge[0] == '\0') {
+		free(nc->bridge);
+		nc->bridge = NULL;
+		return (0);
+	}
+	dup = strdup(bridge);
+	if (dup == NULL)
+		return (-1);
+	free(nc->bridge);
+	nc->bridge = dup;
+	return (0);
+}
+
 void
 netcfg_clear_ip4(struct netcfg *nc)
 {
@@ -323,6 +346,9 @@ netcfg_to_json(const struct netcfg *nc)
 	if (nc->n_dns > 0)
 		json_object_object_add(root, "dns",
 		    str_array_to_json(nc->dns, nc->n_dns));
+	if (nc->bridge != NULL)
+		json_object_object_add(root, "bridge",
+		    json_object_new_string(nc->bridge));
 
 	rendered = json_object_to_json_string_ext(root,
 	    JSON_C_TO_STRING_PRETTY);
@@ -384,6 +410,9 @@ netcfg_parse(const char *json, struct netcfg *out)
 	if (json_object_object_get_ex(root, "gateway6", &v) &&
 	    json_object_get_type(v) == json_type_string)
 		out->gateway6 = strdup(json_object_get_string(v));
+	if (json_object_object_get_ex(root, "bridge", &v) &&
+	    json_object_get_type(v) == json_type_string)
+		out->bridge = strdup(json_object_get_string(v));
 
 	json_object_put(root);
 	return (0);
