@@ -1216,7 +1216,9 @@ cert_status_json(char **json_out)
 {
     struct cert_info **certs;
     int count;
-    char *json = NULL, *tmp;
+    char *buf = NULL;
+    size_t bufsz = 0;
+    FILE *ms;
 
     if (json_out == NULL)
         return (-1);
@@ -1227,27 +1229,30 @@ cert_status_json(char **json_out)
         return (0);
     }
 
-    json = strdup("[");
-
+    /*
+     * Build the array in one streaming pass. The previous loop asprintf'd the
+     * entire accumulated JSON plus one element each iteration and freed the
+     * old string — O(n^2) byte copies (the "Schlemiel the Painter" pattern).
+     * open_memstream grows a single buffer, making this O(n).
+     */
+    ms = open_memstream(&buf, &bufsz);
+    if (ms == NULL) {
+        free(certs);
+        return (-1);
+    }
+    fputc('[', ms);
     for (int i = 0; i < count; i++) {
-        asprintf(&tmp, "%s%s{\"name\":\"%s\",\"type\":%d,\"cn\":\"%s\","
+        fprintf(ms, "%s{\"name\":\"%s\",\"type\":%d,\"cn\":\"%s\","
             "\"status\":%d,\"expires\":%ld}",
-            json, i > 0 ? "," : "",
+            i > 0 ? "," : "",
             certs[i]->name, certs[i]->type, certs[i]->cn,
             certs[i]->status, (long)certs[i]->expires);
-        free(json);
-        json = tmp;
     }
-
-    json = realloc(json, strlen(json) + 2);
-    {
-        size_t l = strlen(json);
-        json[l] = ']';
-        json[l + 1] = '\0';
-    }
+    fputc(']', ms);
+    fclose(ms);			/* finalizes buf/bufsz */
 
     free(certs);
-    *json_out = json;
+    *json_out = buf;
 
     return (0);
 }
