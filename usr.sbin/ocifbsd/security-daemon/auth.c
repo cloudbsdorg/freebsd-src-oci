@@ -39,13 +39,12 @@
 #include <sys/mman.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <crypto/rijndael/rijndael.h>
+#include <openssl/evp.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libutil.h>
 #include <login_cap.h>
-#include <pam_conv.h>
-#include <pam_types.h>
+#include <security/pam_appl.h>
 #include <pwd.h>
 #include <sha256.h>
 #include <stdio.h>
@@ -56,6 +55,18 @@
 
 #include "auth.h"
 #include "../include/ocifbsd.h"
+
+/* Base dirs the code referenced without defining. */
+#ifndef OCIFBSD_VAR_DIR
+#define OCIFBSD_VAR_DIR OCIFBSD_DATA_DIR
+#endif
+#ifndef OCIFBSD_CERT_DIR
+#define OCIFBSD_CERT_DIR OCIFBSD_DATA_DIR "/certs"
+#endif
+
+/* Defined lower in this file; used before its definition. */
+static int pam_conv_func(int num_msg, const struct pam_message **msg,
+    struct pam_response **resp, void *appdata_ptr);
 
 /* Global state */
 static int auth_initialized = 0;
@@ -101,24 +112,16 @@ static struct {
 static uint8_t encryption_key[32];
 static int encryption_key_initialized = 0;
 
-/* Default role permissions */
-static int default_permissions[] = {
-    PERM_READ,                   /* viewer */
-    PERM_READ | PERM_WRITE,      /* editor */
-    PERM_READ | PERM_WRITE | PERM_DELETE,  /* admin */
-    PERM_READ | PERM_WRITE | PERM_DELETE | PERM_ADMIN,  /* cluster-admin */
-    PERM_READ | PERM_WRITE,      /* operator */
-};
 
 /*
  * Compare functions for RB trees
  */
-int token_compare(struct auth_token *a, struct auth_token *b)
+static int token_compare(struct auth_token *a, struct auth_token *b)
 {
     return (strcmp(a->token_id, b->token_id));
 }
 
-int secret_compare(struct secret *a, struct secret *b)
+static int secret_compare(struct secret *a, struct secret *b)
 {
     int cmp = strcmp(a->namespace, b->namespace);
     if (cmp != 0)
@@ -126,7 +129,7 @@ int secret_compare(struct secret *a, struct secret *b)
     return (strcmp(a->name, b->name));
 }
 
-int audit_compare(struct audit_entry *a, struct audit_entry *b)
+static int audit_compare(struct audit_entry *a, struct audit_entry *b)
 {
     if (a->id < b->id)
         return (-1);
@@ -135,13 +138,23 @@ int audit_compare(struct audit_entry *a, struct audit_entry *b)
     return (0);
 }
 
-int rb_compare(struct role_binding *a, struct role_binding *b)
+static int rb_compare(struct role_binding *a, struct role_binding *b)
 {
     int cmp = strcmp(a->namespace, b->namespace);
     if (cmp != 0)
         return (cmp);
     return (strcmp(a->name, b->name));
 }
+
+/*
+ * Define the red-black tree functions. auth.h declares them via RB_PROTOTYPE
+ * but no translation unit generated them, so token_tree_RB_FIND etc. were
+ * undefined — the module could never link. Generate them here.
+ */
+RB_GENERATE(role_binding_tree, role_binding, entry, rb_compare)
+RB_GENERATE(token_tree, auth_token, entry, token_compare)
+RB_GENERATE(secret_tree, secret, entry, secret_compare)
+RB_GENERATE(audit_tree, audit_entry, entry, audit_compare)
 
 /*
  * Initialize auth subsystem
@@ -385,7 +398,7 @@ auth_authenticate(const char *username, const char *password)
      * struct user_identity has no password_hash field. To fix:
      *
      *   1. Add to struct user_identity (in auth.h):
-     *        char password_hash[256];  /* crypt(3) output */
+     *        char password_hash[256];  (crypt(3) output)
      *
      *   2. Add auth_user_add() function that takes a plaintext
      *      password, calls crypt(password, salt) to hash it, and
@@ -420,20 +433,12 @@ auth_authenticate_pam(const char *username, const char *password)
     pam_handle_t *pamh;
     struct pam_conv conv;
     int pam_err;
-    struct pam_message msg;
-    const struct pam_message *msgp;
-    struct pam_response *resp;
-    
+
     if (username == NULL || password == NULL)
         return (-1);
-    
-    /* Setup PAM conversation */
-    msg.msg_style = PAM_PROMPT_ECHO_OFF;
-    msg.msg = password;
-    msgp = &msg;
-    resp = NULL;
-    
-    conv.conv = function pam_conv_func;
+
+    /* The conversation function supplies the password from appdata_ptr. */
+    conv.conv = pam_conv_func;
     conv.appdata_ptr = (void *)password;
     
     pam_err = pam_start("ocifbsd", username, &conv, &pamh);
@@ -522,7 +527,7 @@ auth_token_create(const char *username, char *token_out, size_t token_len)
     
     /* Calculate permissions from roles */
     for (int i = 0; i < user->n_roles; i++) {
-        for (int j = 0; j < sizeof(role_defs) / sizeof(role_defs[0]); j++) {
+        for (int j = 0; j < (int)(sizeof(role_defs) / sizeof(role_defs[0])); j++) {
             if (strcmp(user->roles[i], role_defs[j].name) == 0) {
                 token->permissions |= role_defs[j].permissions;
             }
@@ -676,7 +681,7 @@ auth_check_permission(const char *username, const char *resource, int permission
     
     /* Check user roles for permission */
     for (i = 0; i < user->n_roles; i++) {
-        for (j = 0; j < sizeof(role_defs) / sizeof(role_defs[0]); j++) {
+        for (j = 0; j < (int)(sizeof(role_defs) / sizeof(role_defs[0])); j++) {
             if (strcmp(user->roles[i], role_defs[j].name) == 0) {
                 if ((role_defs[j].permissions & permission) == permission) {
                     return (0);  /* Permission granted */
@@ -770,14 +775,12 @@ secret_get(const char *name, const char *namespace, size_t *len)
  * Output format: 16-byte IV || ciphertext (PKCS#7 padded)
  */
 int
-secret_encrypt(void *data, size_t len, void **out, size_t *out_len)
+secret_encrypt(const void *data, size_t len, void **out, size_t *out_len)
 {
-    keyInstance key;
+    EVP_CIPHER_CTX *ctx;
     uint8_t iv[16];
     uint8_t *buf;
-    size_t padded_len;
-    int pad;
-    size_t i;
+    int l1 = 0, l2 = 0;
 
     if (data == NULL || out == NULL || len == 0)
         return (-1);
@@ -787,47 +790,35 @@ secret_encrypt(void *data, size_t len, void **out, size_t *out_len)
         return (-1);
     }
 
-    /* PKCS#7 pad to next 16-byte boundary */
-    pad = 16 - (len % 16);
-    padded_len = len + pad;
-
-    /* Output: 16-byte IV + padded ciphertext */
-    *out_len = 16 + padded_len;
-    buf = malloc(*out_len);
+    /*
+     * AES-256-CBC via OpenSSL EVP (PKCS#7 padding). Output format is
+     * unchanged: 16-byte random IV || ciphertext. (The previous code used
+     * the KERNEL rijndael primitive via <crypto/rijndael/rijndael.h>, which
+     * is not available in userland, so the module could not be built.)
+     */
+    arc4random_buf(iv, sizeof(iv));
+    buf = malloc(sizeof(iv) + len + 16);	/* IV + ct + one pad block */
     if (buf == NULL)
         return (-1);
-
-    /* Generate random IV */
-    arc4random_buf(iv, sizeof(iv));
     memcpy(buf, iv, sizeof(iv));
 
-    /* Initialize AES-256 key schedule */
-    if (rijndael_makeKey(&key, DIR_ENCRYPT, 256, encryption_key) != 1) {
+    ctx = EVP_CIPHER_CTX_new();
+    if (ctx == NULL) {
+        free(buf);
+        return (-1);
+    }
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, encryption_key,
+            iv) != 1 ||
+        EVP_EncryptUpdate(ctx, buf + sizeof(iv), &l1, data, (int)len) != 1 ||
+        EVP_EncryptFinal_ex(ctx, buf + sizeof(iv) + l1, &l2) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
         free(buf);
         errno = EINVAL;
         return (-1);
     }
+    EVP_CIPHER_CTX_free(ctx);
 
-    /* Encrypt each 16-byte block in CBC mode */
-    uint8_t prev[16];
-    memcpy(prev, iv, sizeof(prev));
-    for (i = 0; i < padded_len; i += 16) {
-        uint8_t block[16];
-        size_t in_len = (i + 16 <= len) ? 16 : (len - i);
-        size_t j;
-
-        memcpy(block, (uint8_t *)data + i, in_len);
-        /* PKCS#7 padding */
-        for (j = in_len; j < 16; j++)
-            block[j] = (uint8_t)pad;
-        /* CBC: XOR with previous ciphertext (or IV) */
-        for (j = 0; j < 16; j++)
-            block[j] ^= prev[j];
-        /* Encrypt */
-        rijndael_encrypt(block, &buf[16 + i], &key);
-        memcpy(prev, &buf[16 + i], sizeof(prev));
-    }
-
+    *out_len = sizeof(iv) + (size_t)l1 + (size_t)l2;
     *out = buf;
     return (0);
 }
@@ -839,12 +830,11 @@ secret_encrypt(void *data, size_t len, void **out, size_t *out_len)
 int
 secret_decrypt(void *data, size_t len, void **out, size_t *out_len)
 {
-    keyInstance key;
-    const uint8_t *iv;
-    const uint8_t *ciphertext;
+    EVP_CIPHER_CTX *ctx;
+    const uint8_t *iv, *ciphertext;
     size_t ciphertext_len;
     uint8_t *buf;
-    size_t i;
+    int l1 = 0, l2 = 0;
 
     if (data == NULL || out == NULL)
         return (-1);
@@ -863,42 +853,28 @@ secret_decrypt(void *data, size_t len, void **out, size_t *out_len)
     ciphertext = iv + 16;
     ciphertext_len = len - 16;
 
+    /* AES-256-CBC via OpenSSL EVP; EVP strips the PKCS#7 padding. */
     buf = malloc(ciphertext_len);
     if (buf == NULL)
         return (-1);
-
-    /* Initialize AES-256 key schedule */
-    if (rijndael_makeKey(&key, DIR_DECRYPT, 256, encryption_key) != 1) {
+    ctx = EVP_CIPHER_CTX_new();
+    if (ctx == NULL) {
+        free(buf);
+        return (-1);
+    }
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, encryption_key,
+            iv) != 1 ||
+        EVP_DecryptUpdate(ctx, buf, &l1, ciphertext,
+            (int)ciphertext_len) != 1 ||
+        EVP_DecryptFinal_ex(ctx, buf + l1, &l2) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
         free(buf);
         errno = EINVAL;
         return (-1);
     }
+    EVP_CIPHER_CTX_free(ctx);
 
-    /* Decrypt each 16-byte block in CBC mode */
-    for (i = 0; i < ciphertext_len; i += 16) {
-        uint8_t block[16];
-        size_t j;
-
-        memcpy(block, &ciphertext[i], 16);
-        rijndael_decrypt(block, &buf[i], &key);
-        /* CBC: XOR with previous ciphertext (or IV) */
-        if (i == 0) {
-            for (j = 0; j < 16; j++)
-                buf[i + j] ^= iv[j];
-        } else {
-            for (j = 0; j < 16; j++)
-                buf[i + j] ^= ciphertext[i - 16 + j];
-        }
-    }
-
-    /* Remove PKCS#7 padding */
-    uint8_t pad = buf[ciphertext_len - 1];
-    if (pad < 1 || pad > 16) {
-        free(buf);
-        errno = EINVAL;
-        return (-1);
-    }
-    *out_len = ciphertext_len - pad;
+    *out_len = (size_t)l1 + (size_t)l2;
     *out = buf;
     return (0);
 }

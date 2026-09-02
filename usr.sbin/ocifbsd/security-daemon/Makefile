@@ -1,16 +1,18 @@
 # $FreeBSD$
-# Makefile for ocifbsd security daemon module
+# Makefile for ocifbsd security-daemon (auth backend)
 
-# NOTE: no <src.opts.mk> here. This module references no MK_* knobs, and
-# including it would break builds on a minimal FreeBSD without /usr/src (the
-# self-contained/cleanroom release target). The installed bsd.prog.mk / bsd.lib.mk
-# supply the defaults we need.
+# NOTE: no <src.opts.mk> here (self-contained/cleanroom release target).
 
-SRCS=	auth.c
-MKLLM=	no
-MKSTATIC=	no
-LIBS+=	-lpam
+LIB=		ocifbsd_auth
+SHLIB_NAME=	ocifbsd_auth.so.1
+SRCS=		auth.c
 
-WARNS?=	2
+WARNS?=		2
 
-.include <bsd.prog.mk>
+# auth.c uses PAM, OpenSSL (AES via EVP + cert gen), libmd (SHA256).
+LIBADD=		pam crypto md
+
+# Static archive may be linked into the PIE ocifbsd binary later; compile PIC.
+CFLAGS+=	-fPIC
+
+.include <bsd.lib.mk>

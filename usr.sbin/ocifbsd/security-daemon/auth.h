@@ -194,7 +194,7 @@ int secret_delete(const char *name, const char *namespace);
 int secret_update(const char *name, const char *namespace, const void *data, size_t len);
 void *secret_get(const char *name, const char *namespace, size_t *len);
 struct secret **secrets_list(const char *namespace, int *count);
-int secret_encrypt(void *data, size_t len, void **out, size_t *out_len);
+int secret_encrypt(const void *data, size_t len, void **out, size_t *out_len);
 int secret_decrypt(void *data, size_t len, void **out, size_t *out_len);
 
 /* TLS certificates */
