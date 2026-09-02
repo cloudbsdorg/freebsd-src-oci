@@ -1289,6 +1289,17 @@ container_start(struct ocifbsd_container *c)
 	}
 
 	/*
+	 * Overlay the persisted `ocifbsd network set` configuration onto the
+	 * freshly-parsed image spec. Without this, a spec reloaded from the
+	 * image config.json carries none of the container's vnet/ip4/gateway
+	 * settings, so setup_container_network() below would skip epair wiring
+	 * and a service (e.g. redis binding a socket) fails with EPROTONOSUPPORT
+	 * in a jail that has no configured interface. Mirrors what
+	 * create_jail_from_spec() does at create time.
+	 */
+	container_overlay_netcfg(c, c->spec);
+
+	/*
 	 * Make any requested-but-unenforced security restriction visible, so an
 	 * operator is never misled into thinking the container is hardened.
 	 */

@@ -1107,6 +1107,14 @@ vnet_wire_jail(int jid, const char *ip4cidr, const char *gw4,
 	 * exists in the jail for the container (or the operator) to configure,
 	 * and we keep it rather than failing the whole start.
 	 */
+	/*
+	 * A fresh vnet jail's lo0 has no IPv4 loopback address, so any service
+	 * that talks to 127.0.0.1 (health checks, redis-cli, PHP-FPM<->app on
+	 * loopback) fails with "network is unreachable". Assign 127.0.0.1/8
+	 * (this also brings lo0 up); ::1 is already present.
+	 */
+	(void)run_cmd(6, "jexec", jidstr, "ifconfig", "lo0", "inet",
+	    "127.0.0.1/8");
 	(void)run_cmd(5, "jexec", jidstr, "ifconfig", "lo0", "up");
 	if (ip4cidr != NULL && ip4cidr[0] != '\0') {
 		if (run_cmd(7, "jexec", jidstr, "ifconfig", side_b, "inet",
