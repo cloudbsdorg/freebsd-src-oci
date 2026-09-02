@@ -608,6 +608,31 @@ node_metrics_export_prometheus(FILE *fp)
 }
 
 /*
+ * A pod name is interpolated into popen() shell commands below, so it must be
+ * restricted to a safe label charset — an unchecked name like "x;reboot" or
+ * "$(...)" is arbitrary command execution as the root collector. (readdir of
+ * the pods state dir also feeds this function.)
+ */
+static bool
+metric_pod_name_is_safe(const char *s)
+{
+    size_t i, len;
+
+    if (s == NULL)
+        return (false);
+    len = strlen(s);
+    if (len == 0 || len > 63)
+        return (false);
+    for (i = 0; i < len; i++) {
+        char c = s[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+            return (false);
+    }
+    return (true);
+}
+
+/*
  * Collect pod metrics
  */
 int
@@ -616,10 +641,12 @@ pod_metrics_collect(const char *pod_name, struct pod_metrics *metrics)
     char cmd[256];
     FILE *fp;
     char buf[256];
-    
+
     if (pod_name == NULL || metrics == NULL)
         return (-1);
-    
+    if (!metric_pod_name_is_safe(pod_name))
+        return (-1);
+
     memset(metrics, 0, sizeof(struct pod_metrics));
     strlcpy(metrics->pod_name, pod_name, sizeof(metrics->pod_name));
     

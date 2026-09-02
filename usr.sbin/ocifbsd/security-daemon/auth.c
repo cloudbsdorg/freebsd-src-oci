@@ -1125,7 +1125,15 @@ cert_check_expiry(const char *name, int warning_days, int critical_days)
     
     if (name == NULL)
         return (-1);
-    
+    /*
+     * name is interpolated into a popen() shell command, so it MUST be
+     * validated — an unchecked name like "x;reboot #" is arbitrary command
+     * execution as the root daemon. cert_generate_ca/node already gate on
+     * auth_id_is_safe; cert_check_expiry did not.
+     */
+    if (!auth_id_is_safe(name))
+        return (-1);
+
     /* Get certificate expiry date */
     snprintf(cmd, sizeof(cmd),
         "openssl x509 -in %s/%s.crt -noout -enddate 2>/dev/null | cut -d= -f2",

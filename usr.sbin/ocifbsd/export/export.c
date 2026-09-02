@@ -847,6 +847,25 @@ network_get_config(const char *interface, char *ip, char *netmask, char *gateway
 
     if (interface == NULL)
         return (-1);
+    /*
+     * interface is interpolated into a popen() shell command; restrict it to
+     * the FreeBSD interface-name charset so a name containing ';', '$(...)',
+     * or backticks cannot inject a command run as root.
+     */
+    {
+        const char *p;
+        size_t ilen = strlen(interface);
+
+        if (ilen == 0 || ilen >= 16)	/* IFNAMSIZ */
+            return (-1);
+        for (p = interface; *p != '\0'; p++) {
+            char c = *p;
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+                c == '-'))
+                return (-1);
+        }
+    }
 
     /* Get IP and netmask */
     snprintf(cmd, sizeof(cmd), "ifconfig %s | grep 'inet '", interface);
