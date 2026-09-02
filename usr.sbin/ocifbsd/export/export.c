@@ -282,7 +282,9 @@ export_to_feb(const char *name, struct export_config *config, char **output_path
     fwrite(metadata, header.metadata_size, 1, fp);
     free(metadata);
 
-    /* Write image data */
+    /* Write image data, tracking the number of bytes actually written to
+     * disk (compressed size when compressing). */
+    uint32_t on_disk_image = 0;
     if (image_data && header.image_size > 0) {
         if (config && config->compress) {
             /* Compress image data */
@@ -292,13 +294,33 @@ export_to_feb(const char *name, struct export_config *config, char **output_path
             if (compressed_size > 0) {
                 fwrite(compressed, compressed_size, 1, fp);
                 free(compressed);
+                on_disk_image = (uint32_t)compressed_size;
             } else {
                 fwrite(image_data, image_size, 1, fp);
+                on_disk_image = (uint32_t)image_size;
             }
         } else {
             fwrite(image_data, image_size, 1, fp);
+            on_disk_image = (uint32_t)image_size;
         }
         free(image_data);
+    }
+
+    /*
+     * Backpatch header.image_size to the ON-DISK byte count. It was written
+     * as the uncompressed size before compression, so a compressed export
+     * recorded the wrong length and import_from_feb read too many/few bytes —
+     * every compressed round-trip failed. decompress_image sizes its own
+     * output buffer, so only the on-disk (input) length must be correct.
+     */
+    if (on_disk_image != header.image_size) {
+        long endpos = ftell(fp);
+        if (endpos >= 0 &&
+            fseek(fp, offsetof(struct feb_header, image_size),
+                SEEK_SET) == 0) {
+            fwrite(&on_disk_image, sizeof(on_disk_image), 1, fp);
+            (void)fseek(fp, endpos, SEEK_SET);
+        }
     }
 
     /* Write volume data if configured */
