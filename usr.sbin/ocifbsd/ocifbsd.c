@@ -98,10 +98,18 @@ static struct cmd_options {
 	.version = 0,
 };
 
-/* Command usage */
+/*
+ * Command usage. The program is always invoked as "ocifbsd", so the name is
+ * fixed here rather than taken from argv[0]: subcommand handlers call
+ * usage("start <container-id>") with just the command string, and previously
+ * passing argv[0] (which for a subcommand is the subcommand name) produced a
+ * doubled "Usage: start start ..." line.
+ */
 static void
-usage(const char *prog, const char *cmd)
+usage(const char *cmd)
 {
+	static const char *const prog = "ocifbsd";
+
 	if (cmd == NULL) {
 		fprintf(stderr, "Usage: %s [OPTIONS] COMMAND [ARGS...]\n\n", prog);
 		fprintf(stderr, "FreeBSD Native OCI Runtime\n\n");
@@ -129,7 +137,7 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "  load [--name ref] <archive|dir>   Import a local OCI image archive\n");
 		fprintf(stderr, "  images                            List local image store paths\n");
 		fprintf(stderr, "  rmi <reference>                   Remove a local image store\n");
-		fprintf(stderr, "  network <list|set> [args]         View/modify container network config\n");
+		fprintf(stderr, "  network <create|ls|rm|inspect|list|set>  Manage networks / container net config\n");
 		fprintf(stderr, "  pod <create|list|delete|logs>     Manage pods (orchestration)\n");
 		fprintf(stderr, "  service <create|scale|...>        Manage services (orchestration)\n");
 		fprintf(stderr, "  stack <create|up|...>             Manage stacks (orchestration)\n");
@@ -618,11 +626,11 @@ cmd_create(int argc, char **argv)
 			from_image = 1;
 			break;
 		case 'h':
-			usage(argv[0],
+			usage(
 			    "create [--name name] [--image ref | <bundle>]");
 			return (0);
 		default:
-			usage(argv[0], "create");
+			usage("create");
 			return (1);
 		}
 	}
@@ -648,7 +656,7 @@ cmd_create(int argc, char **argv)
 		if (argc < 1) {
 			fprintf(stderr,
 			    "error: bundle path or --image required\n");
-			usage("ocifbsd", "create");
+			usage("create");
 			return (1);
 		}
 		bundle = argv[0];
@@ -717,10 +725,10 @@ cmd_start(int argc, char **argv)
 	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
-			usage(argv[0], "start <container-id>");
+			usage("start <container-id>");
 			return (0);
 		default:
-			usage(argv[0], "start");
+			usage("start");
 			return (1);
 		}
 	}
@@ -730,7 +738,7 @@ cmd_start(int argc, char **argv)
 
 	if (argc < 1) {
 		fprintf(stderr, "error: container id required\n");
-		usage(argv[-optind], "start");
+		usage("start");
 		return (1);
 	}
 
@@ -805,10 +813,10 @@ cmd_kill(int argc, char **argv)
 			}
 			break;
 		case 'h':
-			usage(argv[0], "kill <container-id> [--signal <signal>]");
+			usage("kill <container-id> [--signal <signal>]");
 			return (0);
 		default:
-			usage(argv[0], "kill");
+			usage("kill");
 			return (1);
 		}
 	}
@@ -818,7 +826,7 @@ cmd_kill(int argc, char **argv)
 
 	if (argc < 1) {
 		fprintf(stderr, "error: container id required\n");
-		usage(argv[-optind], "kill");
+		usage("kill");
 		return (1);
 	}
 
@@ -946,10 +954,10 @@ cmd_delete(int argc, char **argv)
 			force = true;
 			break;
 		case 'h':
-			usage(argv[0], "delete <container-id> [--force]");
+			usage("delete <container-id> [--force]");
 			return (0);
 		default:
-			usage(argv[0], "delete");
+			usage("delete");
 			return (1);
 		}
 	}
@@ -959,7 +967,7 @@ cmd_delete(int argc, char **argv)
 
 	if (argc < 1) {
 		fprintf(stderr, "error: container id required\n");
-		usage(argv[-optind], "delete");
+		usage("delete");
 		return (1);
 	}
 
@@ -1034,10 +1042,10 @@ cmd_state(int argc, char **argv)
 	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
-			usage(argv[0], "state <container-id>");
+			usage("state <container-id>");
 			return (0);
 		default:
-			usage(argv[0], "state");
+			usage("state");
 			return (1);
 		}
 	}
@@ -1047,7 +1055,7 @@ cmd_state(int argc, char **argv)
 
 	if (argc < 1) {
 		fprintf(stderr, "error: container id required\n");
-		usage(argv[-optind], "state");
+		usage("state");
 		return (1);
 	}
 
@@ -1107,10 +1115,10 @@ cmd_list(int argc, char **argv)
 	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
-			usage(argv[0], "list");
+			usage("list");
 			return (0);
 		default:
-			usage(argv[0], "list");
+			usage("list");
 			return (1);
 		}
 	}
@@ -1168,10 +1176,10 @@ cmd_inspect(int argc, char **argv)
 	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
-			usage(argv[0], "inspect <container-id>");
+			usage("inspect <container-id>");
 			return (0);
 		default:
-			usage(argv[0], "inspect");
+			usage("inspect");
 			return (1);
 		}
 	}
@@ -1181,7 +1189,7 @@ cmd_inspect(int argc, char **argv)
 
 	if (argc < 1) {
 		fprintf(stderr, "error: container id required\n");
-		usage(argv[-optind], "inspect");
+		usage("inspect");
 		return (1);
 	}
 
@@ -1243,11 +1251,11 @@ cmd_run(int argc, char **argv)
 			from_image = 1;
 			break;
 		case 'h':
-			usage(argv[0],
+			usage(
 			    "run [--name name] [--image ref | <bundle>]");
 			return (0);
 		default:
-			usage(argv[0], "run");
+			usage("run");
 			return (1);
 		}
 	}
@@ -1273,7 +1281,7 @@ cmd_run(int argc, char **argv)
 		if (argc < 1) {
 			fprintf(stderr,
 			    "error: bundle path or --image required\n");
-			usage("ocifbsd", "run");
+			usage("run");
 			return (1);
 		}
 		bundle = argv[0];
@@ -1388,17 +1396,17 @@ cmd_pull(int argc, char **argv)
 			dry_run = 1;
 			break;
 		case 'h':
-			usage(argv[0], "pull [--dry-run] <reference>");
+			usage("pull [--dry-run] <reference>");
 			return (0);
 		default:
-			usage(argv[0], "pull");
+			usage("pull");
 			return (1);
 		}
 	}
 	argc -= optind;
 	argv += optind;
 	if (argc < 1) {
-		usage("ocifbsd", "pull [--dry-run] <reference>");
+		usage("pull [--dry-run] <reference>");
 		return (1);
 	}
 	ref = argv[0];
@@ -1607,17 +1615,17 @@ cmd_rmi(int argc, char **argv)
 			force = true;
 			break;
 		case 'h':
-			usage(argv[0], "rmi [--force] <reference>");
+			usage("rmi [--force] <reference>");
 			return (0);
 		default:
-			usage(argv[0], "rmi");
+			usage("rmi");
 			return (1);
 		}
 	}
 	argc -= optind;
 	argv += optind;
 	if (argc < 1) {
-		usage("ocifbsd", "rmi <reference>");
+		usage("rmi <reference>");
 		return (1);
 	}
 	ref = argv[0];
@@ -1718,11 +1726,11 @@ cmd_exec(int argc, char **argv)
 			cwd = optarg;
 			break;
 		case 'h':
-			usage(argv[0],
+			usage(
 			    "exec [--cwd dir] <container-id> <command> [args...]");
 			return (0);
 		default:
-			usage(argv[0], "exec");
+			usage("exec");
 			return (1);
 		}
 	}
@@ -1731,7 +1739,7 @@ cmd_exec(int argc, char **argv)
 
 	if (argc < 2) {
 		fprintf(stderr, "error: container id and command required\n");
-		usage("ocifbsd",
+		usage(
 		    "exec [--cwd dir] <container-id> <command> [args...]");
 		return (1);
 	}
@@ -1796,11 +1804,11 @@ cmd_stop(int argc, char **argv)
 			break;
 		}
 		case 'h':
-			usage(argv[0],
+			usage(
 			    "stop [--timeout sec] <container-id>");
 			return (0);
 		default:
-			usage(argv[0], "stop");
+			usage("stop");
 			return (1);
 		}
 	}
@@ -1809,7 +1817,7 @@ cmd_stop(int argc, char **argv)
 
 	if (argc < 1) {
 		fprintf(stderr, "error: container id required\n");
-		usage("ocifbsd", "stop [--timeout sec] <container-id>");
+		usage("stop [--timeout sec] <container-id>");
 		return (1);
 	}
 
@@ -1870,7 +1878,7 @@ cmd_pause_resume(int argc, char **argv, bool do_pause)
 		switch (ch) {
 		case 'h':
 		default:
-			usage(argv[0], do_pause ?
+			usage(do_pause ?
 			    "pause <container-id>" : "resume <container-id>");
 			return (ch == 'h' ? 0 : 1);
 		}
@@ -1950,17 +1958,17 @@ cmd_push(int argc, char **argv)
 	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'h':
-			usage(argv[0], "push <reference>");
+			usage("push <reference>");
 			return (0);
 		default:
-			usage(argv[0], "push");
+			usage("push");
 			return (1);
 		}
 	}
 	argc -= optind;
 	argv += optind;
 	if (argc < 1) {
-		usage("ocifbsd", "push <reference>");
+		usage("push <reference>");
 		return (1);
 	}
 	ref = argv[0];
@@ -2026,17 +2034,17 @@ cmd_load(int argc, char **argv)
 			ref = optarg;
 			break;
 		case 'h':
-			usage(argv[0], "load [--name ref] <oci-archive|dir>");
+			usage("load [--name ref] <oci-archive|dir>");
 			return (0);
 		default:
-			usage(argv[0], "load");
+			usage("load");
 			return (1);
 		}
 	}
 	argc -= optind;
 	argv += optind;
 	if (argc < 1) {
-		usage("ocifbsd", "load [--name ref] <oci-archive|dir>");
+		usage("load [--name ref] <oci-archive|dir>");
 		return (1);
 	}
 	archive = argv[0];
@@ -2296,7 +2304,7 @@ cmd_network_set(int argc, char **argv)
 	}
 
 	if (argc < 1) {
-		usage("ocifbsd", "network set <container> [options]");
+		usage("network set <container> [options]");
 		return (1);
 	}
 	c = network_resolve(argv[0]);
@@ -2398,14 +2406,14 @@ cmd_network_set(int argc, char **argv)
 			netcfg_clear_dns(&nc);
 			break;
 		case 'h':
-			usage(argv[0], "network set <container> "
+			usage("network set <container> "
 			    "[--vnet on|off] [--ip4 CIDR] [--ip6 CIDR] "
 			    "[--gateway4 ADDR] [--gateway6 ADDR] [--dns ADDR] "
 			    "[--clear|--clear-ip4|--clear-ip6|--clear-dns]");
 			ret = 0;
 			goto out;
 		default:
-			usage(argv[0], "network set");
+			usage("network set");
 			goto out;
 		}
 		if (rc != 0) {
@@ -2595,7 +2603,7 @@ cmd_network_create(int argc, char **argv)
 		case 'i': cfg.internal = true; break;
 		case 'h':
 		default:
-			usage("ocifbsd",
+			usage(
 			    "network create [--driver bridge] [--subnet CIDR] "
 			    "[--gateway IP] [--internal] NAME");
 			return (ch == 'h' ? 0 : 1);
@@ -2871,14 +2879,14 @@ main(int argc, char **argv)
 			break;
 		case 'h':
 			opt.help = 1;
-			usage(argv[0], NULL);
+			usage(NULL);
 			return (0);
 		case 'V':
 			opt.version = 1;
 			version();
 			return (0);
 		default:
-			usage(argv[0], NULL);
+			usage(NULL);
 			return (1);
 		}
 	}
@@ -2887,7 +2895,7 @@ main(int argc, char **argv)
 	argv += optind;
 
 	if (argc < 1) {
-		usage(argv[-optind], NULL);
+		usage(NULL);
 		return (1);
 	}
 
@@ -2905,7 +2913,7 @@ main(int argc, char **argv)
 		fprintf(stderr, " %s", cmd->name);
 	}
 	fprintf(stderr, "\n\n");
-	usage(argv[-optind], NULL);
+	usage(NULL);
 
 	return (1);
 }
