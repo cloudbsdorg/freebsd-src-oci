@@ -29,7 +29,24 @@
  * certificate); otherwise a client context is built (verify the server and
  * present the client certificate). Returns a new SSL_CTX (caller frees with
  * SSL_CTX_free) or NULL on error.
+ *
+ * expected_peer pins the peer's identity: when non-NULL, the peer certificate's
+ * SAN dNSName (or CN) must equal expected_peer or the handshake fails. Chaining
+ * to the cluster CA alone is NOT sufficient — without this, ANY node holding a
+ * CA-issued certificate could impersonate ANY other node. A client dialing a
+ * specific node MUST pass that node's name here. A server generally passes NULL
+ * (it cannot know which member will connect) and authorizes the learned peer
+ * identity, obtained via cluster_mtls_peer_name(), afterward.
  */
-SSL_CTX	*cluster_mtls_ctx(const char *dir, const char *node_name, int is_server);
+SSL_CTX	*cluster_mtls_ctx(const char *dir, const char *node_name,
+	    const char *expected_peer, int is_server);
+
+/*
+ * After a successful handshake, copy the verified peer certificate's CN into
+ * buf (NUL-terminated, at most buflen bytes). Returns 0 on success or -1 if no
+ * verified peer certificate is present or the name does not fit. Use this on
+ * the server to learn (and then authorize) which node connected.
+ */
+int	cluster_mtls_peer_name(SSL *ssl, char *buf, size_t buflen);
 
 #endif /* OCIFBSD_CLUSTER_MTLS_H */
