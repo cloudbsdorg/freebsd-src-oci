@@ -412,28 +412,68 @@ bridge_exists(const char *name)
 /*
  * epair management
  */
-static int
-epair_get_next_id(void)
+
+/*
+ * Given the 'a' side of an epair (as printed by `ifconfig epair create`,
+ * e.g. "epair0a"), write the peer 'b' name into buf. Returns 0 on success,
+ * -1 if aname is empty, does not end in 'a', or does not fit. Pure and
+ * root-free so the naming contract can be unit-tested.
+ */
+int
+epair_peer_name(const char *aname, char *buf, size_t buflen)
 {
-	static int next_id = 0;
-	return (next_id++);
+	size_t len;
+
+	if (aname == NULL || buf == NULL)
+		return (-1);
+	len = strlen(aname);
+	if (len == 0 || len + 1 > buflen)
+		return (-1);
+	if (aname[len - 1] != 'a')
+		return (-1);
+	memcpy(buf, aname, len);
+	buf[len - 1] = 'b';
+	buf[len] = '\0';
+	return (0);
 }
 
 int
 epair_create(const char *prefix, char **side_a, char **side_b)
 {
-	char epair_name[64];
+	char *out = NULL;
+	char name[IFNAMSIZ];
 	char *a, *b;
-	int id;
+	size_t len;
+	int rc;
 
-	id = epair_get_next_id();
-	snprintf(epair_name, sizeof(epair_name), "%sa%d", prefix ? prefix : "epair", id);
+	/*
+	 * epair units are assigned by the kernel; a caller-chosen name is not
+	 * honored. `ifconfig epair create` creates the next free pair and prints
+	 * the 'a' side (e.g. "epair0a"); the peer is the same name ending in
+	 * 'b'. The previous code ran `ifconfig epair create <fabricated-name>`
+	 * (which the kernel ignores) and then returned names like "ocifbsda0"
+	 * that never existed, so nothing downstream could find the interface.
+	 * The prefix is retained in the API for source compatibility but unused.
+	 */
+	(void)prefix;
 
-	/* Create epair */
-	if (run_cmd(4, "ifconfig", "epair", "create", epair_name) != 0)
+	rc = net_capture_argv(&out, (char *const[]){ "ifconfig", "epair",
+	    "create", NULL });
+	if (rc != 0 || out == NULL) {
+		free(out);
 		return (-1);
+	}
 
-	/* Allocate output strings */
+	/* Take the first whitespace-delimited token as the interface name. */
+	len = strcspn(out, " \t\r\n");
+	if (len == 0 || len >= sizeof(name)) {
+		free(out);
+		return (-1);
+	}
+	memcpy(name, out, len);
+	name[len] = '\0';
+	free(out);
+
 	a = malloc(IFNAMSIZ);
 	b = malloc(IFNAMSIZ);
 	if (a == NULL || b == NULL) {
@@ -441,9 +481,13 @@ epair_create(const char *prefix, char **side_a, char **side_b)
 		free(b);
 		return (-1);
 	}
-
-	snprintf(a, IFNAMSIZ, "%sa%d", prefix ? prefix : "epair", id);
-	snprintf(b, IFNAMSIZ, "%sb%d", prefix ? prefix : "epair", id);
+	/* The created side must end in 'a'; derive the 'b' peer from it. */
+	strlcpy(a, name, IFNAMSIZ);
+	if (epair_peer_name(name, b, IFNAMSIZ) != 0) {
+		free(a);
+		free(b);
+		return (-1);
+	}
 
 	*side_a = a;
 	*side_b = b;

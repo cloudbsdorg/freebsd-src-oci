@@ -171,6 +171,7 @@ bool	 bridge_exists(const char *name);
  * epair management
  */
 int	 epair_create(const char *prefix, char **side_a, char **side_b);
+int	 epair_peer_name(const char *aname, char *buf, size_t buflen);
 int	 epair_delete(const char *epair);
 int	 epair_set_mtu(const char *epair, int mtu);
 bool	 epair_exists(const char *epair);
