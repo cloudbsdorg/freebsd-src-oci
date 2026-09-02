@@ -494,12 +494,18 @@ state_list(int *n)
 		/* Expand list if needed */
 		if (count >= capacity) {
 			capacity = capacity ? capacity * 2 : 16;
-			list = realloc(list, capacity * sizeof(*list));
-			if (list == NULL) {
+			void *_t = realloc(list, capacity * sizeof(*list));
+			if (_t == NULL) {
+				/* Free the entries loaded so far and the array
+				 * (realloc into a temp so we don't lose it). */
+				for (int k = 0; k < count; k++)
+					container_free(list[k]);
+				free(list);
 				closedir(dir);
-				*n = count;
+				*n = 0;
 				return (NULL);
 			}
+			list = _t;
 		}
 
 		list[count++] = c;
@@ -512,10 +518,16 @@ state_list(int *n)
 	 * (count == 0) allocate a [NULL] list rather than returning NULL, so
 	 * NULL is reserved for genuine errors.
 	 */
-	list = realloc(list, (count + 1) * sizeof(*list));
-	if (list == NULL) {
-		*n = 0;
-		return (NULL);
+	{
+		void *_t = realloc(list, (count + 1) * sizeof(*list));
+		if (_t == NULL) {
+			for (int k = 0; k < count; k++)
+				container_free(list[k]);
+			free(list);
+			*n = 0;
+			return (NULL);
+		}
+		list = _t;
 	}
 	list[count] = NULL;
 

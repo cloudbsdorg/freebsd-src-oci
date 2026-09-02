@@ -106,13 +106,16 @@ container_register(struct ocifbsd_container *c)
 	if (container_registry_size >= container_registry_capacity) {
 		container_registry_capacity = container_registry_capacity ?
 		    container_registry_capacity * 2 : 16;
-		container_registry = realloc(container_registry,
+		void *_t = realloc(container_registry,
 		    container_registry_capacity * sizeof(*container_registry));
-		if (container_registry == NULL) {
+		if (_t == NULL) {
+			/* Keep the old registry intact on failure (realloc
+			 * into a temp) rather than losing the pointer. */
 			pthread_mutex_unlock(&registry_lock);
 			errno = ENOMEM;
 			return (-1);
 		}
+		container_registry = _t;
 	}
 
 	container_registry[container_registry_size++] = c;
