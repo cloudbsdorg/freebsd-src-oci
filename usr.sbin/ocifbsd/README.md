@@ -4,20 +4,37 @@
 
 ## Features
 
-- **OCI Runtime Compliance**: Runs OCI-compliant containers on FreeBSD
-- **FreeBSD Native**: Uses jail(8), VNET, RCTL, ZFS, and other FreeBSD technologies
-- **Orchestration Ready**: Pods, stacks, services, and rolling updates
-- **Image Management**: Pull/push images from any OCI-compliant registry
-- **Networking**: Bridge, VNET, CNI plugin support
-- **Resource Limits**: Memory, CPU, process limits via RCTL
-- **Security**: MAC labels, RBAC, secrets
-- **Clustering**: Multi-node support with a gossip protocol and full Raft
-  consensus (leader election, log replication, persistence, membership
-  changes, and log compaction/snapshots), exposed via the `ocifbsd-cluster(8)`
-  daemon
-- **Certificates**: Native ACME (RFC 8555) client with ES256/JWS, HTTP-01
-  challenges, rotation and backup — built on base OpenSSL 3
-- **Config Conversion**: Convert Ensemble manifests (declarative resources and multi-service stacks) to the native format
+Status reflects what is tested and enforced today versus what is still
+scaffold. The runtime core (create → run → networking → limits → security)
+is implemented and covered by ATF/kyua tests on FreeBSD; the higher layers
+build but are not yet production-complete.
+
+**Working and tested**
+
+- **OCI runtime lifecycle**: `create`, `start`, `state`, `kill`, `delete`,
+  `run`, `exec`, `stop`, `pause`/`resume`, `list`, `inspect` — jail-backed,
+  with an OCI-conformant `state` output. See [OCI conformance](docs/OCI-CONFORMANCE.md).
+- **FreeBSD native**: jail(8), VNET, RCTL, MAC, nullfs, ZFS — no Linux
+  emulation.
+- **Image management**: pull/push/load/images/rmi against OCI registries;
+  layers verified against manifest digests and unpacked to a ZFS-backed store.
+- **Networking (VNET)**: per-container network stack — an epair is moved into
+  the jail, the container IPv4/gateway configured, and an optional host
+  bridge attached; interfaces are cleaned up on delete.
+- **Resource limits**: `linux.resources` (memory, cpu, pids) mapped to
+  rctl(8) and applied/cleaned across the lifecycle (needs
+  `kern.racct.enable=1`).
+- **Security**: read-only / nosuid root, `process.noNewPrivileges`, RCTL, and
+  MAC labels (`freebsd.macLabel` applied to the init via mac_set_proc).
+- **Config conversion**: convert Ensemble manifests (declarative resources and
+  multi-service stacks) to the native format.
+
+**Scaffold / experimental** (builds, not production-complete — see
+[.plan/005.0](../../.plan/005.0-Risks-TODO.md))
+
+- Orchestration (pods, stacks, services, rolling updates)
+- Clustering (gossip + Raft), certificates (ACME), REST API, PAM, RBAC/secrets
+- CNI plugin interface, cloud export
 
 ## Quick Start
 
@@ -47,49 +64,62 @@ sudo make install              # installs /usr/sbin/ocifbsd
 sudo make install-man          # installs /usr/share/man/man8/ocifbsd.8
 ```
 
-### Run a Container
+### Run a container
+
+`create` takes either an OCI image reference (`--image`) or a path to an OCI
+bundle directory (one containing `config.json` and `rootfs/`). It prints the
+container id.
 
 ```bash
-# Pull an image
-ocifbsd image pull localhost/freebsd:latest
+# From a pulled image:
+ocifbsd pull docker.io/library/hello-world:latest
+cid=$(ocifbsd run --name demo --image docker.io/library/hello-world:latest)
 
-# Create a container
-ocifbsd create --name my-container localhost/freebsd:latest /bin/sh
+# ...or from a local OCI bundle directory:
+cid=$(ocifbsd create --name demo ./mybundle)
+ocifbsd start "$cid"
 
-# Start the container
-ocifbsd start my-container
-
-# Attach to the container
-ocifbsd attach my-container
-
-# Stop the container
-ocifbsd stop my-container
+ocifbsd state "$cid"          # OCI state JSON (pretty by default; -c for one line)
+ocifbsd exec "$cid" /bin/sh -c 'echo hi'
+ocifbsd stop "$cid"           # SIGTERM, then SIGKILL after a timeout
+ocifbsd delete --force "$cid"
 ```
 
-### Run a Pod
+### Networking, limits, and MAC (via the bundle config.json)
 
-```bash
-# Create a pod
-ocifbsd pod create --name my-pod --replicas 2
+These are opt-in `config.json` fields; an absent field leaves the default
+open. See the CONFIGURATION EXTENSIONS section of `ocifbsd(8)`.
 
-# List pods
-ocifbsd pod list
-
-# Get pod logs
-ocifbsd pod logs my-pod
-
-# Scale the pod
-ocifbsd pod scale my-pod --replicas 5
+```json
+{
+  "ociVersion": "1.0.2",
+  "process": { "args": ["/bin/sh"], "cwd": "/" },
+  "root": { "path": "rootfs", "readonly": true },
+  "linux": { "resources": {
+    "memory": { "limit": 134217728 },
+    "cpu": { "quota": 50000, "period": 100000 }
+  } },
+  "freebsd": {
+    "vnet": true,
+    "ip4": ["192.0.2.20/24"],
+    "defaultGateway4": ["192.0.2.1"],
+    "bridge": "ocibr0",
+    "macLabel": "biba/high"
+  }
+}
 ```
 
-### Convert Ensemble Config
+Starting a container from this bundle gives it a read-only root, a 128&nbsp;MiB
+memory cap and a 50%-of-one-core CPU cap via rctl(8), its own VNET interface on
+`ocibr0` at `192.0.2.20/24`, and a Biba MAC label on its init (when a labeling
+policy is loaded). Resource limits require `kern.racct.enable=1`.
+
+### Convert an Ensemble config
 
 ```bash
-# Convert a declarative Deployment manifest
-ocifbsd-convert deployment.yaml -f simple > output.yaml
-
-# Convert a multi-service stack
-ocifbsd-convert app.stack.yml --format native > output.yaml
+# Declarative manifest or a multi-service stack -> native config:
+ocifbsd_convert deployment.yaml > output.yaml
+ocifbsd_convert app.stack.yml   > output.yaml
 ```
 
 ## Architecture
@@ -101,7 +131,7 @@ ocifbsd
 ├── src/               # Core runtime (container lifecycle, hooks, OCI translation)
 ├── api/               # REST API server
 ├── cert/              # Certificate management (ACME/RFC 8555, rotation, backup)
-├── clustering/        # Clustering (gossip + full Raft consensus)
+├── clustering/        # Clustering (gossip + Raft) — scaffold
 ├── convert/           # Config conversion (Ensemble manifests)
 ├── export/            # Cloud export scaffolding (AWS, GCP, Azure)
 ├── gc/                # Garbage collection
@@ -110,7 +140,7 @@ ocifbsd
 ├── metrics/           # Metrics collection
 ├── namespace/         # Namespace isolation
 ├── network/           # Networking (bridge, VNET, CNI)
-├── orchestration/     # Orchestration (pods, stacks, services, health checks)
+├── orchestration/     # Orchestration (pods, stacks, services) — scaffold
 ├── pam/               # PAM authentication
 ├── security/          # Security (RCTL, MAC labels)
 ├── security-daemon/   # Security daemon (RBAC, secrets, TLS)
