@@ -48,6 +48,9 @@
 #include <unistd.h>
 
 #include "include/ocifbsd.h"
+#include <sys/wait.h>
+#include <inttypes.h>
+
 #include "image/pull.h"
 #include "image/push.h"
 #include "image/load.h"
@@ -1094,6 +1097,177 @@ cmd_state(int argc, char **argv)
 	}
 
 	container_free(c);
+	return (0);
+}
+
+/*
+ * Capture `rctl -u jail:<jailname>` output into buf. rctl reports live RACCT
+ * resource usage for the jail (cputime, memoryuse, nthr, ...). Returns 0 on
+ * success (buf NUL-terminated), -1 otherwise. jailname is ocifbsd-<hexid>, so
+ * no shell is involved and the argument is not attacker-controlled.
+ */
+static int
+capture_rctl(const char *jailname, char *buf, size_t buflen)
+{
+	int fds[2], status;
+	pid_t pid;
+	char rule[80];
+	size_t o = 0;
+
+	if (buflen == 0 || pipe(fds) != 0)
+		return (-1);
+	snprintf(rule, sizeof(rule), "jail:%s", jailname);
+	pid = fork();
+	if (pid < 0) {
+		close(fds[0]);
+		close(fds[1]);
+		return (-1);
+	}
+	if (pid == 0) {
+		int dn;
+
+		close(fds[0]);
+		dup2(fds[1], STDOUT_FILENO);
+		dn = open("/dev/null", O_WRONLY);
+		if (dn >= 0)
+			dup2(dn, STDERR_FILENO);
+		execlp("rctl", "rctl", "-u", rule, (char *)NULL);
+		_exit(127);
+	}
+	close(fds[1]);
+	for (;;) {
+		ssize_t r = read(fds[0], buf + o, buflen - 1 - o);
+
+		if (r <= 0)
+			break;
+		o += (size_t)r;
+		if (o >= buflen - 1)
+			break;
+	}
+	buf[o] = '\0';
+	close(fds[0]);
+	waitpid(pid, &status, 0);
+	return (0);
+}
+
+/* Extract the unsigned value of "<key>=" from an rctl -u dump (0 if absent). */
+static uintmax_t
+rctl_field(const char *buf, const char *key)
+{
+	char pat[48];
+	const char *p;
+
+	snprintf(pat, sizeof(pat), "%s=", key);
+	for (p = strstr(buf, pat); p != NULL; p = strstr(p + 1, pat)) {
+		if (p == buf || p[-1] == '\n')
+			return (strtoumax(p + strlen(pat), NULL, 10));
+	}
+	return (0);
+}
+
+/*
+ * `ocifbsd stats` — per-container resource usage from RACCT, as JSON. Pretty by
+ * default (human-facing); --compact emits one JSON object per line (JSONL) for
+ * streaming into a metrics pipeline.
+ */
+static int
+cmd_stats(int argc, char **argv)
+{
+	struct ocifbsd_container **list;
+	int n, i, ch, compact = 0, first = 1;
+
+	static struct option longopts[] = {
+		{ "compact",	no_argument,	NULL, 'c' },
+		{ "help",	no_argument,	NULL, 'h' },
+		{ NULL,		0,		NULL, 0 }
+	};
+
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "ch", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'c':
+			compact = 1;
+			break;
+		case 'h':
+			usage("stats [--compact]");
+			return (0);
+		default:
+			usage("stats [--compact]");
+			return (1);
+		}
+	}
+
+	errno = 0;
+	list = state_list(&n);
+	if (list == NULL) {
+		if (errno != 0) {
+			fprintf(stderr, "error: failed to list containers: %s\n",
+			    strerror(errno));
+			return (1);
+		}
+		if (!compact)
+			printf("{\n  \"containers\": []\n}\n");
+		return (0);
+	}
+
+	if (!compact)
+		printf("{\n  \"containers\": [\n");
+	for (i = 0; i < n; i++) {
+		struct ocifbsd_container *c = list[i];
+		char jn[64], buf[8192], eid[128], enm[512];
+		uintmax_t cpu = 0, mem = 0, vmem = 0, swap = 0;
+		uintmax_t nproc = 0, nthr = 0, ofiles = 0, wall = 0;
+
+		if (c->state == OCIFBSD_STATE_RUNNING) {
+			snprintf(jn, sizeof(jn), "ocifbsd-%.12s",
+			    c->id ? c->id : "");
+			buf[0] = '\0';
+			(void)capture_rctl(jn, buf, sizeof(buf));
+			cpu = rctl_field(buf, "cputime");
+			mem = rctl_field(buf, "memoryuse");
+			vmem = rctl_field(buf, "vmemoryuse");
+			swap = rctl_field(buf, "swapuse");
+			nproc = rctl_field(buf, "maxproc");
+			nthr = rctl_field(buf, "nthr");
+			ofiles = rctl_field(buf, "openfiles");
+			wall = rctl_field(buf, "wallclock");
+		}
+		ocifbsd_json_escape(c->id ? c->id : "", eid, sizeof(eid));
+		ocifbsd_json_escape(c->name ? c->name : "", enm, sizeof(enm));
+
+		if (compact) {
+			printf("{\"id\":\"%s\",\"name\":\"%s\",\"state\":\"%s\","
+			    "\"cputime_sec\":%ju,\"memory_bytes\":%ju,"
+			    "\"vmemory_bytes\":%ju,\"swap_bytes\":%ju,"
+			    "\"processes\":%ju,\"threads\":%ju,"
+			    "\"open_files\":%ju,\"wallclock_sec\":%ju}\n",
+			    eid, enm, ocifbsd_state_to_string(c->state),
+			    cpu, mem, vmem, swap, nproc, nthr, ofiles, wall);
+		} else {
+			printf("%s    {\n"
+			    "      \"id\": \"%s\",\n"
+			    "      \"name\": \"%s\",\n"
+			    "      \"state\": \"%s\",\n"
+			    "      \"cputime_sec\": %ju,\n"
+			    "      \"memory_bytes\": %ju,\n"
+			    "      \"vmemory_bytes\": %ju,\n"
+			    "      \"swap_bytes\": %ju,\n"
+			    "      \"processes\": %ju,\n"
+			    "      \"threads\": %ju,\n"
+			    "      \"open_files\": %ju,\n"
+			    "      \"wallclock_sec\": %ju\n"
+			    "    }",
+			    first ? "" : ",\n", eid, enm,
+			    ocifbsd_state_to_string(c->state),
+			    cpu, mem, vmem, swap, nproc, nthr, ofiles, wall);
+			first = 0;
+		}
+		container_free(c);
+	}
+	if (!compact)
+		printf("\n  ]\n}\n");
+	free(list);
 	return (0);
 }
 
@@ -2879,6 +3053,7 @@ static struct command commands[] = {
 	{ "delete",	cmd_delete,	"Delete a container" },
 	{ "state",	cmd_state,	"Show container state" },
 	{ "list",	cmd_list,	"List containers" },
+	{ "stats",	cmd_stats,	"Per-container resource stats (JSON)" },
 	{ "inspect",	cmd_inspect,	"Show container details" },
 	{ "run",	cmd_run,	"Create and start container" },
 	{ "exec",	cmd_exec,	"Run a command in a running container" },
