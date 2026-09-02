@@ -918,10 +918,34 @@ save_user_state(struct ocifbsd_user *user, const char *path)
  * Verify token
  */
 int
-pam_verify_token(const char *token, char *username, uint32_t *permissions)
+pam_verify_token(const char *token, const char *expected_user,
+    uint32_t *permissions)
 {
+    char *sub = NULL;
     time_t exp;
-    return (pam_verify_jwt(token, &username, permissions, &exp));
+    int rc;
+
+    rc = pam_verify_jwt(token, &sub, permissions, &exp);
+    if (rc != 0) {
+        free(sub);
+        return (-1);
+    }
+
+    /*
+     * Bind the token to the authenticating identity. pam_verify_jwt only
+     * proves the token is validly signed and unexpired; without this check a
+     * token issued to one user would authenticate a request that claims to be
+     * a different user (the caller supplies expected_user from its own
+     * lookup). Require the token's "sub" claim to equal that identity.
+     */
+    if (expected_user == NULL || sub == NULL ||
+        strcmp(sub, expected_user) != 0) {
+        free(sub);
+        return (-1);
+    }
+
+    free(sub);
+    return (0);
 }
 
 /*

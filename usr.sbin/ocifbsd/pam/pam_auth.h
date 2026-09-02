@@ -185,7 +185,7 @@ int     pam_set_config(struct pam_config *config);
 
 int     pam_authenticate_user(struct pam_auth_request *req,
             struct pam_auth_response *resp);
-int     pam_verify_token(const char *token, char *username,
+int     pam_verify_token(const char *token, const char *expected_user,
             uint32_t *permissions);
 int     pam_refresh_token(const char *refresh_token, char **new_token);
 
