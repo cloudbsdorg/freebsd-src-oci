@@ -354,14 +354,17 @@ rctl_limits_applied_and_cleaned_body()
 	rootfs=${bundle}/rootfs
 	mkdir -p "${rootfs}/bin"
 	cp /rescue/sleep "${rootfs}/bin/sleep"; chmod 755 "${rootfs}/bin/sleep"
-	# 128 MiB memoryuse limit via the OCI linux.resources.memory.limit field.
+	# 128 MiB memoryuse limit and a 50%-of-one-core CPU limit via the OCI
+	# linux.resources.memory.limit and cpu.quota/period fields.
 	cat > "${bundle}/config.json" <<EOF
 {
   "ociVersion": "1.0.2",
   "process": { "user": { "uid": 0, "gid": 0 },
     "args": [ "/bin/sleep", "120" ], "cwd": "/" },
   "root": { "path": "rootfs", "readonly": false },
-  "linux": { "resources": { "memory": { "limit": 134217728 } } }
+  "linux": { "resources": {
+    "memory": { "limit": 134217728 },
+    "cpu": { "quota": 50000, "period": 100000 } } }
 }
 EOF
 	name="rctllife$$"
@@ -377,6 +380,10 @@ EOF
 		# rctl(8) lists a subject's rules as `rctl <subject>` (the -l
 		# form takes a different subject syntax and does not match here).
 		atf_check -s exit:0 -o match:"memoryuse" \
+		    sh -c "rctl jail:${jname} 2>/dev/null"
+		# cpu.quota 50000 / period 100000 -> pcpu:...=50 (not the raw
+		# microsecond quota).
+		atf_check -s exit:0 -o match:"pcpu:deny=50" \
 		    sh -c "rctl jail:${jname} 2>/dev/null"
 		atf_check -s exit:0 -e ignore -o ignore \
 		    "${bin}" delete --force "${cid}"

@@ -168,8 +168,34 @@ ATF_TC_BODY(oci_resources_null_json_zeroes, tc)
 	ATF_CHECK(!limits.memory_oom_kill_disable);
 }
 
+/* ----- CPU quota/period -> pcpu ----- */
+
+ATF_TC(quota_to_pcpu);
+ATF_TC_HEAD(quota_to_pcpu, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "OCI cpu.quota/cpu.period converts to an RCTL pcpu percentage, "
+	    "not the raw microsecond quota");
+}
+ATF_TC_BODY(quota_to_pcpu, tc)
+{
+	/* 50000us / 100000us = 50%. */
+	ATF_CHECK_EQ((uint64_t)50, rctl_quota_to_pcpu(50000, 100000));
+	/* A full core. */
+	ATF_CHECK_EQ((uint64_t)100, rctl_quota_to_pcpu(100000, 100000));
+	/* Two cores' worth may exceed 100. */
+	ATF_CHECK_EQ((uint64_t)200, rctl_quota_to_pcpu(200000, 100000));
+	/* Unspecified period defaults to 100000us. */
+	ATF_CHECK_EQ((uint64_t)25, rctl_quota_to_pcpu(25000, 0));
+	/* A tiny positive quota floors at 1%, never 0 (which is unlimited). */
+	ATF_CHECK_EQ((uint64_t)1, rctl_quota_to_pcpu(1, 100000));
+	/* Zero quota is zero (no rule). */
+	ATF_CHECK_EQ((uint64_t)0, rctl_quota_to_pcpu(0, 100000));
+}
+
 ATF_TP_ADD_TCS(tp)
 {
+	ATF_TP_ADD_TC(tp, quota_to_pcpu);
 	ATF_TP_ADD_TC(tp, parse_size_plain);
 	ATF_TP_ADD_TC(tp, parse_size_suffixes);
 	ATF_TP_ADD_TC(tp, parse_size_empty_and_null);

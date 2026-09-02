@@ -329,6 +329,28 @@ run_rctl_output(char **output, int argc, ...)
 }
 
 /*
+ * Convert an OCI CPU quota/period (both in microseconds) to an RCTL pcpu
+ * percentage. pcpu is a whole-percent share of a single core and may exceed
+ * 100 across multiple cores. An unspecified period uses the OCI default of
+ * 100000us; any positive quota floors at 1% so a small request is never
+ * rounded down to zero (which rctl(8) would treat as unlimited).
+ */
+static uint64_t
+rctl_quota_to_pcpu(uint64_t quota, uint64_t period)
+{
+	uint64_t pcpu;
+
+	if (quota == 0)
+		return (0);
+	if (period == 0)
+		period = 100000;
+	pcpu = (quota * 100) / period;
+	if (pcpu == 0)
+		pcpu = 1;
+	return (pcpu);
+}
+
+/*
  * Apply resource limits to a jail
  */
 int
@@ -380,11 +402,22 @@ rctl_apply_rules(const char *jail_name, struct rctl_limits *limits)
 		ret |= run_rctl(3, "rctl", "-a", rule);
 	}
 
-	/* Apply CPU limits via rctl pcpu (no shell; jail_name is untrusted). */
+	/*
+	 * Apply CPU limits via rctl pcpu (no shell; jail_name is untrusted).
+	 * OCI expresses CPU as cpu.quota / cpu.period microseconds; RCTL pcpu is
+	 * a whole-percent share of one core (and may exceed 100 across multiple
+	 * cores). Convert quota/period to a percentage rather than passing the
+	 * raw microsecond quota — the previous code applied e.g. 50000 as pcpu,
+	 * which is not a meaningful CPU percentage. An unspecified period uses
+	 * the OCI default of 100000us, and any positive request floors at 1% so
+	 * a small quota is never rounded down to "unlimited".
+	 */
 	if (limits->cpu_quota > 0) {
+		uint64_t pcpu = rctl_quota_to_pcpu(limits->cpu_quota,
+		    limits->cpu_period);
+
 		snprintf(rule, sizeof(rule), "jail:%s:pcpu:%s=%llu",
-		    jail_name, action,
-		    (unsigned long long)limits->cpu_quota);
+		    jail_name, action, (unsigned long long)pcpu);
 		ret |= run_rctl(3, "rctl", "-a", rule);
 	}
 
