@@ -33,9 +33,11 @@
 
 #include <sys/param.h>
 #include <sys/jail.h>
+#include <sys/mac.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syslimits.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
 
 #include <errno.h>
@@ -344,6 +346,38 @@ record_applied_mount(struct ocifbsd_container *c, const char *target)
 }
 
 /*
+ * Report whether the MAC labeling policy named by a label's prefix is loaded.
+ * A label is "<policy>/<detail>" (e.g. "biba/high"); a loaded policy registers
+ * a "security.mac.<policy>.enabled" sysctl. mac_from_text() is not a usable
+ * probe here — it converts text to an internal form and succeeds even with no
+ * policy loaded. Returns false for a NULL/blank/malformed label.
+ */
+static bool
+mac_policy_for_label_loaded(const char *label)
+{
+	char name[64];
+	char oid[128];
+	const char *slash;
+	size_t nlen;
+	int enabled;
+	size_t sz = sizeof(enabled);
+
+	if (label == NULL || label[0] == '\0')
+		return (false);
+	slash = strchr(label, '/');
+	nlen = (slash != NULL) ? (size_t)(slash - label) : strlen(label);
+	if (nlen == 0 || nlen >= sizeof(name))
+		return (false);
+	memcpy(name, label, nlen);
+	name[nlen] = '\0';
+
+	snprintf(oid, sizeof(oid), "security.mac.%s.enabled", name);
+	if (sysctlbyname(oid, &enabled, &sz, NULL, 0) != 0)
+		return (false);
+	return (enabled != 0);
+}
+
+/*
  * Warn about OCI security-context restrictions this bundle requests but that
  * ocifbsd does not enforce yet, so an operator is never misled into believing a
  * container is hardened when it is not. root.readonly, process.noNewPrivileges,
@@ -370,11 +404,51 @@ warn_unenforced_security(const struct oci_runtime_spec *spec)
 		fprintf(stderr, "warning: linux.maskedPaths (%d) recorded but "
 		    "NOT yet enforced; those paths are not masked\n",
 		    spec->n_masked_paths);
-	if (spec->freebsd != NULL && spec->freebsd->mac_label != NULL)
-		fprintf(stderr, "warning: freebsd.macLabel '%s' recorded but "
-		    "NOT yet enforced; a MAC label needs a loaded labeling "
-		    "policy and setpmac on the init process\n",
+	if (spec->freebsd != NULL && spec->freebsd->mac_label != NULL &&
+	    !mac_policy_for_label_loaded(spec->freebsd->mac_label)) {
+		/*
+		 * The label IS applied to the container's init process (see
+		 * apply_process_mac_label in container_start), but only takes
+		 * effect when the matching MAC labeling policy is loaded. Warn
+		 * only when it is absent, so the operator is not misled into
+		 * believing an unenforceable label is active.
+		 */
+		fprintf(stderr, "warning: freebsd.macLabel '%s' set but its MAC "
+		    "policy is not loaded (labeling policies load at boot, e.g. "
+		    "mac_biba_load=YES); it will not be enforced\n",
 		    spec->freebsd->mac_label);
+	}
+}
+
+/*
+ * Apply a MAC label to the current (container init) process via mac_set_proc,
+ * best-effort. Called in the start child after jail_attach so the label lands
+ * on the container's init. Returns 0 on success or when there is nothing to
+ * do, -1 (with a warning already emitted) when a label was requested but could
+ * not be applied — the caller proceeds regardless, matching the runtime's
+ * "map honestly, do not fail closed on advisory hardening" behavior.
+ */
+static int
+apply_process_mac_label(const char *label)
+{
+	mac_t mac;
+
+	if (label == NULL || label[0] == '\0')
+		return (0);
+
+	if (mac_from_text(&mac, label) != 0) {
+		fprintf(stderr, "warning: cannot parse MAC label '%s': %s\n",
+		    label, strerror(errno));
+		return (-1);
+	}
+	if (mac_set_proc(mac) != 0) {
+		fprintf(stderr, "warning: cannot apply MAC label '%s' (is a "
+		    "labeling policy loaded?): %s\n", label, strerror(errno));
+		mac_free(mac);
+		return (-1);
+	}
+	mac_free(mac);
+	return (0);
 }
 
 /*
@@ -1294,6 +1368,14 @@ container_start(struct ocifbsd_container *c)
 			    strerror(errno));
 			_exit(126);
 		}
+
+		/*
+		 * Apply the requested MAC label to this (the container init)
+		 * process, inside the jail. Best-effort: a labeling policy must
+		 * be loaded for it to take effect.
+		 */
+		if (c->spec->freebsd != NULL)
+			(void)apply_process_mac_label(c->spec->freebsd->mac_label);
 
 		/* Set working directory */
 		if (c->spec->process.cwd != NULL) {

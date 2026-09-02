@@ -536,6 +536,58 @@ vnet_bridge_attach_cleanup()
 	rm -f /var/run/ocifbsd/*.epair 2>/dev/null || true
 }
 
+atf_test_case mac_label_applied_or_warned cleanup
+mac_label_applied_or_warned_head()
+{
+	atf_set "descr" "freebsd.macLabel is applied to the container init when " \
+	    "its MAC policy is loaded, and warned as unenforceable otherwise"
+	atf_set "require.user" "root"
+}
+mac_label_applied_or_warned_body()
+{
+	local bin bundle rootfs cid name jname
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	[ -x /rescue/sleep ] || atf_skip "/rescue/sleep not available"
+	bundle=$(pwd)/macbundle
+	rootfs=${bundle}/rootfs
+	mkdir -p "${rootfs}/bin"
+	cp /rescue/sleep "${rootfs}/bin/sleep"; chmod 755 "${rootfs}/bin/sleep"
+	cat > "${bundle}/config.json" <<EOF
+{
+  "ociVersion": "1.0.2",
+  "process": { "user": { "uid": 0, "gid": 0 },
+    "args": [ "/bin/sleep", "120" ], "cwd": "/" },
+  "root": { "path": "rootfs", "readonly": false },
+  "freebsd": { "macLabel": "biba/high" }
+}
+EOF
+	name="maclife$$"
+	atf_check -s exit:0 -e ignore -o save:c.out \
+	    "${bin}" create --name "${name}" "${bundle}"
+	cid=$(tr -d ' \t\r\n' < c.out)
+
+	if [ "$(sysctl -n security.mac.biba.enabled 2>/dev/null)" = "1" ]; then
+		# Policy loaded: the init process must carry the biba label.
+		atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
+		jname=$(jls -q name | grep '^ocifbsd-' | head -1)
+		atf_check -s exit:0 -o match:"biba/high" \
+		    sh -c "ps -J ${jname} -o label,command | grep sleep"
+	else
+		# No policy: start warns it will not be enforced, still runs.
+		atf_check -s exit:0 -o match:"will not be enforced" \
+		    sh -c "${bin} start ${cid} 2>&1"
+	fi
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" delete --force "${cid}"
+}
+mac_label_applied_or_warned_cleanup()
+{
+	local j
+	for j in $(jls -q name 2>/dev/null | grep '^ocifbsd-'); do
+		jail -r "${j}" 2>/dev/null || true
+	done
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case create_start_kill_delete
@@ -546,4 +598,5 @@ atf_init_test_cases()
 	atf_add_test_case rctl_limits_applied_and_cleaned
 	atf_add_test_case vnet_epair_wired_and_cleaned
 	atf_add_test_case vnet_bridge_attach
+	atf_add_test_case mac_label_applied_or_warned
 }
