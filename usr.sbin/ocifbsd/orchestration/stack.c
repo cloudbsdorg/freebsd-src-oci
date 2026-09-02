@@ -610,6 +610,130 @@ stack_update(struct stack *stack, struct stack_spec *new_spec)
  * Service operations (also used by stack management)
  */
 
+static char *
+get_service_state_path(const char *name, const char *namespace)
+{
+	char *path;
+
+	asprintf(&path, "%s/services/%s/%s.json",
+	    orch_var_dir(), namespace ? namespace : "default", name);
+	return (path);
+}
+
+/*
+ * Persist a service's state so it survives across CLI processes. Creates the
+ * parent directory only (mkdirp on the full path would make the state file a
+ * directory). Saves the fields the CLI needs: name/namespace/stack and the
+ * spec's image + replica count.
+ */
+static int
+save_service_state(struct service *service)
+{
+	FILE *fp;
+	char *path;
+	char *slash;
+
+	path = get_service_state_path(service->name, service->namespace);
+	if (path == NULL)
+		return (-1);
+	slash = strrchr(path, '/');
+	if (slash != NULL) {
+		*slash = '\0';
+		if (mkdirp(path, 0755) != 0 && errno != EEXIST) {
+			free(path);
+			return (-1);
+		}
+		*slash = '/';
+	}
+	fp = fopen(path, "w");
+	free(path);
+	if (fp == NULL)
+		return (-1);
+
+	fprintf(fp, "{\n");
+	fprintf(fp, "  \"name\": \"%s\",\n", service->name);
+	fprintf(fp, "  \"namespace\": \"%s\",\n", service->namespace);
+	fprintf(fp, "  \"stack\": \"%s\",\n", service->stack);
+	fprintf(fp, "  \"image\": \"%s\",\n",
+	    service->spec != NULL ? service->spec->image : "");
+	fprintf(fp, "  \"replicas\": %d\n",
+	    service->spec != NULL ? service->spec->replicas : 0);
+	fprintf(fp, "}\n");
+
+	fclose(fp);
+	return (0);
+}
+
+/*
+ * Reconstruct a service from its on-disk state (name/namespace/stack/image/
+ * replicas). A minimal spec and status are allocated so the CLI's list output
+ * (which reads spec->image/replicas and status) is valid; the replica array is
+ * not reconstructed. Returns NULL if no state file exists. Does not call
+ * service_get/service_list, so there is no recursion.
+ */
+static struct service *
+service_load_disk(const char *name, const char *namespace)
+{
+	char *path;
+	FILE *fp;
+	char buf[1024];
+	struct service *service;
+	struct service_spec *spec;
+	struct service_status *status;
+	const char *ns = namespace ? namespace : "default";
+
+	path = get_service_state_path(name, ns);
+	if (path == NULL)
+		return (NULL);
+	fp = fopen(path, "r");
+	free(path);
+	if (fp == NULL)
+		return (NULL);
+
+	service = calloc(1, sizeof(*service));
+	spec = calloc(1, sizeof(*spec));
+	status = calloc(1, sizeof(*status));
+	if (service == NULL || spec == NULL || status == NULL) {
+		free(service);
+		free(spec);
+		free(status);
+		fclose(fp);
+		return (NULL);
+	}
+	strlcpy(service->name, name, sizeof(service->name));
+	strlcpy(service->namespace, ns, sizeof(service->namespace));
+	strlcpy(spec->name, name, sizeof(spec->name));
+
+	while (fgets(buf, sizeof(buf), fp) != NULL) {
+		char tmp[512];
+		int rep;
+
+		if (strstr(buf, "\"stack\":") != NULL &&
+		    sscanf(strstr(buf, "\"stack\":"), "\"stack\": \"%255[^\"]\"",
+		    tmp) == 1) {
+			strlcpy(service->stack, tmp, sizeof(service->stack));
+			strlcpy(spec->stack, tmp, sizeof(spec->stack));
+		} else if (strstr(buf, "\"image\":") != NULL &&
+		    sscanf(strstr(buf, "\"image\":"), "\"image\": \"%511[^\"]\"",
+		    tmp) == 1) {
+			strlcpy(spec->image, tmp, sizeof(spec->image));
+		} else if (strstr(buf, "\"replicas\":") != NULL &&
+		    sscanf(strstr(buf, "\"replicas\":"), "\"replicas\": %d",
+		    &rep) == 1) {
+			spec->replicas = rep;
+		}
+	}
+	fclose(fp);
+
+	strlcpy(status->name, service->name, sizeof(status->name));
+	strlcpy(status->namespace, service->namespace, sizeof(status->namespace));
+	strlcpy(status->stack, service->stack, sizeof(status->stack));
+	status->desired_replicas = spec->replicas;
+	service->spec = spec;
+	service->status = status;
+	return (service);
+}
+
 /*
  * Create a new service
  */
@@ -629,9 +753,13 @@ service_create(struct service_spec *spec)
 		return (NULL);
 	
 	strlcpy(service->name, spec->name, sizeof(service->name));
-	strlcpy(service->namespace, 
-	    spec->name[0] ? spec->name : "default",
-	    sizeof(service->namespace));
+	/*
+	 * service_spec has no namespace field, so a service lives in the
+	 * "default" namespace. (This previously copied spec->name into the
+	 * namespace, so `service list` — which filters on "default" — never
+	 * matched its own services.)
+	 */
+	strlcpy(service->namespace, "default", sizeof(service->namespace));
 	strlcpy(service->stack, spec->stack, sizeof(service->stack));
 	
 	/* Copy spec */
@@ -696,7 +824,10 @@ service_create(struct service_spec *spec)
 	}
 	service_registry[service_registry_count++] = service;
 	pthread_mutex_unlock(&service_registry_lock);
-	
+
+	/* Persist so a later CLI process can list/scale/delete it. */
+	save_service_state(service);
+
 	orch_event_publish("Normal", "ServiceCreated", service->namespace,
 	    "Service %s created with %d replicas",
 	    service->name, spec->replicas);
@@ -864,10 +995,22 @@ service_delete(struct service *service)
 		}
 	}
 	pthread_mutex_unlock(&service_registry_lock);
-	
+
+	/* Remove on-disk state so the service does not reappear in a later
+	 * list/get from another process. */
+	{
+		char *path = get_service_state_path(service->name,
+		    service->namespace);
+
+		if (path != NULL) {
+			(void)unlink(path);
+			free(path);
+		}
+	}
+
 	orch_event_publish("Normal", "ServiceDeleted", service->namespace,
 	    "Service %s deleted", service->name);
-	
+
 	service_free(service);
 	return (ret);
 }
@@ -889,7 +1032,15 @@ service_get(const char *name, const char *namespace)
 		}
 	}
 	pthread_mutex_unlock(&service_registry_lock);
-	
+
+	/* Fall back to on-disk state for a service from an earlier process. */
+	{
+		struct service *disk = service_load_disk(name, ns);
+
+		if (disk != NULL)
+			return (disk);
+	}
+
 	errno = ENOENT;
 	return (NULL);
 }
@@ -921,7 +1072,57 @@ service_list(const char *namespace, int *count)
 		}
 	}
 	pthread_mutex_unlock(&service_registry_lock);
-	
+
+	/* Add services persisted on disk by earlier processes, deduped. */
+	{
+		char dirpath[PATH_MAX];
+		DIR *d;
+		struct dirent *e;
+
+		snprintf(dirpath, sizeof(dirpath), "%s/services/%s",
+		    orch_var_dir(), ns);
+		d = opendir(dirpath);
+		if (d != NULL) {
+			while ((e = readdir(d)) != NULL) {
+				char svcname[256];
+				char *dot;
+				struct service *ls;
+				int dup = 0, k;
+
+				if (e->d_name[0] == '.')
+					continue;
+				strlcpy(svcname, e->d_name, sizeof(svcname));
+				dot = strstr(svcname, ".json");
+				if (dot == NULL)
+					continue;
+				*dot = '\0';
+				for (k = 0; k < n; k++) {
+					if (strcmp(result[k]->name, svcname) == 0) {
+						dup = 1;
+						break;
+					}
+				}
+				if (dup)
+					continue;
+				ls = service_load_disk(svcname, ns);
+				if (ls == NULL)
+					continue;
+				if (n >= alloc) {
+					struct service **grown = realloc(result,
+					    alloc * 2 * sizeof(struct service *));
+					if (grown == NULL) {
+						service_free(ls);
+						break;
+					}
+					result = grown;
+					alloc *= 2;
+				}
+				result[n++] = ls;
+			}
+			closedir(d);
+		}
+	}
+
 	*count = n;
 	return (result);
 }

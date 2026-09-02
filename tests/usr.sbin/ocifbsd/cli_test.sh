@@ -102,6 +102,34 @@ stack_lifecycle_persists_body()
 	atf_check -s exit:0 -o not-match:"^app " "${bin}" stack list
 }
 
+atf_test_case service_lifecycle_persists
+service_lifecycle_persists_head()
+{
+	atf_set "descr" "service create/list/delete persist across separate CLI invocations"
+}
+service_lifecycle_persists_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	export OCIFBSD_ORCH_DIR="${PWD}/orch"
+	mkdir -p "${OCIFBSD_ORCH_DIR}"
+
+	atf_check -s exit:0 -o match:"created" \
+	    "${bin}" service create --name web --image nginx:1.27 --replicas 3
+	# a separate list process must see it, with its image and replica count.
+	atf_check -s exit:0 -o match:"web" -o match:"nginx:1.27" \
+	    "${bin}" service list
+	if [ ! -f "${OCIFBSD_ORCH_DIR}/services/default/web.json" ]; then
+		atf_fail "service state not persisted as a file"
+	fi
+	atf_check -s exit:0 -o ignore "${bin}" service delete --name web
+	atf_check -s exit:0 -o not-match:"^web " "${bin}" service list
+}
+
 atf_test_case version_prints
 version_prints_head()
 {
@@ -532,6 +560,7 @@ atf_init_test_cases()
 	atf_add_test_case orch_commands_dispatch
 	atf_add_test_case pod_lifecycle_persists
 	atf_add_test_case stack_lifecycle_persists
+	atf_add_test_case service_lifecycle_persists
 	atf_add_test_case version_prints
 	atf_add_test_case unknown_command_fails
 	atf_add_test_case pull_dry_run
