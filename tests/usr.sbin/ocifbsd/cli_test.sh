@@ -49,6 +49,34 @@ orch_commands_dispatch_body()
 	    "${bin}" definitelynotacommand
 }
 
+atf_test_case pod_lifecycle_persists
+pod_lifecycle_persists_head()
+{
+	atf_set "descr" "pod create/list/delete persist across separate CLI invocations"
+}
+pod_lifecycle_persists_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	export OCIFBSD_ORCH_DIR="${PWD}/orch"
+	mkdir -p "${OCIFBSD_ORCH_DIR}"
+
+	# create in one process, list in another must see it.
+	atf_check -s exit:0 -o match:"created" "${bin}" pod create --name web
+	atf_check -s exit:0 -o match:"web" "${bin}" pod list
+	# the state must be a regular file, not a directory.
+	if [ ! -f "${OCIFBSD_ORCH_DIR}/pods/default/web.json" ]; then
+		atf_fail "pod state not persisted as a file"
+	fi
+	# delete removes it; a later list no longer shows it.
+	atf_check -s exit:0 -o ignore "${bin}" pod delete --name web
+	atf_check -s exit:0 -o not-match:"^web " "${bin}" pod list
+}
+
 atf_test_case version_prints
 version_prints_head()
 {
@@ -477,6 +505,7 @@ atf_init_test_cases()
 {
 	atf_add_test_case help_lists_commands
 	atf_add_test_case orch_commands_dispatch
+	atf_add_test_case pod_lifecycle_persists
 	atf_add_test_case version_prints
 	atf_add_test_case unknown_command_fails
 	atf_add_test_case pull_dry_run

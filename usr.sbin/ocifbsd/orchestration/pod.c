@@ -83,15 +83,28 @@ generate_pod_uid(char *uid, size_t len)
 }
 
 /*
+ * Base directory for orchestration state. Defaults to OCIFBSD_ORCH_VAR_DIR but
+ * may be redirected with OCIFBSD_ORCH_DIR (mirroring OCIFBSD_STATE_DIR for the
+ * runtime) so tests and unprivileged instances can use a writable location.
+ */
+static const char *
+orch_var_dir(void)
+{
+	const char *e = getenv("OCIFBSD_ORCH_DIR");
+
+	return (e != NULL && e[0] != '\0') ? e : OCIFBSD_ORCH_VAR_DIR;
+}
+
+/*
  * Get pod state file path
  */
 static char *
 get_pod_state_path(const char *name, const char *namespace)
 {
 	char *path;
-	
-	asprintf(&path, "%s/pods/%s/%s.json", 
-	    OCIFBSD_ORCH_VAR_DIR, namespace, name);
+
+	asprintf(&path, "%s/pods/%s/%s.json",
+	    orch_var_dir(), namespace, name);
 	return (path);
 }
 
@@ -107,13 +120,26 @@ save_pod_state(struct pod *pod)
 	path = get_pod_state_path(pod->name, pod->namespace);
 	if (path == NULL)
 		return (-1);
-	
-	/* Ensure directory exists */
-	if (mkdirp(path, 0755) != 0 && errno != EEXIST) {
-		free(path);
-		return (-1);
+
+	/*
+	 * Ensure the PARENT directory exists. mkdirp on the full path would
+	 * create the state file itself as a directory, after which fopen()
+	 * fails and the pod is never persisted (so list/delete could not find
+	 * it across CLI invocations).
+	 */
+	{
+		char *slash = strrchr(path, '/');
+
+		if (slash != NULL) {
+			*slash = '\0';
+			if (mkdirp(path, 0755) != 0 && errno != EEXIST) {
+				free(path);
+				return (-1);
+			}
+			*slash = '/';
+		}
 	}
-	
+
 	fp = fopen(path, "w");
 	free(path);
 	
@@ -159,9 +185,67 @@ load_pod_state(struct pod *pod)
 		if (strstr(buf, "\"state\":"))
 			continue;
 	}
-	
+
 	fclose(fp);
 	return (0);
+}
+
+/*
+ * Reconstruct a pod from its on-disk state file (uid/name/namespace/state).
+ * Containers are not persisted, so the loaded pod carries metadata + status
+ * only. Returns a newly allocated pod, or NULL if no state file exists. This
+ * is what lets `pod list`/`pod get`/`pod delete` see pods created by an
+ * earlier CLI process rather than only this process's in-memory registry.
+ */
+static struct pod *
+pod_load_disk(const char *name, const char *namespace)
+{
+	char *path;
+	FILE *fp;
+	char buf[1024];
+	struct pod *pod;
+	struct pod_status *status;
+	const char *ns = namespace ? namespace : "default";
+
+	path = get_pod_state_path(name, ns);
+	if (path == NULL)
+		return (NULL);
+	fp = fopen(path, "r");
+	free(path);
+	if (fp == NULL)
+		return (NULL);
+
+	pod = calloc(1, sizeof(*pod));
+	status = calloc(1, sizeof(*status));
+	if (pod == NULL || status == NULL) {
+		free(pod);
+		free(status);
+		fclose(fp);
+		return (NULL);
+	}
+	strlcpy(pod->name, name, sizeof(pod->name));
+	strlcpy(pod->namespace, ns, sizeof(pod->namespace));
+	status->state = POD_STATE_PENDING;
+
+	while (fgets(buf, sizeof(buf), fp) != NULL) {
+		char tmp[64];
+		int st;
+
+		if (strstr(buf, "\"uid\":") != NULL &&
+		    sscanf(strstr(buf, "\"uid\":"), "\"uid\": \"%63[^\"]\"",
+		    tmp) == 1)
+			strlcpy(pod->uid, tmp, sizeof(pod->uid));
+		else if (strstr(buf, "\"state\":") != NULL &&
+		    sscanf(strstr(buf, "\"state\":"), "\"state\": %d", &st) == 1)
+			status->state = (pod_state_t)st;
+	}
+	fclose(fp);
+
+	strlcpy(status->uid, pod->uid, sizeof(status->uid));
+	strlcpy(status->name, pod->name, sizeof(status->name));
+	strlcpy(status->namespace, pod->namespace, sizeof(status->namespace));
+	pod->status = status;
+	return (pod);
 }
 
 /*
@@ -398,18 +482,25 @@ pod_delete(struct pod *pod)
 		return (-1);
 	
 	/* Stop if running */
-	if (pod->status->state == POD_STATE_RUNNING)
+	if (pod->status != NULL && pod->status->state == POD_STATE_RUNNING)
 		pod_stop(pod, SIGTERM);
-	
-	/* Delete each container */
-	for (i = 0; i < pod->spec->ncontainers; i++) {
-		char *cid = pod->status->containers[i].container_id;
-		
-		if (cid == NULL || cid[0] == '\0')
-			continue;
-		
-		if (ocifbsd_delete_container(cid, true) != 0)
-			ret = -1;
+
+	/*
+	 * Delete each backing container. A pod reconstructed from disk
+	 * (pod_load_disk) carries no spec/container status, so guard against
+	 * both being absent.
+	 */
+	if (pod->spec != NULL && pod->status != NULL &&
+	    pod->status->containers != NULL) {
+		for (i = 0; i < pod->spec->ncontainers; i++) {
+			char *cid = pod->status->containers[i].container_id;
+
+			if (cid == NULL || cid[0] == '\0')
+				continue;
+
+			if (ocifbsd_delete_container(cid, true) != 0)
+				ret = -1;
+		}
 	}
 	
 	/* Remove from registry */
@@ -423,12 +514,25 @@ pod_delete(struct pod *pod)
 		}
 	}
 	pthread_mutex_unlock(&pod_registry_lock);
-	
+
+	/*
+	 * Remove the on-disk state file so the pod does not reappear in a later
+	 * `pod list`/`pod get` from another process.
+	 */
+	{
+		char *path = get_pod_state_path(pod->name, pod->namespace);
+
+		if (path != NULL) {
+			(void)unlink(path);
+			free(path);
+		}
+	}
+
 	/* Free resources */
 	pod->status->finished = time(NULL);
 	orch_event_publish("Normal", "Deleted", pod->namespace,
 	    "Pod %s deleted", pod->name);
-	
+
 	pod_free(pod);
 	return (ret);
 }
@@ -456,6 +560,18 @@ pod_get(const char *name, const char *namespace)
 		}
 	}
 	pthread_mutex_unlock(&pod_registry_lock);
+
+	/*
+	 * Not in this process's registry — try the on-disk state so a pod
+	 * created by an earlier CLI invocation is still found. (pod_load_disk
+	 * does not call back into pod_get/pod_list, so there is no recursion.)
+	 */
+	{
+		struct pod *disk = pod_load_disk(name, namespace);
+
+		if (disk != NULL)
+			return (disk);
+	}
 
 	errno = ENOENT;
 	return (NULL);
@@ -499,6 +615,59 @@ pod_list(const char *namespace, int *count)
 		result[n++] = pod_registry[i];
 	}
 	pthread_mutex_unlock(&pod_registry_lock);
+
+	/*
+	 * Add pods persisted on disk by earlier processes, deduped by name
+	 * against what the in-memory registry already contributed.
+	 */
+	{
+		char dirpath[PATH_MAX];
+		DIR *d;
+		struct dirent *e;
+
+		snprintf(dirpath, sizeof(dirpath), "%s/pods/%s",
+		    orch_var_dir(), ns);
+		d = opendir(dirpath);
+		if (d != NULL) {
+			while ((e = readdir(d)) != NULL) {
+				char pname[256];
+				char *dot;
+				struct pod *lp;
+				int dup = 0, k;
+
+				if (e->d_name[0] == '.')
+					continue;
+				strlcpy(pname, e->d_name, sizeof(pname));
+				dot = strstr(pname, ".json");
+				if (dot == NULL)
+					continue;
+				*dot = '\0';
+				for (k = 0; k < n; k++) {
+					if (strcmp(result[k]->name, pname) == 0) {
+						dup = 1;
+						break;
+					}
+				}
+				if (dup)
+					continue;
+				lp = pod_load_disk(pname, ns);
+				if (lp == NULL)
+					continue;
+				if (n >= alloc) {
+					struct pod **grown = realloc(result,
+					    alloc * 2 * sizeof(struct pod *));
+					if (grown == NULL) {
+						pod_free(lp);
+						break;
+					}
+					result = grown;
+					alloc *= 2;
+				}
+				result[n++] = lp;
+			}
+			closedir(d);
+		}
+	}
 
 	*count = n;
 	return (result);
