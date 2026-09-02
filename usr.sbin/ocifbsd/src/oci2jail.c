@@ -585,6 +585,20 @@ oci_parse_config(const char *config_path)
 			    "readonlyPaths", &spec->n_readonly_paths);
 			spec->masked_paths = json_get_string_array(lx,
 			    "maskedPaths", &spec->n_masked_paths);
+
+			/*
+			 * Serialize linux.resources so the runtime can apply
+			 * RCTL limits. Copied now because json_object_put(root)
+			 * below frees the tree.
+			 */
+			struct json_object *res =
+			    json_object_object_get(lx, "resources");
+			if (res != NULL &&
+			    json_object_get_type(res) == json_type_object) {
+				const char *s = json_object_to_json_string(res);
+				if (s != NULL)
+					spec->linux_resources_json = strdup(s);
+			}
 		}
 	}
 
@@ -653,6 +667,8 @@ oci_free_spec(struct oci_runtime_spec *spec)
 			free(spec->masked_paths[i]);
 		free(spec->masked_paths);
 	}
+
+	free(spec->linux_resources_json);
 
 #define FREE_HOOKS(arr, count) do {						\
 	if (arr) {								\

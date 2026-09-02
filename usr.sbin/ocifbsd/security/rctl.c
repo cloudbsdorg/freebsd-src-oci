@@ -70,15 +70,21 @@ static const char *rctl_resource_names[] = {
 int
 rctl_check_available(void)
 {
-	int rctl_available;
+	int enabled;
+	size_t len = sizeof(enabled);
 
-	size_t len = sizeof(rctl_available);
-	if (sysctlbyname("security.jail.rctl_available", &rctl_available, &len,
-	    NULL, 0) != 0) {
-		return (0);  /* RCTL not available */
-	}
+	/*
+	 * RCTL is usable only when RACCT accounting is compiled in AND enabled.
+	 * The signal for both is the kern.racct.enable sysctl: it is absent when
+	 * the kernel lacks "options RACCT"/"options RCTL", and 0 when present but
+	 * disabled (kern.racct.enable=1 is a boot-time tunable). The previously
+	 * queried "security.jail.rctl_available" oid does not exist on FreeBSD,
+	 * so this always reported unavailable and no limits were ever applied.
+	 */
+	if (sysctlbyname("kern.racct.enable", &enabled, &len, NULL, 0) != 0)
+		return (0);  /* RACCT/RCTL not compiled in */
 
-	return (rctl_available);
+	return (enabled != 0);
 }
 
 /*

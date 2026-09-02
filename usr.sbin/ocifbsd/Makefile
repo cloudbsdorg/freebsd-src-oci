@@ -157,6 +157,20 @@ ${OCIFBSD_IMAGE_LIB}: .PHONY
 DPADD+=		${OCIFBSD_IMAGE_LIB}
 LDADD+=		${OCIFBSD_IMAGE_LIB}
 
+#
+# Security module (RCTL resource limits, MAC labels). Built as a static
+# archive and linked so the container lifecycle can apply/remove RCTL rules
+# from the OCI linux.resources object. Same OBJDIR pattern as the image lib.
+#
+OCIFBSD_SECURITY_OBJDIR!=	cd ${.CURDIR}/security && ${MAKE} -V .OBJDIR
+OCIFBSD_SECURITY_LIB=	${OCIFBSD_SECURITY_OBJDIR}/libocifbsd_security.a
+
+${OCIFBSD_SECURITY_LIB}: .PHONY
+	@cd ${.CURDIR}/security && ${MAKE} all
+
+DPADD+=		${OCIFBSD_SECURITY_LIB}
+LDADD+=		${OCIFBSD_SECURITY_LIB}
+
 # Enable test suite
 HAS_TESTS=
 SUBDIR.${MK_TESTS}+=	tests
@@ -176,8 +190,8 @@ SUBDIR.${MK_TESTS}+=	tests
 # them when generating the .o -> .c dependency rules.
 .PATH: ${.CURDIR}/src
 
-# Ensure image library exists before linking the PROG
-beforebuild: ${OCIFBSD_IMAGE_LIB}
+# Ensure the image and security libraries exist before linking the PROG
+beforebuild: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB}
 
 # Disable the default /usr/obj objdir. The ocifbsd build is a standalone
 # checkout (not in /usr/src), so we put .o files in the current directory.
@@ -899,4 +913,15 @@ banner:
 
 .if exists(/usr/share/mk/bsd.prog.mk)
 .include "/usr/share/mk/bsd.prog.mk"
+
+#
+# Force the program to relink whenever a bundled archive changes. The image
+# and security archives are rebuilt through .PHONY rules; a .PHONY prerequisite
+# does not carry an mtime that make compares against the linked binary, so an
+# incremental build that updated only image/ or security/ would leave the
+# previously linked ${PROG} in place — silently shipping a binary without the
+# updated library code. Depending PROG_FULL on the archives forces the relink.
+# (A clean build always links correctly; this only matters for incremental
+# rebuilds after touching a bundled library.)
+${PROG_FULL}: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB}
 .endif

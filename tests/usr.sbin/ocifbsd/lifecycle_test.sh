@@ -336,6 +336,72 @@ readonly_nosuid_root_cleanup()
 	done
 }
 
+atf_test_case rctl_limits_applied_and_cleaned cleanup
+rctl_limits_applied_and_cleaned_head()
+{
+	atf_set "descr" "a bundle with linux.resources gets RCTL rules on " \
+	    "start and they are removed on delete (enforced when RACCT is on, " \
+	    "gracefully skipped when it is off)"
+	atf_set "require.user" "root"
+}
+rctl_limits_applied_and_cleaned_body()
+{
+	local bin bundle rootfs cid name jname
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	[ -x /rescue/sleep ] || atf_skip "/rescue/sleep not available"
+	bundle=$(pwd)/rctlbundle
+	rootfs=${bundle}/rootfs
+	mkdir -p "${rootfs}/bin"
+	cp /rescue/sleep "${rootfs}/bin/sleep"; chmod 755 "${rootfs}/bin/sleep"
+	# 128 MiB memoryuse limit via the OCI linux.resources.memory.limit field.
+	cat > "${bundle}/config.json" <<EOF
+{
+  "ociVersion": "1.0.2",
+  "process": { "user": { "uid": 0, "gid": 0 },
+    "args": [ "/bin/sleep", "120" ], "cwd": "/" },
+  "root": { "path": "rootfs", "readonly": false },
+  "linux": { "resources": { "memory": { "limit": 134217728 } } }
+}
+EOF
+	name="rctllife$$"
+	atf_check -s exit:0 -e ignore -o save:c.out \
+	    "${bin}" create --name "${name}" "${bundle}"
+	cid=$(tr -d ' \t\r\n' < c.out)
+
+	if [ "$(sysctl -n kern.racct.enable 2>/dev/null)" = "1" ]; then
+		# RACCT/RCTL enabled: the rule must be applied on start and
+		# gone after delete.
+		atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
+		jname=$(jls -q name | grep '^ocifbsd-' | head -1)
+		# rctl(8) lists a subject's rules as `rctl <subject>` (the -l
+		# form takes a different subject syntax and does not match here).
+		atf_check -s exit:0 -o match:"memoryuse" \
+		    sh -c "rctl jail:${jname} 2>/dev/null"
+		atf_check -s exit:0 -e ignore -o ignore \
+		    "${bin}" delete --force "${cid}"
+		# No rule may survive the container.
+		atf_check -s exit:0 -o not-match:"memoryuse" \
+		    sh -c "rctl jail:${jname} 2>/dev/null || true"
+	else
+		# RACCT/RCTL disabled: start must still succeed and warn rather
+		# than fail, so containers run on hosts without accounting.
+		atf_check -s exit:0 -o match:"RACCT/RCTL is unavailable" \
+		    -o match:"limits not applied" \
+		    sh -c "${bin} start ${cid} 2>&1"
+		atf_check -s exit:0 -e ignore -o ignore \
+		    "${bin}" delete --force "${cid}"
+	fi
+}
+rctl_limits_applied_and_cleaned_cleanup()
+{
+	local j
+	for j in $(jls -q name 2>/dev/null | grep '^ocifbsd-'); do
+		rctl -r "jail:${j}" 2>/dev/null || true
+		jail -r "${j}" 2>/dev/null || true
+	done
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case create_start_kill_delete
@@ -343,4 +409,5 @@ atf_init_test_cases()
 	atf_add_test_case create_start_with_nullfs
 	atf_add_test_case rmi_refuses_in_use
 	atf_add_test_case readonly_nosuid_root
+	atf_add_test_case rctl_limits_applied_and_cleaned
 }

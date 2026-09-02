@@ -197,6 +197,14 @@ struct oci_runtime_spec {
 	int			n_readonly_paths;
 	char			**masked_paths;
 	int			n_masked_paths;
+	/*
+	 * Raw JSON of the OCI linux.resources object (cpu/memory/pids), if the
+	 * bundle declares one, else NULL. Kept as a serialized string so the
+	 * runtime can hand it to the RCTL translation (rctl_parse_oci_resources)
+	 * without the spec depending on the security module's types. Default
+	 * NULL = no resource limits (open/unbounded), applied opt-in.
+	 */
+	char			*linux_resources_json;
 };
 
 /* Container lifecycle operations */

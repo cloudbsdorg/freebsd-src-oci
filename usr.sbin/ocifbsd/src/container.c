@@ -54,6 +54,7 @@
 
 #include "ocifbsd.h"
 #include "network/netcfg.h"
+#include "security/rctl.h"
 
 /* setproctitle(3) is in <libutil.h> on FreeBSD but the declaration is
  * not visible with the strict feature-test macros used here. Declare
@@ -368,6 +369,51 @@ warn_unenforced_security(const struct oci_runtime_spec *spec)
 		fprintf(stderr, "warning: linux.maskedPaths (%d) recorded but "
 		    "NOT yet enforced; those paths are not masked\n",
 		    spec->n_masked_paths);
+}
+
+/*
+ * Compose the kernel jail name for a container. Must match the name used in
+ * create_jail_from_spec ("ocifbsd-<first 12 chars of id>") so RCTL rules and
+ * teardown address the same jail subject.
+ */
+static void
+container_jail_name(const struct ocifbsd_container *c, char *buf, size_t len)
+{
+	snprintf(buf, len, "ocifbsd-%.12s", c->id != NULL ? c->id : "");
+}
+
+/*
+ * Apply RCTL resource limits from the OCI linux.resources object, if the
+ * bundle declares one. Opt-in and best-effort: a bundle with no resources is
+ * a no-op, and when the kernel has RACCT/RCTL disabled (kern.racct.enable=0)
+ * we warn once rather than failing the start, so containers still run on hosts
+ * without accounting compiled in or enabled.
+ */
+static void
+apply_resource_limits(const struct ocifbsd_container *c)
+{
+	struct rctl_limits limits;
+	char jname[MAXHOSTNAMELEN];
+
+	if (c == NULL || c->spec == NULL ||
+	    c->spec->linux_resources_json == NULL)
+		return;
+
+	if (!rctl_check_available()) {
+		fprintf(stderr, "warning: container %s declares resource limits "
+		    "but RACCT/RCTL is unavailable (enable kern.racct.enable=1); "
+		    "limits not applied\n", c->id);
+		return;
+	}
+
+	if (rctl_parse_oci_resources(&limits, c->spec->linux_resources_json)
+	    != 0)
+		return;
+
+	container_jail_name(c, jname, sizeof(jname));
+	if (rctl_apply_rules(jname, &limits) != 0)
+		fprintf(stderr, "warning: failed to apply some RCTL limits for "
+		    "%s\n", c->id);
 }
 
 /*
@@ -1078,6 +1124,13 @@ container_start(struct ocifbsd_container *c)
 	warn_unenforced_security(c->spec);
 
 	/*
+	 * Apply RCTL resource limits declared in the bundle (opt-in; no-op when
+	 * none are declared or RACCT is disabled). Done before the init process
+	 * attaches so the jail is bounded from its first process.
+	 */
+	apply_resource_limits(c);
+
+	/*
 	 * Host-side mounts into rootfs before the init process attaches.
 	 * Failures of individual mounts are warned; only ENOMEM from
 	 * tracking aborts start.
@@ -1534,6 +1587,18 @@ container_delete(struct ocifbsd_container *c)
 			fprintf(stderr, "warning: failed to remove jail: %s\n",
 			    strerror(errno));
 		}
+	}
+
+	/*
+	 * Remove any RCTL rules for this jail subject so limits do not leak
+	 * after the jail is gone (rctl(8) rules on a jail: subject otherwise
+	 * persist). Best-effort and a no-op when RACCT is unavailable.
+	 */
+	if (rctl_check_available()) {
+		char jname[MAXHOSTNAMELEN];
+
+		container_jail_name(c, jname, sizeof(jname));
+		(void)rctl_remove_rules(jname);
 	}
 
 	/*
