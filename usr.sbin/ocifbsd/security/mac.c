@@ -61,9 +61,17 @@ mac_arg_is_safe(const char *s)
 		return (false);
 	for (i = 0; s[i] != '\0'; i++) {
 		char c = s[i];
+		/*
+		 * Allow the characters that appear in jail names and in
+		 * mac(4) label syntax. '=' and ':' are part of every Biba/MLS
+		 * label (e.g. "biba/effective=low:high"); they are safe here
+		 * because mac_run() uses fork/execvp with no shell, so each
+		 * value is a single argv element with no metacharacter risk.
+		 */
 		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
 		    (c >= '0' && c <= '9') ||
-		    c == '.' || c == '-' || c == '_' || c == '/' || c == ','))
+		    c == '.' || c == '-' || c == '_' || c == '/' ||
+		    c == ',' || c == '=' || c == ':'))
 			return (false);
 	}
 	return (true);
@@ -484,9 +492,20 @@ mac_label_to_string(struct mac_label *label, char **str)
 
 	switch (label->type) {
 	case MAC_TYPE_BIBA:
-		snprintf(buf, sizeof(buf), "biba/effective=%s:%s",
-		    label->biba_range_low ? label->biba_range_low : "0",
-		    label->biba_range_high ? label->biba_range_high : "0");
+		/*
+		 * Prefer the parsed/constructed effective value; only fall
+		 * back to the range bounds when no effective label is set.
+		 * (The two are stored in different fields, so sourcing the
+		 * "effective=" key from the range dropped a parsed effective
+		 * label to "0:0".)
+		 */
+		if (label->biba_effective != NULL)
+			snprintf(buf, sizeof(buf), "biba/effective=%s",
+			    label->biba_effective);
+		else
+			snprintf(buf, sizeof(buf), "biba/effective=%s:%s",
+			    label->biba_range_low ? label->biba_range_low : "0",
+			    label->biba_range_high ? label->biba_range_high : "0");
 		break;
 	case MAC_TYPE_MLS:
 		snprintf(buf, sizeof(buf), "mls/level=%s",
