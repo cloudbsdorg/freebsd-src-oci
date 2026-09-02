@@ -333,8 +333,18 @@ cmd_service_create(int argc, char **argv)
 		fprintf(stderr, "Error: Failed to create service: %s\n", strerror(errno));
 		return (1);
 	}
-	
-	printf("Service %s created with %d replicas\n", svc->name, replicas);
+
+	/*
+	 * Compose-"up"/apply semantics: creating a service also launches its
+	 * replicas. Best-effort — a replica whose image is not in the local
+	 * store is marked failed, but the service is still created and can be
+	 * scaled/deleted. Report how many replicas actually came up.
+	 */
+	(void)service_start(svc);
+
+	printf("Service %s created with %d replicas (%d running)\n",
+	    svc->name, replicas,
+	    svc->status != NULL ? svc->status->available_replicas : 0);
 	/* svc is owned by the registry; do not free it here. */
 	return (0);
 }

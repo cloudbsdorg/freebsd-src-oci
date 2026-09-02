@@ -656,8 +656,24 @@ save_service_state(struct service *service)
 	fprintf(fp, "  \"stack\": \"%s\",\n", service->stack);
 	fprintf(fp, "  \"image\": \"%s\",\n",
 	    service->spec != NULL ? service->spec->image : "");
-	fprintf(fp, "  \"replicas\": %d\n",
+	fprintf(fp, "  \"replicas\": %d,\n",
 	    service->spec != NULL ? service->spec->replicas : 0);
+	/*
+	 * Persist the pod name backing each running replica so a later `service
+	 * delete` (in another process) can find and tear the pods down. Written
+	 * as indexed "pod<N>" keys for the line-based loader.
+	 */
+	{
+		int np = 0, i;
+
+		for (i = 0; i < service->nreplicas; i++) {
+			if (service->replicas != NULL &&
+			    service->replicas[i].pod_name[0] != '\0')
+				fprintf(fp, "  \"pod%d\": \"%s\",\n", np++,
+				    service->replicas[i].pod_name);
+		}
+		fprintf(fp, "  \"npods\": %d\n", np);
+	}
 	fprintf(fp, "}\n");
 
 	fclose(fp);
@@ -704,9 +720,12 @@ service_load_disk(const char *name, const char *namespace)
 	strlcpy(service->namespace, ns, sizeof(service->namespace));
 	strlcpy(spec->name, name, sizeof(spec->name));
 
+	struct service_replica pods[256];
+	int npods = 0;
+
 	while (fgets(buf, sizeof(buf), fp) != NULL) {
 		char tmp[512];
-		int rep;
+		int rep, idx;
 
 		if (strstr(buf, "\"stack\":") != NULL &&
 		    sscanf(strstr(buf, "\"stack\":"), "\"stack\": \"%255[^\"]\"",
@@ -721,9 +740,29 @@ service_load_disk(const char *name, const char *namespace)
 		    sscanf(strstr(buf, "\"replicas\":"), "\"replicas\": %d",
 		    &rep) == 1) {
 			spec->replicas = rep;
+		} else if (sscanf(buf, " \"pod%d\": \"%255[^\"]\"", &idx, tmp)
+		    == 2 && npods < (int)(sizeof(pods) / sizeof(pods[0]))) {
+			memset(&pods[npods], 0, sizeof(pods[npods]));
+			strlcpy(pods[npods].pod_name, tmp,
+			    sizeof(pods[npods].pod_name));
+			strlcpy(pods[npods].service, name,
+			    sizeof(pods[npods].service));
+			pods[npods].replica_id = npods;
+			pods[npods].state = REPLICA_STATE_RUNNING;
+			npods++;
 		}
 	}
 	fclose(fp);
+
+	/* Restore the running replicas so service_delete can tear them down. */
+	if (npods > 0) {
+		service->replicas = calloc(npods, sizeof(*service->replicas));
+		if (service->replicas != NULL) {
+			memcpy(service->replicas, pods,
+			    npods * sizeof(*service->replicas));
+			service->nreplicas = npods;
+		}
+	}
 
 	strlcpy(status->name, service->name, sizeof(status->name));
 	strlcpy(status->namespace, service->namespace, sizeof(status->namespace));
@@ -926,10 +965,13 @@ service_start(struct service *service)
 	
 	service->status->ready_replicas = service->status->available_replicas;
 	service->status->updated = time(NULL);
-	
+
+	/* Persist the replica->pod mapping so a later delete can tear it down. */
+	save_service_state(service);
+
 	orch_event_publish("Normal", "ServiceStarted", service->namespace,
 	    "Service %s started", service->name);
-	
+
 	return (0);
 }
 

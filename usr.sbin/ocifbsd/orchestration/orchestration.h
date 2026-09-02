@@ -187,7 +187,7 @@ struct pod_status {
 		time_t		last_restart;
 		int		exit_code;
 		char		image[512];
-		char		container_id[64];
+		char		container_id[128];	/* 64-hex id + NUL (was 64: truncated the id, breaking teardown) */
 	} *containers;
 	int		ncontainers;
 };

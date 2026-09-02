@@ -118,7 +118,11 @@ service_lifecycle_persists_body()
 	export OCIFBSD_ORCH_DIR="${PWD}/orch"
 	mkdir -p "${OCIFBSD_ORCH_DIR}"
 
-	atf_check -s exit:0 -o match:"created" \
+	# `service create` uses compose-up semantics: it also tries to launch
+	# the replicas. Without the image pulled (and unprivileged), those
+	# launches fail on stderr but the service is still created and persisted,
+	# so ignore stderr here.
+	atf_check -s exit:0 -o match:"created" -e ignore \
 	    "${bin}" service create --name web --image nginx:1.27 --replicas 3
 	# a separate list process must see it, with its image and replica count.
 	atf_check -s exit:0 -o match:"web" -o match:"nginx:1.27" \

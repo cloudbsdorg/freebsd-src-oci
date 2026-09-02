@@ -146,15 +146,33 @@ save_pod_state(struct pod *pod)
 	if (fp == NULL)
 		return (-1);
 	
-	/* For now, just save basic state */
 	fprintf(fp, "{\n");
 	fprintf(fp, "  \"uid\": \"%s\",\n", pod->uid);
 	fprintf(fp, "  \"name\": \"%s\",\n", pod->name);
 	fprintf(fp, "  \"namespace\": \"%s\",\n", pod->namespace);
-	if (pod->status)
-		fprintf(fp, "  \"state\": %d\n", pod->status->state);
+	fprintf(fp, "  \"state\": %d,\n",
+	    pod->status != NULL ? pod->status->state : 0);
+	/*
+	 * Persist the backing container ids so a later `delete` (from another
+	 * process, which reconstructs the pod from disk) can tear the jails
+	 * down instead of leaking them. Written as indexed "cid<N>" keys.
+	 */
+	{
+		int nc = 0, i;
+
+		if (pod->status != NULL && pod->status->containers != NULL) {
+			for (i = 0; i < pod->status->ncontainers; i++) {
+				if (pod->status->containers[i].container_id[0]
+				    != '\0')
+					fprintf(fp, "  \"cid%d\": \"%s\",\n",
+					    nc++,
+					    pod->status->containers[i].container_id);
+			}
+		}
+		fprintf(fp, "  \"ncids\": %d\n", nc);
+	}
 	fprintf(fp, "}\n");
-	
+
 	fclose(fp);
 	return (0);
 }
@@ -227,15 +245,25 @@ pod_load_disk(const char *name, const char *namespace)
 	strlcpy(pod->namespace, ns, sizeof(pod->namespace));
 	status->state = POD_STATE_PENDING;
 
+	struct container_status cids[256];
+	int ncids = 0;
+
 	while (fgets(buf, sizeof(buf), fp) != NULL) {
-		char tmp[64];
-		int st;
+		char tmp[128];
+		int st, idx;
 
 		if (strstr(buf, "\"uid\":") != NULL &&
 		    sscanf(strstr(buf, "\"uid\":"), "\"uid\": \"%63[^\"]\"",
 		    tmp) == 1)
 			strlcpy(pod->uid, tmp, sizeof(pod->uid));
-		else if (strstr(buf, "\"state\":") != NULL &&
+		else if (sscanf(buf, " \"cid%d\": \"%127[^\"]\"", &idx, tmp)
+		    == 2 && ncids < (int)(sizeof(cids) / sizeof(cids[0]))) {
+			memset(&cids[ncids], 0, sizeof(cids[ncids]));
+			strlcpy(cids[ncids].container_id, tmp,
+			    sizeof(cids[ncids].container_id));
+			cids[ncids].state = REPLICA_STATE_RUNNING;
+			ncids++;
+		} else if (strstr(buf, "\"state\":") != NULL &&
 		    sscanf(strstr(buf, "\"state\":"), "\"state\": %d", &st) == 1)
 			status->state = (pod_state_t)st;
 	}
@@ -244,6 +272,15 @@ pod_load_disk(const char *name, const char *namespace)
 	strlcpy(status->uid, pod->uid, sizeof(status->uid));
 	strlcpy(status->name, pod->name, sizeof(status->name));
 	strlcpy(status->namespace, pod->namespace, sizeof(status->namespace));
+	/* Restore the backing containers so pod_delete can tear them down. */
+	if (ncids > 0) {
+		status->containers = calloc(ncids, sizeof(*status->containers));
+		if (status->containers != NULL) {
+			memcpy(status->containers, cids,
+			    ncids * sizeof(*status->containers));
+			status->ncontainers = ncids;
+		}
+	}
 	pod->status = status;
 	return (pod);
 }
@@ -442,22 +479,29 @@ pod_stop(struct pod *pod, int sig)
 	if (pod == NULL)
 		return (-1);
 	
-	if (pod->status->state != POD_STATE_RUNNING)
+	if (pod->status == NULL || pod->status->state != POD_STATE_RUNNING)
 		return (0);
-	
-	/* Stop each container */
-	for (i = 0; i < pod->spec->ncontainers; i++) {
-		char *cid = pod->status->containers[i].container_id;
-		int r;
-		
-		if (cid == NULL || cid[0] == '\0')
-			continue;
-		
-		r = ocifbsd_stop_container(cid, sig);
-		if (r != 0)
-			ret = -1;
-		else
-			pod->status->containers[i].state = REPLICA_STATE_TERMINATED;
+
+	/*
+	 * Stop each container. Iterate the status container list (restored by
+	 * pod_load_disk from the persisted ids), not spec->ncontainers — a pod
+	 * reconstructed from disk has no spec, so the old spec deref crashed.
+	 */
+	if (pod->status->containers != NULL) {
+		for (i = 0; i < pod->status->ncontainers; i++) {
+			char *cid = pod->status->containers[i].container_id;
+			int r;
+
+			if (cid == NULL || cid[0] == '\0')
+				continue;
+
+			r = ocifbsd_stop_container(cid, sig);
+			if (r != 0)
+				ret = -1;
+			else
+				pod->status->containers[i].state =
+				    REPLICA_STATE_TERMINATED;
+		}
 	}
 	
 	pod->status->state = POD_STATE_PENDING;
@@ -486,13 +530,13 @@ pod_delete(struct pod *pod)
 		pod_stop(pod, SIGTERM);
 
 	/*
-	 * Delete each backing container. A pod reconstructed from disk
-	 * (pod_load_disk) carries no spec/container status, so guard against
-	 * both being absent.
+	 * Delete each backing container. Iterate the status container list
+	 * (populated at start and restored by pod_load_disk from the persisted
+	 * container ids), so a pod reconstructed from disk still tears its jails
+	 * down instead of leaking them.
 	 */
-	if (pod->spec != NULL && pod->status != NULL &&
-	    pod->status->containers != NULL) {
-		for (i = 0; i < pod->spec->ncontainers; i++) {
+	if (pod->status != NULL && pod->status->containers != NULL) {
+		for (i = 0; i < pod->status->ncontainers; i++) {
 			char *cid = pod->status->containers[i].container_id;
 
 			if (cid == NULL || cid[0] == '\0')
