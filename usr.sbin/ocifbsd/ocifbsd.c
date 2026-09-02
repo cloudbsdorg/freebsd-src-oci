@@ -54,6 +54,7 @@
 #include "image/load.h"
 #include "image/zfs_store.h"
 #include "network/netcfg.h"
+#include "network/network.h"
 #include "src/jsonfmt.h"
 
 /* Global verbosity flag */
@@ -2479,22 +2480,295 @@ out:
 }
 
 /*
- * network — list and modify container network configuration.
+ * Named-network management (`network create|ls|rm|inspect`) is a distinct
+ * surface from the per-container `network list|set` above: it drives the
+ * network resource library (network_create/list/delete/inspect in
+ * network/network.h), which builds an if_bridge + epair and persists the
+ * network under /var/run/ocifbsd/networks. The two coexist under `network`
+ * the way Docker exposes both container attach config and `network` objects.
+ */
+
+/*
+ * Generate a filename-safe 32-hex network id. arc4random is already the
+ * project's id source elsewhere; a UUID would work equally but needs no
+ * library beyond libc here.
+ */
+static void
+net_make_id(char *buf, size_t len)
+{
+	static const char hex[] = "0123456789abcdef";
+	size_t i;
+
+	for (i = 0; i + 1 < len && i < 32; i++)
+		buf[i] = hex[arc4random_uniform(16)];
+	buf[i] = '\0';
+}
+
+/*
+ * Ensure the named-network state directory tree exists. The network library
+ * persists under /var/run/ocifbsd/networks but its network_init() only does a
+ * single mkdir, which fails when the /var/run/ocifbsd parent is absent; use
+ * the project's recursive mkdirp so the first `network create` on a fresh host
+ * succeeds. Best effort — network_create surfaces any real write error.
+ */
+static void
+net_ensure_store(void)
+{
+	(void)mkdirp("/var/run/ocifbsd/networks", 0755);
+}
+
+/*
+ * Resolve a user-supplied network reference (id or name) to a concrete id.
+ * Returns a malloc'd id on success (caller frees) or NULL if no match. An
+ * exact id match wins; otherwise the first network whose name matches is used.
+ */
+static char *
+net_resolve_id(const char *ref)
+{
+	struct network_config **list = NULL;
+	int n = 0, i;
+	char *found = NULL;
+
+	if (ref == NULL || ref[0] == '\0')
+		return (NULL);
+	if (network_list(&list, &n) != 0 || list == NULL)
+		return (NULL);
+	/* Exact id match first. */
+	for (i = 0; i < n; i++) {
+		if (list[i]->id != NULL && strcmp(list[i]->id, ref) == 0) {
+			found = strdup(list[i]->id);
+			break;
+		}
+	}
+	/* Then name match. */
+	if (found == NULL) {
+		for (i = 0; i < n; i++) {
+			if (list[i]->name != NULL &&
+			    strcmp(list[i]->name, ref) == 0 &&
+			    list[i]->id != NULL) {
+				found = strdup(list[i]->id);
+				break;
+			}
+		}
+	}
+	free(list);	/* short-lived CLI: entry configs reclaimed at exit */
+	return (found);
+}
+
+/*
+ * network create [--driver bridge] [--subnet CIDR] [--gateway IP]
+ *                [--internal] NAME
+ * Creates a bridge network and prints its id. Requires modify privilege.
+ */
+static int
+cmd_network_create(int argc, char **argv)
+{
+	struct network_config cfg;
+	char idbuf[33];
+	const char *driver = "bridge";
+	int ch;
+	static struct option longopts[] = {
+		{ "driver",	required_argument,	NULL, 'd' },
+		{ "subnet",	required_argument,	NULL, 's' },
+		{ "gateway",	required_argument,	NULL, 'g' },
+		{ "internal",	no_argument,		NULL, 'i' },
+		{ "help",	no_argument,		NULL, 'h' },
+		{ NULL,		0,			NULL, 0 }
+	};
+
+	if (ocifbsd_require_access(OCIFBSD_OP_MODIFY) != 0) {
+		fprintf(stderr, "error: permission denied: creating a network "
+		    "requires root or the %s group\n", OCIFBSD_ADMIN_GROUP);
+		return (1);
+	}
+
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.type = NETWORK_TYPE_BRIDGE;
+
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "d:s:g:ih", longopts,
+	    NULL)) != -1) {
+		switch (ch) {
+		case 'd': driver = optarg; break;
+		case 's': cfg.subnet = optarg; break;
+		case 'g': cfg.gateway = optarg; break;
+		case 'i': cfg.internal = true; break;
+		case 'h':
+		default:
+			usage("ocifbsd",
+			    "network create [--driver bridge] [--subnet CIDR] "
+			    "[--gateway IP] [--internal] NAME");
+			return (ch == 'h' ? 0 : 1);
+		}
+	}
+	argc -= optind;
+	argv += optind;
+	if (argc < 1) {
+		fprintf(stderr, "error: network create requires a NAME\n");
+		return (1);
+	}
+	if (strcmp(driver, "bridge") != 0) {
+		fprintf(stderr, "error: unsupported driver '%s' "
+		    "(only 'bridge' is supported)\n", driver);
+		return (1);
+	}
+
+	net_ensure_store();
+	net_make_id(idbuf, sizeof(idbuf));
+	cfg.id = idbuf;
+	cfg.name = argv[0];
+	cfg.driver = __DECONST(char *, driver);
+
+	if (network_create(&cfg) != 0) {
+		fprintf(stderr, "error: failed to create network '%s': %s\n",
+		    cfg.name, strerror(errno));
+		return (1);
+	}
+	printf("%s\n", idbuf);
+	return (0);
+}
+
+/*
+ * network ls — list named networks. Human-readable table by default;
+ * with --pretty JSON (the default) still prints the table, since `inspect`
+ * is the JSON surface. Requires view privilege.
+ */
+static int
+cmd_network_ls(int argc __unused, char **argv __unused)
+{
+	struct network_config **list = NULL;
+	int n = 0, i;
+
+	if (ocifbsd_require_access(OCIFBSD_OP_VIEW) != 0) {
+		fprintf(stderr, "error: permission denied: listing networks "
+		    "requires root or the %s group\n", OCIFBSD_ADMIN_GROUP);
+		return (1);
+	}
+	if (network_list(&list, &n) != 0) {
+		/* No store yet simply means no networks. */
+		if (errno == ENOENT)
+			return (0);
+		fprintf(stderr, "error: failed to list networks: %s\n",
+		    strerror(errno));
+		return (1);
+	}
+	printf("%-34s %-16s %-10s %s\n", "NETWORK ID", "NAME", "DRIVER",
+	    "BRIDGE");
+	for (i = 0; i < n; i++) {
+		printf("%-34s %-16s %-10s %s\n",
+		    list[i]->id != NULL ? list[i]->id : "-",
+		    list[i]->name != NULL ? list[i]->name : "-",
+		    list[i]->driver != NULL ? list[i]->driver : "bridge",
+		    list[i]->bridge != NULL ? list[i]->bridge : "-");
+	}
+	free(list);	/* entry configs reclaimed at process exit */
+	return (0);
+}
+
+/*
+ * network rm ID|NAME [...] — delete one or more named networks. Requires
+ * modify privilege. Reports and continues on individual failures.
+ */
+static int
+cmd_network_rm(int argc, char **argv)
+{
+	int i, ret = 0;
+
+	if (ocifbsd_require_access(OCIFBSD_OP_MODIFY) != 0) {
+		fprintf(stderr, "error: permission denied: removing a network "
+		    "requires root or the %s group\n", OCIFBSD_ADMIN_GROUP);
+		return (1);
+	}
+	if (argc < 1) {
+		fprintf(stderr, "error: network rm requires a network ID or "
+		    "name\n");
+		return (1);
+	}
+	for (i = 0; i < argc; i++) {
+		char *id = net_resolve_id(argv[i]);
+
+		if (id == NULL) {
+			fprintf(stderr, "error: no such network: %s\n",
+			    argv[i]);
+			ret = 1;
+			continue;
+		}
+		if (network_delete(id) != 0) {
+			fprintf(stderr, "error: failed to remove network %s: "
+			    "%s\n", argv[i], strerror(errno));
+			ret = 1;
+		} else {
+			printf("%s\n", argv[i]);
+		}
+		free(id);
+	}
+	return (ret);
+}
+
+/*
+ * network inspect ID|NAME — emit the network's JSON (pretty by default).
+ * Requires view privilege.
+ */
+static int
+cmd_network_inspect(int argc, char **argv)
+{
+	char *id, *json = NULL;
+	int rc;
+
+	if (ocifbsd_require_access(OCIFBSD_OP_VIEW) != 0) {
+		fprintf(stderr, "error: permission denied: inspecting a network "
+		    "requires root or the %s group\n", OCIFBSD_ADMIN_GROUP);
+		return (1);
+	}
+	if (argc < 1) {
+		fprintf(stderr, "error: network inspect requires a network ID "
+		    "or name\n");
+		return (1);
+	}
+	id = net_resolve_id(argv[0]);
+	if (id == NULL) {
+		fprintf(stderr, "error: no such network: %s\n", argv[0]);
+		return (1);
+	}
+	rc = network_inspect(id, &json);
+	free(id);
+	if (rc != 0 || json == NULL) {
+		fprintf(stderr, "error: failed to inspect network %s\n",
+		    argv[0]);
+		return (1);
+	}
+	emit_json(json);
+	free(json);
+	return (0);
+}
+
+/*
+ * network — per-container network config (list|set) plus named-network
+ * management (create|ls|rm|inspect).
  */
 static int
 cmd_network(int argc, char **argv)
 {
 	if (argc < 2) {
-		fprintf(stderr,
-		    "usage: ocifbsd network <list|set> [args]\n");
+		fprintf(stderr, "usage: ocifbsd network "
+		    "<list|set|create|ls|rm|inspect> [args]\n");
 		return (1);
 	}
 	if (strcmp(argv[1], "list") == 0)
 		return (cmd_network_list(argc - 2, argv + 2));
 	if (strcmp(argv[1], "set") == 0)
 		return (cmd_network_set(argc - 2, argv + 2));
+	if (strcmp(argv[1], "create") == 0)
+		return (cmd_network_create(argc - 1, argv + 1));
+	if (strcmp(argv[1], "ls") == 0)
+		return (cmd_network_ls(argc - 2, argv + 2));
+	if (strcmp(argv[1], "rm") == 0)
+		return (cmd_network_rm(argc - 2, argv + 2));
+	if (strcmp(argv[1], "inspect") == 0)
+		return (cmd_network_inspect(argc - 2, argv + 2));
 	fprintf(stderr, "error: unknown network subcommand: %s\n", argv[1]);
-	fprintf(stderr, "usage: ocifbsd network <list|set> [args]\n");
+	fprintf(stderr, "usage: ocifbsd network "
+	    "<list|set|create|ls|rm|inspect> [args]\n");
 	return (1);
 }
 
@@ -2554,7 +2828,7 @@ static struct command commands[] = {
 	{ "load",	cmd_load,	"Import a local OCI image archive" },
 	{ "images",	cmd_images,	"List local image store" },
 	{ "rmi",	cmd_rmi,	"Remove a local image" },
-	{ "network",	cmd_network,	"List/modify container network config" },
+	{ "network",	cmd_network,	"Manage networks (create/ls/rm/inspect) and container net config (list/set)" },
 	{ "pod",	cmd_orch,	"Manage pods (orchestration)" },
 	{ "service",	cmd_orch,	"Manage services (orchestration)" },
 	{ "stack",	cmd_orch,	"Manage stacks (orchestration)" },

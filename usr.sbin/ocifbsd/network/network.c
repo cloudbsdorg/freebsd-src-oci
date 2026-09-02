@@ -92,6 +92,21 @@ run_cmd(int argc, ...)
 	}
 
 	if (pid == 0) {
+		/*
+		 * run_cmd is for side-effecting commands (ifconfig up, name,
+		 * addm). Some of them echo to stdout (e.g. `ifconfig <if> name
+		 * <new>` prints the new name), which would corrupt the CLI's
+		 * own stdout — the `network create` id line in particular. Send
+		 * the child's stdout to /dev/null; stderr is left attached so
+		 * real errors remain visible. Output that must be read back is
+		 * captured separately via run_cmd_output / net_capture_argv.
+		 */
+		int devnull = open("/dev/null", O_WRONLY);
+		if (devnull >= 0) {
+			(void)dup2(devnull, STDOUT_FILENO);
+			if (devnull > STDERR_FILENO)
+				(void)close(devnull);
+		}
 		closefrom(STDERR_FILENO + 1);
 		execvp(argv[0], argv);
 		_exit(127);
@@ -156,7 +171,18 @@ run_cmd_output(char **output, int argc, ...)
 		close(fds[0]);
 		if (dup2(fds[1], STDOUT_FILENO) < 0)
 			_exit(127);
-		if (fds[1] != STDOUT_FILENO)
+		/*
+		 * Merge stderr into the captured pipe. ifconfig writes its
+		 * "interface <x> does not exist" diagnostic to stderr, and
+		 * bridge_exists() decides existence by scanning that text; if
+		 * stderr stayed attached to our terminal the probe would both
+		 * leak the message to the user and never match. Callers that
+		 * parse a created interface name read stdout, which ifconfig
+		 * writes only on success, so the merge is harmless for them.
+		 */
+		if (dup2(fds[1], STDERR_FILENO) < 0)
+			_exit(127);
+		if (fds[1] != STDOUT_FILENO && fds[1] != STDERR_FILENO)
 			close(fds[1]);
 		execvp(argv[0], argv);
 		_exit(127);
@@ -233,7 +259,18 @@ net_capture_argv(char **output, char *const argv[])
 		close(fds[0]);
 		if (dup2(fds[1], STDOUT_FILENO) < 0)
 			_exit(127);
-		if (fds[1] != STDOUT_FILENO)
+		/*
+		 * Merge stderr into the captured pipe. ifconfig writes its
+		 * "interface <x> does not exist" diagnostic to stderr, and
+		 * bridge_exists() decides existence by scanning that text; if
+		 * stderr stayed attached to our terminal the probe would both
+		 * leak the message to the user and never match. Callers that
+		 * parse a created interface name read stdout, which ifconfig
+		 * writes only on success, so the merge is harmless for them.
+		 */
+		if (dup2(fds[1], STDERR_FILENO) < 0)
+			_exit(127);
+		if (fds[1] != STDOUT_FILENO && fds[1] != STDERR_FILENO)
 			close(fds[1]);
 		execvp(argv[0], argv);
 		_exit(127);
@@ -346,7 +383,14 @@ bridge_delete(const char *name)
 	/* Bring interface down first */
 	run_cmd(3, "ifconfig", name, "down");
 
-	return (run_cmd(4, "ifconfig", "bridge", "destroy", name));
+	/*
+	 * Destroy is `ifconfig <name> destroy` — the interface name is the
+	 * first argument. The previous form `ifconfig bridge destroy <name>`
+	 * made ifconfig treat the literal "bridge" as the interface ("interface
+	 * bridge does not exist") and leaked every bridge network_delete tried
+	 * to remove.
+	 */
+	return (run_cmd(3, "ifconfig", name, "destroy"));
 }
 
 int
@@ -691,7 +735,15 @@ network_create(struct network_config *config)
 		fprintf(f, "  \"name\": \"%s\",\n", config->name);
 		fprintf(f, "  \"id\": \"%s\",\n", config->id);
 		fprintf(f, "  \"type\": %d,\n", config->type);
+		fprintf(f, "  \"driver\": \"%s\",\n",
+		    config->driver ? config->driver : "bridge");
 		fprintf(f, "  \"bridge\": \"%s\",\n", bridge_name);
+		fprintf(f, "  \"subnet\": \"%s\",\n",
+		    config->subnet ? config->subnet : "");
+		fprintf(f, "  \"gateway\": \"%s\",\n",
+		    config->gateway ? config->gateway : "");
+		fprintf(f, "  \"internal\": %s,\n",
+		    config->internal ? "true" : "false");
 		fprintf(f, "  \"dns_servers\": []\n");
 		fprintf(f, "}\n");
 		fclose(f);
@@ -861,6 +913,44 @@ network_disconnect(const char *network_id, const char *container_id)
 	return (0);
 }
 
+/*
+ * Extract a JSON string field from one line of the form
+ *   "key": "value"
+ * as written by network_create(). Returns true and copies the (possibly
+ * empty) value into out when the key is present on this line. This is a
+ * deliberately small line-oriented reader matched to our own writer, not a
+ * general JSON parser.
+ */
+static bool
+json_str_field(const char *line, const char *key, char *out, size_t outlen)
+{
+	char needle[64];
+	const char *p, *start, *end;
+	size_t n;
+
+	snprintf(needle, sizeof(needle), "\"%s\"", key);
+	p = strstr(line, needle);
+	if (p == NULL)
+		return (false);
+	p += strlen(needle);
+	p = strchr(p, ':');		/* move past the key to the colon */
+	if (p == NULL)
+		return (false);
+	start = strchr(p, '"');		/* opening quote of the value */
+	if (start == NULL)
+		return (false);
+	start++;
+	end = strchr(start, '"');	/* closing quote */
+	if (end == NULL)
+		return (false);
+	n = (size_t)(end - start);
+	if (n >= outlen)
+		n = outlen - 1;
+	memcpy(out, start, n);
+	out[n] = '\0';
+	return (true);
+}
+
 struct network_config *
 network_get(const char *network_id)
 {
@@ -874,11 +964,42 @@ network_get(const char *network_id)
 	if (f) {
 		config = calloc(1, sizeof(*config));
 		if (config) {
-			char buf[256];
+			char buf[512];
 			while (fgets(buf, sizeof(buf), f)) {
-				if (strstr(buf, "\"name\"")) {
-					/* Parse name */
+				char val[256];
+
+				if (json_str_field(buf, "name", val,
+				    sizeof(val)))
+					config->name = strdup(val);
+				else if (json_str_field(buf, "id", val,
+				    sizeof(val)))
+					config->id = strdup(val);
+				else if (json_str_field(buf, "driver", val,
+				    sizeof(val)))
+					config->driver = strdup(val);
+				else if (json_str_field(buf, "bridge", val,
+				    sizeof(val)))
+					config->bridge = strdup(val);
+				else if (json_str_field(buf, "subnet", val,
+				    sizeof(val)) && val[0] != '\0')
+					config->subnet = strdup(val);
+				else if (json_str_field(buf, "gateway", val,
+				    sizeof(val)) && val[0] != '\0')
+					config->gateway = strdup(val);
+				else if (strstr(buf, "\"type\"") != NULL) {
+					int t;
+					if (sscanf(buf, " \"type\": %d", &t)
+					    == 1)
+						config->type =
+						    (network_type_t)t;
+				} else if (strstr(buf, "\"internal\"") != NULL) {
+					config->internal =
+					    (strstr(buf, "true") != NULL);
 				}
+			}
+			/* A network with no id parsed is not usable. */
+			if (config->id == NULL) {
+				config->id = strdup(network_id);
 			}
 		}
 		fclose(f);
@@ -1504,12 +1625,20 @@ network_inspect(const char *network_id, char **json_output)
 	    "  \"name\": \"%s\",\n"
 	    "  \"id\": \"%s\",\n"
 	    "  \"type\": \"%s\",\n"
-	    "  \"driver\": \"%s\"\n"
+	    "  \"driver\": \"%s\",\n"
+	    "  \"bridge\": \"%s\",\n"
+	    "  \"subnet\": \"%s\",\n"
+	    "  \"gateway\": \"%s\",\n"
+	    "  \"internal\": %s\n"
 	    "}\n",
 	    config->name ? config->name : "",
 	    config->id ? config->id : "",
 	    config->type == NETWORK_TYPE_BRIDGE ? "bridge" : "unknown",
-	    config->driver ? config->driver : "");
+	    config->driver ? config->driver : "",
+	    config->bridge ? config->bridge : "",
+	    config->subnet ? config->subnet : "",
+	    config->gateway ? config->gateway : "",
+	    config->internal ? "true" : "false");
 
 	*json_output = json;
 
