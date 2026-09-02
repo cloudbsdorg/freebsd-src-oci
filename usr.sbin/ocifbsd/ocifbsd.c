@@ -265,8 +265,8 @@ image_store_ready(const char *store)
  */
 int
 ocifbsd_create_container(const char *name, const char *image,
-    const char *command, const char *args, const char *pod_id,
-    char **container_id)
+	const char *command, const char *args, const char *pod_id,
+	char **container_id)
 {
 	struct ocifbsd_container *c = NULL;
 	char *store = NULL;
@@ -355,7 +355,7 @@ ocifbsd_delete_container(const char *cid, bool force)
 
 int
 ocifbsd_get_container_state(const char *cid, container_state_t *state,
-    int *exit_code)
+	int *exit_code)
 {
 	struct ocifbsd_container *c;
 

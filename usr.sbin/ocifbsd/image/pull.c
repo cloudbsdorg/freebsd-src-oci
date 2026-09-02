@@ -550,7 +550,7 @@ www_auth_header_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 
 static void
 parse_www_authenticate(const char *hdr, char *realm, size_t realm_sz,
-    char *service, size_t service_sz)
+	char *service, size_t service_sz)
 {
 	const char *p, *end;
 	size_t n;
@@ -877,7 +877,7 @@ select_platform_digest(const char *json, char *out, size_t outsz)
  */
 static int
 fetch_manifest_once(struct registry *reg, const char *repo, const char *ref,
-    char **out_json, size_t *out_len)
+	char **out_json, size_t *out_len)
 {
 	char *url;
 	char *path;
@@ -949,7 +949,7 @@ fetch_manifest_once(struct registry *reg, const char *repo, const char *ref,
  */
 int
 fetch_manifest(struct registry *reg, const char *repo, const char *tag,
-    struct oci_manifest **manifest)
+	struct oci_manifest **manifest)
 {
 	char *json = NULL;
 	size_t len = 0;
@@ -1182,7 +1182,7 @@ free_manifest(struct oci_manifest *manifest)
  */
 int
 fetch_config(struct registry *reg, const char *repo, const char *digest,
-    struct oci_config **config)
+	struct oci_config **config)
 {
 	char *url;
 	char *path;
@@ -1506,7 +1506,7 @@ copy_regular_file(const char *src, const char *dst)
 
 int
 registry_pull_layer(struct registry *reg, struct oci_layer *layer,
-    const char *destdir, progress_cb cb, void *opaque)
+	const char *destdir, progress_cb cb, void *opaque)
 {
 	char *url;
 	char *path;
@@ -1665,7 +1665,7 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
  */
 int
 registry_pull(struct registry *reg, const char *reference,
-    const char *destdir, progress_cb cb, void *opaque)
+	const char *destdir, progress_cb cb, void *opaque)
 {
 	char *registry, *repo, *tag, *digest;
 	struct oci_manifest *manifest = NULL;

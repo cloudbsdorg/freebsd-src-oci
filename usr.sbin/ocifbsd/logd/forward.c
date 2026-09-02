@@ -87,7 +87,7 @@ hdr_add(struct curl_slist **list, const char *s)
 
 int
 logd_http_post(const char *url, const char *body, const char *content_type,
-    const char *extra_header)
+	const char *extra_header)
 {
 	CURL *curl;
 	CURLcode rc;

@@ -397,7 +397,7 @@ ocifbsd_state_to_string(ocifbsd_state_t state)
  */
 bool
 ocifbsd_access_allowed(uid_t euid, gid_t allowed_gid, const gid_t *groups,
-    int ngroups)
+	int ngroups)
 {
 	int i;
 

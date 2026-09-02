@@ -531,7 +531,7 @@ write_runtime_config(const char *storedir, const char *config_blob)
 
 int
 load_oci_archive(const char *archive_path, const char *ref_override,
-    char **out_store_path)
+	char **out_store_path)
 {
 	char layoutdir[PATH_MAX];
 	char tmpl[PATH_MAX];

@@ -19,7 +19,7 @@
 
 int
 controller_lb_ruleset(const struct cp_state *st, const char *service,
-    const char *vip, int port, int backend_port, char *out, size_t outlen)
+	const char *vip, int port, int backend_port, char *out, size_t outlen)
 {
 	char ips[CTRL_MAX_NODES][64];
 	size_t off = 0;
@@ -61,7 +61,7 @@ controller_lb_ruleset(const struct cp_state *st, const char *service,
 
 int
 controller_vip_commands(const struct cp_state *st, const char *prefix,
-    char (*out)[256], int max, int *nout)
+	char (*out)[256], int max, int *nout)
 {
 	int k = 0, ns;
 
@@ -85,8 +85,8 @@ controller_vip_commands(const struct cp_state *st, const char *prefix,
 
 int
 controller_endpoint_commands(const struct cp_state *st,
-    const char *const *names, const char *const *addrs, int nnodes,
-    char (*out)[256], int max, int *nout)
+	const char *const *names, const char *const *addrs, int nnodes,
+	char (*out)[256], int max, int *nout)
 {
 	int k = 0, npl;
 
@@ -123,7 +123,7 @@ controller_endpoint_commands(const struct cp_state *st,
 
 int
 controller_node_assignments(const struct cp_state *st, const char *node,
-    struct agent_replica *out, int max, int *nout)
+	struct agent_replica *out, int max, int *nout)
 {
 	int k = 0, npl;
 
@@ -157,7 +157,7 @@ controller_node_assignments(const struct cp_state *st, const char *node,
 
 int
 controller_plan(const struct cp_state *st, const char *const *nodes,
-    int nnodes, char (*out)[256], int max, int *nout)
+	int nnodes, char (*out)[256], int max, int *nout)
 {
 	int load[CTRL_MAX_NODES];
 	int k = 0, nsvc;

@@ -116,7 +116,7 @@ struct oci_manifest {
  * Progress callback
  */
 typedef void (*progress_cb)(void *opaque, const char *what,
-    off_t current, off_t total);
+	off_t current, off_t total);
 
 /*
  * Registry operations

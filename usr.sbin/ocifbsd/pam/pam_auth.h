@@ -76,62 +76,62 @@
 
 /* User structure */
 struct ocifbsd_user {
-    char            username[256];          /* username */
-    uid_t           uid;                    /* system UID */
-    char            role[64];               /* RBAC role */
-    uint32_t       permissions;            /* PERM_* flags */
-    bool            is_service_account;     /* service account flag */
-    time_t          created;                /* creation time */
-    time_t          last_login;             /* last successful login */
-    time_t          token_expires;          /* token expiration */
-    uint32_t       login_count;            /* total login count */
-    uint32_t       failed_count;           /* consecutive failed logins */
-    time_t          locked_until;           /* lock expiration (0 = not locked) */
-    char            pubkey_fingerprint[128];/* SSH public key */
-    char            *groups;                /* comma-separated groups */
-    char            *annotations;           /* user annotations */
-    RB_ENTRY(ocifbsd_user) entry;
+	char            username[256];          /* username */
+	uid_t           uid;                    /* system UID */
+	char            role[64];               /* RBAC role */
+	uint32_t       permissions;            /* PERM_* flags */
+	bool            is_service_account;     /* service account flag */
+	time_t          created;                /* creation time */
+	time_t          last_login;             /* last successful login */
+	time_t          token_expires;          /* token expiration */
+	uint32_t       login_count;            /* total login count */
+	uint32_t       failed_count;           /* consecutive failed logins */
+	time_t          locked_until;           /* lock expiration (0 = not locked) */
+	char            pubkey_fingerprint[128];/* SSH public key */
+	char            *groups;                /* comma-separated groups */
+	char            *annotations;           /* user annotations */
+	RB_ENTRY(ocifbsd_user) entry;
 };
 
 /* RBAC role bindings */
 struct role_binding {
-    char            role[64];               /* role name */
-    char            *users;                  /* comma-separated users */
-    char            *groups;                 /* comma-separated groups */
-    char            *namespaces;             /* comma-separated namespaces (empty = all) */
-    time_t          created;
-    RB_ENTRY(role_binding) entry;
+	char            role[64];               /* role name */
+	char            *users;                  /* comma-separated users */
+	char            *groups;                 /* comma-separated groups */
+	char            *namespaces;             /* comma-separated namespaces (empty = all) */
+	time_t          created;
+	RB_ENTRY(role_binding) entry;
 };
 
 /* RBAC permission mapping */
 struct role_permissions {
-    const char      *role;
-    uint32_t       permissions;
-    const char     *description;
+	const char      *role;
+	uint32_t       permissions;
+	const char     *description;
 };
 
 /* PAM auth request */
 struct pam_auth_request {
-    const char      *username;
-    const char      *password;
-    const char      *service;
-    int             session_type;
-    const char      *pubkey;
-    const char      *token;
-    const char      *certificate;
-    char            *client_addr;
-    bool            interactive;
+	const char      *username;
+	const char      *password;
+	const char      *service;
+	int             session_type;
+	const char      *pubkey;
+	const char      *token;
+	const char      *certificate;
+	char            *client_addr;
+	bool            interactive;
 };
 
 /* PAM auth response */
 struct pam_auth_response {
-    int             result;                  /* PAM_AUTH_* result code */
-    char            *token;                  /* JWT token on success */
-    time_t          expires;
-    char            role[64];
-    uint32_t       permissions;
-    char            *message;
-    char            *username;
+	int             result;                  /* PAM_AUTH_* result code */
+	char            *token;                  /* JWT token on success */
+	time_t          expires;
+	char            role[64];
+	uint32_t       permissions;
+	char            *message;
+	char            *username;
 };
 
 /* User registry */
@@ -140,41 +140,41 @@ RB_PROTOTYPE(user_tree, ocifbsd_user, entry, user_compare);
 
 /* Group to role mapping entry */
 struct group_role_map {
-    char            group_name[64];
-    char            role[64];
-    RB_ENTRY(group_role_map) entry;
+	char            group_name[64];
+	char            role[64];
+	RB_ENTRY(group_role_map) entry;
 };
 RB_HEAD(group_role_map_tree, group_role_map);
 RB_PROTOTYPE(group_role_map_tree, group_role_map, entry, group_compare);
 
 /* PAM module configuration */
 struct pam_config {
-    bool            enable_pam;              /* enable PAM authentication */
-    bool            enable_group_map;         /* enable system group to role mapping */
-    bool            enable_pubkey;           /* enable SSH public key auth */
-    bool            enable_totp;              /* enable TOTP MFA */
-    int             max_failed_attempts;     /* max failed attempts before lock */
-    int             lockout_duration;        /* lockout duration in seconds */
-    int             token_lifetime;           /* token lifetime in seconds */
-    int             session_timeout;         /* session timeout in seconds */
-    char            *default_role;           /* default role for new users */
-    char            *admin_users;            /* comma-separated admin users */
-    char            *pam_service;            /* PAM service name */
-    char            *ldap_uri;               /* LDAP server URI */
-    char            *ldap_base_dn;            /* LDAP base DN */
-    char            *krb_realm;              /* Kerberos realm */
-    char            *totp_issuer;            /* TOTP issuer name */
+	bool            enable_pam;              /* enable PAM authentication */
+	bool            enable_group_map;         /* enable system group to role mapping */
+	bool            enable_pubkey;           /* enable SSH public key auth */
+	bool            enable_totp;              /* enable TOTP MFA */
+	int             max_failed_attempts;     /* max failed attempts before lock */
+	int             lockout_duration;        /* lockout duration in seconds */
+	int             token_lifetime;           /* token lifetime in seconds */
+	int             session_timeout;         /* session timeout in seconds */
+	char            *default_role;           /* default role for new users */
+	char            *admin_users;            /* comma-separated admin users */
+	char            *pam_service;            /* PAM service name */
+	char            *ldap_uri;               /* LDAP server URI */
+	char            *ldap_base_dn;            /* LDAP base DN */
+	char            *krb_realm;              /* Kerberos realm */
+	char            *totp_issuer;            /* TOTP issuer name */
 };
 
 /* Audit log entry */
 struct audit_entry {
-    time_t          timestamp;
-    char            username[256];
-    char            action[128];
-    char            resource[256];
-    char            result[32];
-    char            client_addr[64];
-    char            *details;
+	time_t          timestamp;
+	char            username[256];
+	char            action[128];
+	char            resource[256];
+	char            result[32];
+	char            client_addr[64];
+	char            *details;
 };
 
 /* PAM authentication functions */
@@ -184,9 +184,9 @@ struct pam_config *pam_get_config(void);
 int     pam_set_config(struct pam_config *config);
 
 int     pam_authenticate_user(struct pam_auth_request *req,
-            struct pam_auth_response *resp);
+			struct pam_auth_response *resp);
 int     pam_verify_token(const char *token, const char *expected_user,
-            uint32_t *permissions);
+			uint32_t *permissions);
 int     pam_refresh_token(const char *refresh_token, char **new_token);
 
 struct ocifbsd_user *ocifbsd_pam_get_user(const char *username);
@@ -205,7 +205,7 @@ uint32_t   pam_permissions_for_role(const char *role);
 
 int     pam_log_audit(struct audit_entry *entry);
 struct audit_entry **pam_query_audit(const char *username,
-            time_t start, time_t end, int *count);
+			time_t start, time_t end, int *count);
 
 int     pam_rate_limit(const char *client_addr);
 void    pam_reset_rate_limit(const char *client_addr);
@@ -216,9 +216,9 @@ void    pam_set_conv_func(pam_conv_func_t func);
 
 /* Token generation */
 int     pam_generate_token(const char *username, const char *role,
-            uint32_t permissions, int lifetime, char **token_out);
+			uint32_t permissions, int lifetime, char **token_out);
 int     pam_verify_jwt(const char *jwt, char **username, uint32_t *perms,
-            time_t *exp);
+			time_t *exp);
 
 /* User locking */
 int     pam_lock_user(const char *username, time_t until);

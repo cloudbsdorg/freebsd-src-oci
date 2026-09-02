@@ -42,16 +42,16 @@
 
 /* API configuration */
 struct api_config {
-    char bind_address[64];
-    uint16_t port;
-    bool enable_tls;
-    char *tls_cert;
-    char *tls_key;
-    int max_connections;
-    int request_timeout;
-    int worker_threads;
-    char *unix_socket;
-    bool enable_metrics;
+	char bind_address[64];
+	uint16_t port;
+	bool enable_tls;
+	char *tls_cert;
+	char *tls_key;
+	int max_connections;
+	int request_timeout;
+	int worker_threads;
+	char *unix_socket;
+	bool enable_metrics;
 };
 
 /* HTTP methods */
@@ -63,46 +63,46 @@ struct api_config {
 
 /* API response */
 struct api_response {
-    int status_code;
-    char status_message[64];
-    char *body;
-    size_t body_len;
-    char content_type[64];
-    char *headers;
+	int status_code;
+	char status_message[64];
+	char *body;
+	size_t body_len;
+	char content_type[64];
+	char *headers;
 };
 
 /* API endpoint handler */
 typedef int (*api_handler)(struct api_request *req, struct api_response *resp);
 
 struct api_endpoint {
-    char path[256];
-    int method;                /* HTTP_* */
-    api_handler handler;
-    char description[512];
-    struct api_endpoint *next;
+	char path[256];
+	int method;                /* HTTP_* */
+	api_handler handler;
+	char description[512];
+	struct api_endpoint *next;
 };
 
 /* API request */
 struct api_request {
-    char method[16];
-    char path[512];
-    char query[1024];
-    char *body;
-    size_t body_len;
-    char remote_addr[64];
-    char *headers;
-    void *context;             /* auth context */
+	char method[16];
+	char path[512];
+	char query[1024];
+	char *body;
+	size_t body_len;
+	char remote_addr[64];
+	char *headers;
+	void *context;             /* auth context */
 };
 
 /* API server state */
 struct api_server {
-    int listen_fd;
-    struct event_base *evbase;
-    pthread_t *workers;
-    int n_workers;
-    bool running;
-    struct api_endpoint *endpoints;
-    pthread_mutex_t lock;
+	int listen_fd;
+	struct event_base *evbase;
+	pthread_t *workers;
+	int n_workers;
+	bool running;
+	struct api_endpoint *endpoints;
+	pthread_mutex_t lock;
 };
 
 /* API initialization */

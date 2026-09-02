@@ -74,7 +74,7 @@ convert_result_str(convert_result_t result)
  */
 void
 convert_add_warning(struct convert_context *ctx, int line,
-    convert_result_t code, const char *fmt, ...)
+	convert_result_t code, const char *fmt, ...)
 {
 	struct convert_warning *w;
 	char buf[512];
@@ -116,7 +116,7 @@ convert_add_warning(struct convert_context *ctx, int line,
  */
 int
 convert_get_warnings(struct convert_context *ctx,
-    struct convert_warning **warnings, int *count)
+	struct convert_warning **warnings, int *count)
 {
 	if (ctx == NULL || warnings == NULL || count == NULL)
 		return (-1);
@@ -174,7 +174,7 @@ detect_source_type(const char *filename, const char *content)
  */
 int
 convert_file(const char *input_path, const char *output_path,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	FILE *fp;
 	char *input;
@@ -298,7 +298,7 @@ convert_stdin(const char *output_path, struct convert_options *opts)
  */
 int
 convert_buffer(const char *input, size_t len, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	convert_source_type_t type;
 	int ret;

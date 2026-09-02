@@ -70,63 +70,63 @@
 
 /* Cluster configuration */
 struct cluster_config {
-    char cluster_name[256];
-    uint16_t cluster_port;         /* UDP port for gossip */
-    uint16_t api_port;             /* TCP port for API */
-    int gossip_interval;           /* ms between gossip rounds */
-    int gossip_fanout;            /* number of peers to contact */
-    int suspicion_timeout;         /* ms before suspecting node */
-    int node_timeout;             /* ms before marking node dead */
-    int max_payload_size;         /* max gossip message size */
-    bool enable_encryption;       /* encrypt gossip traffic */
-    char *cluster_key;            /* encryption key if enabled */
+	char cluster_name[256];
+	uint16_t cluster_port;         /* UDP port for gossip */
+	uint16_t api_port;             /* TCP port for API */
+	int gossip_interval;           /* ms between gossip rounds */
+	int gossip_fanout;            /* number of peers to contact */
+	int suspicion_timeout;         /* ms before suspecting node */
+	int node_timeout;             /* ms before marking node dead */
+	int max_payload_size;         /* max gossip message size */
+	bool enable_encryption;       /* encrypt gossip traffic */
+	char *cluster_key;            /* encryption key if enabled */
 };
 
 /* Cluster node information */
 struct cluster_node {
-    char node_id[256];            /* unique node identifier */
-    char hostname[256];           /* node hostname */
-    char ip[64];                  /* node IP address */
-    uint16_t port;                /* gossip port */
-    uint16_t api_port;            /* API port */
-    int role;                     /* NODE_ROLE_* */
-    int state;                    /* NODE_STATE_* */
-    time_t last_seen;             /* timestamp of last message */
-    time_t joined_at;             /* when node joined cluster */
-    uint64_t incarnation;        /* incarnation number for anti-entropy */
-    double weight;                 /* scheduling weight */
-    uint64_t capacity_cpu;       /* CPU capacity units */
-    uint64_t capacity_memory;     /* memory capacity */
-    uint64_t capacity_storage;    /* storage capacity */
-    uint64_t used_cpu;            /* used CPU */
-    uint64_t used_memory;         /* used memory */
-    uint64_t used_storage;        /* used storage */
-    char **labels;                /* node labels for scheduling */
-    int nlabels;
+	char node_id[256];            /* unique node identifier */
+	char hostname[256];           /* node hostname */
+	char ip[64];                  /* node IP address */
+	uint16_t port;                /* gossip port */
+	uint16_t api_port;            /* API port */
+	int role;                     /* NODE_ROLE_* */
+	int state;                    /* NODE_STATE_* */
+	time_t last_seen;             /* timestamp of last message */
+	time_t joined_at;             /* when node joined cluster */
+	uint64_t incarnation;        /* incarnation number for anti-entropy */
+	double weight;                 /* scheduling weight */
+	uint64_t capacity_cpu;       /* CPU capacity units */
+	uint64_t capacity_memory;     /* memory capacity */
+	uint64_t capacity_storage;    /* storage capacity */
+	uint64_t used_cpu;            /* used CPU */
+	uint64_t used_memory;         /* used memory */
+	uint64_t used_storage;        /* used storage */
+	char **labels;                /* node labels for scheduling */
+	int nlabels;
 
-    /* Gossip state */
-    uint32_t suspicion_count;     /* number of suspicion rounds */
-    time_t suspicion_started;
+	/* Gossip state */
+	uint32_t suspicion_count;     /* number of suspicion rounds */
+	time_t suspicion_started;
 
-    /* Raft leader-side replication cursors for this peer (valid while this
-     * node is leader): next log index to send, and highest index known
-     * replicated on the peer. */
-    uint64_t raft_next_index;
-    uint64_t raft_match_index;
+	/* Raft leader-side replication cursors for this peer (valid while this
+	 * node is leader): next log index to send, and highest index known
+	 * replicated on the peer. */
+	uint64_t raft_next_index;
+	uint64_t raft_match_index;
 
-    /* Tree entry */
-    RB_ENTRY(cluster_node) entry;
-    pthread_mutex_t lock;
+	/* Tree entry */
+	RB_ENTRY(cluster_node) entry;
+	pthread_mutex_t lock;
 
-    /*
-     * Lifetime management (protected by node_registry_lock): cluster_node_get
-     * hands out a counted reference; cluster_node_remove detaches the node
-     * from the tree but defers free() until the last reference is released
-     * via cluster_node_put. This prevents a use-after-free when one thread
-     * removes a node while another is still operating on it.
-     */
-    int refcount;
-    bool removed;
+	/*
+	 * Lifetime management (protected by node_registry_lock): cluster_node_get
+	 * hands out a counted reference; cluster_node_remove detaches the node
+	 * from the tree but defers free() until the last reference is released
+	 * via cluster_node_put. This prevents a use-after-free when one thread
+	 * removes a node while another is still operating on it.
+	 */
+	int refcount;
+	bool removed;
 };
 
 /* Node RB tree */
@@ -135,29 +135,29 @@ RB_PROTOTYPE(node_tree, cluster_node, entry, node_compare);
 
 /* Gossip message */
 struct gossip_message {
-    uint8_t type;                 /* GOSSIP_MSG_* */
-    uint8_t version;              /* protocol version */
-    uint16_t length;             /* payload length */
-    char source_id[256];         /* source node ID */
-    uint64_t source_incarnation; /* source incarnation */
-    uint64_t timestamp;          /* message timestamp */
-    uint8_t payload[];           /* variable length payload */
+	uint8_t type;                 /* GOSSIP_MSG_* */
+	uint8_t version;              /* protocol version */
+	uint16_t length;             /* payload length */
+	char source_id[256];         /* source node ID */
+	uint64_t source_incarnation; /* source incarnation */
+	uint64_t timestamp;          /* message timestamp */
+	uint8_t payload[];           /* variable length payload */
 };
 
 /* SWIM failure detector state */
 struct swim_state {
-    uint32_t proto_version;
-    uint32_t ack_version;
-    uint32_t suspect_version;
-    uint32_t coordinator_version;
+	uint32_t proto_version;
+	uint32_t ack_version;
+	uint32_t suspect_version;
+	uint32_t coordinator_version;
 };
 
 /* Cluster event */
 struct cluster_event {
-    char node_id[256];
-    int event_type;              /* JOIN, LEAVE, FAILURE, RECOVERY */
-    time_t timestamp;
-    char details[512];
+	char node_id[256];
+	int event_type;              /* JOIN, LEAVE, FAILURE, RECOVERY */
+	time_t timestamp;
+	char details[512];
 };
 
 /* Control-plane state machine (opaque; see control_plane.h). */
@@ -165,43 +165,43 @@ struct cp_state;
 
 /* Raft consensus state */
 struct raft_state {
-    enum {
-        RAFT_FOLLOWER,
-        RAFT_CANDIDATE,
-        RAFT_LEADER
-    } state;
+	enum {
+		RAFT_FOLLOWER,
+		RAFT_CANDIDATE,
+		RAFT_LEADER
+	} state;
 
-    uint64_t current_term;
-    char voted_for[256];
-    uint64_t commit_index;
-    uint64_t last_applied;
+	uint64_t current_term;
+	char voted_for[256];
+	uint64_t commit_index;
+	uint64_t last_applied;
 
-    /* Leader info */
-    char leader_id[256];
-    time_t last_heartbeat;
+	/* Leader info */
+	char leader_id[256];
+	time_t last_heartbeat;
 
-    /*
-     * Snapshot boundary: log[] holds entries with absolute index
-     * > snapshot_index only; everything up to (snapshot_index, snapshot_term)
-     * has been compacted away. absolute index N maps to log[N -
-     * snapshot_index - 1].
-     */
-    uint64_t snapshot_index;
-    uint64_t snapshot_term;
+	/*
+	 * Snapshot boundary: log[] holds entries with absolute index
+	 * > snapshot_index only; everything up to (snapshot_index, snapshot_term)
+	 * has been compacted away. absolute index N maps to log[N -
+	 * snapshot_index - 1].
+	 */
+	uint64_t snapshot_index;
+	uint64_t snapshot_term;
 
-    /* Log (entries after the snapshot boundary) */
-    struct raft_log_entry {
-        uint64_t term;
-        uint64_t index;
-        char command[256];
-        time_t timestamp;
-    } *log;
-    int log_size;
-    int log_capacity;
+	/* Log (entries after the snapshot boundary) */
+	struct raft_log_entry {
+		uint64_t term;
+		uint64_t index;
+		char command[256];
+		time_t timestamp;
+	} *log;
+	int log_size;
+	int log_capacity;
 
-    /* Replicated control-plane state, rebuilt by applying committed log
-     * entries in order (see raft_apply_committed / control_plane.c). */
-    struct cp_state *cp;
+	/* Replicated control-plane state, rebuilt by applying committed log
+	 * entries in order (see raft_apply_committed / control_plane.c). */
+	struct cp_state *cp;
 };
 
 /* Cluster management functions */
@@ -263,12 +263,12 @@ int cluster_service_replicas(const char *service);
  */
 struct agent_replica;	/* node_agent.h */
 int cluster_controller_tick(const char *const *names, const char *const *addrs,
-    int nnodes);
+	int nnodes);
 int cluster_placement_count(void);
 int cluster_service_endpoint_count(const char *service);
 int cluster_lb_ruleset(const char *service, char *out, size_t outlen);
 int cluster_node_assignments(const char *node, struct agent_replica *out,
-    int max, int *nout);
+	int max, int *nout);
 int raft_replicate_log(const char *target_id);
 int raft_commit_log(uint64_t index);
 int raft_get_leader(char *leader_id, size_t len);
@@ -285,14 +285,14 @@ int cluster_health_json(char **json_out, size_t *json_len);
 
 /* Service discovery */
 struct service_endpoint {
-    char service_name[256];
-    char namespace[256];
-    char node_id[256];
-    char ip[64];
-    uint16_t port;
-    char protocol[16];             /* tcp, udp, http, https */
-    int replicas;
-    time_t last_updated;
+	char service_name[256];
+	char namespace[256];
+	char node_id[256];
+	char ip[64];
+	uint16_t port;
+	char protocol[16];             /* tcp, udp, http, https */
+	int replicas;
+	time_t last_updated;
 };
 
 int cluster_register_service(const char *name, const char *ns, const char *ip, uint16_t port, const char *protocol);

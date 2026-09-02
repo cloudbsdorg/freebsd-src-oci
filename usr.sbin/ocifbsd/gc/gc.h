@@ -74,98 +74,98 @@
 
 /* Orphaned resource */
 struct gc_orphan {
-    int             type;           /* GC_TYPE_* */
-    char            name[256];
-    char            namespace[128];
-    char            node[256];
-    time_t          detected;
-    time_t          last_heartbeat;/* For container orphans */
-    int             reason;        /* GC_REASON_* */
-    int             priority;
-    bool            is_protected;   /* Don't delete */
-    RB_ENTRY(gc_orphan) entry;
+	int             type;           /* GC_TYPE_* */
+	char            name[256];
+	char            namespace[128];
+	char            node[256];
+	time_t          detected;
+	time_t          last_heartbeat;/* For container orphans */
+	int             reason;        /* GC_REASON_* */
+	int             priority;
+	bool            is_protected;   /* Don't delete */
+	RB_ENTRY(gc_orphan) entry;
 };
 RB_HEAD(orphan_tree, gc_orphan);
 RB_PROTOTYPE(orphan_tree, gc_orphan, entry, orphan_compare);
 
 /* GC item */
 struct gc_item {
-    uint64_t        id;
-    int             type;
-    char            name[256];
-    char            namespace[128];
-    char            owner_ref[512];  /* Owner reference */
-    time_t          created;
-    time_t          last_used;
-    time_t          scheduled;
-    int             status;
-    int             priority;
-    int             reason;
-    int             attempts;
-    char            error[512];
-    char            *metadata;
-    TAILQ_ENTRY(gc_item) next;
+	uint64_t        id;
+	int             type;
+	char            name[256];
+	char            namespace[128];
+	char            owner_ref[512];  /* Owner reference */
+	time_t          created;
+	time_t          last_used;
+	time_t          scheduled;
+	int             status;
+	int             priority;
+	int             reason;
+	int             attempts;
+	char            error[512];
+	char            *metadata;
+	TAILQ_ENTRY(gc_item) next;
 };
 TAILQ_HEAD(gc_queue, gc_item);
 
 /* GC configuration */
 struct gc_config {
-    /* Container GC */
-    int             container_ttl;           /* seconds */
-    int             stopped_container_ttl;  /* seconds */
-    int             max_containers;
-    bool            gc_stopped_containers;
-    bool            gc_finished_pods;
+	/* Container GC */
+	int             container_ttl;           /* seconds */
+	int             stopped_container_ttl;  /* seconds */
+	int             max_containers;
+	bool            gc_stopped_containers;
+	bool            gc_finished_pods;
 
-    /* Image GC */
-    int             image_ttl;              /* seconds */
-    uint64_t        image_min_free_space;   /* bytes */
-    uint64_t        image_high_threshold;   /* percent */
-    uint64_t        image_low_threshold;    /* percent */
+	/* Image GC */
+	int             image_ttl;              /* seconds */
+	uint64_t        image_min_free_space;   /* bytes */
+	uint64_t        image_high_threshold;   /* percent */
+	uint64_t        image_low_threshold;    /* percent */
 
-    /* Volume GC */
-    int             volume_ttl;
-    bool            gc_orphaned_volumes;
-    bool            gc_released_pvc;
+	/* Volume GC */
+	int             volume_ttl;
+	bool            gc_orphaned_volumes;
+	bool            gc_released_pvc;
 
-    /* Network GC */
-    bool            gc_orphaned_networks;
-    bool            gc_unused_networks;
+	/* Network GC */
+	bool            gc_orphaned_networks;
+	bool            gc_unused_networks;
 
-    /* Cluster GC */
-    int             node_grace_period;      /* seconds */
-    bool            gc_orphaned_pods;
-    bool            gc_failed_jobs;
+	/* Cluster GC */
+	int             node_grace_period;      /* seconds */
+	bool            gc_orphaned_pods;
+	bool            gc_failed_jobs;
 
-    /* General */
-    int             gc_interval;            /* seconds */
-    int             gc_batch_size;
-    int             gc_concurrency;
-    bool            dry_run;
-    bool            verbose;
+	/* General */
+	int             gc_interval;            /* seconds */
+	int             gc_batch_size;
+	int             gc_concurrency;
+	bool            dry_run;
+	bool            verbose;
 };
 
 /* GC statistics */
 struct gc_stats {
-    uint64_t        items_scanned;
-    uint64_t        items_collected;
-    uint64_t        items_failed;
-    uint64_t        space_reclaimed;
-    uint64_t        orphans_detected;
-    uint64_t        orphans_resolved;
-    time_t          last_run;
-    time_t          last_full_gc;
+	uint64_t        items_scanned;
+	uint64_t        items_collected;
+	uint64_t        items_failed;
+	uint64_t        space_reclaimed;
+	uint64_t        orphans_detected;
+	uint64_t        orphans_resolved;
+	time_t          last_run;
+	time_t          last_full_gc;
 };
 
 /* Ownership graph entry */
 struct owner_ref {
-    char            resource_type[64];
-    char            resource_name[256];
-    char            namespace[128];
-    char            uid[64];
-    int             block_deletion;          /* Finalizer count */
-    bool            is_deleted;
-    LIST_ENTRY(owner_ref) refs;
+	char            resource_type[64];
+	char            resource_name[256];
+	char            namespace[128];
+	char            uid[64];
+	int             block_deletion;          /* Finalizer count */
+	bool            is_deleted;
+	LIST_ENTRY(owner_ref) refs;
 };
 LIST_HEAD(owner_list, owner_ref);
 

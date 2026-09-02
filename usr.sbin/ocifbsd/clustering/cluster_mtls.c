@@ -20,7 +20,7 @@
 
 SSL_CTX *
 cluster_mtls_ctx(const char *dir, const char *node_name,
-    const char *expected_peer, int is_server)
+	const char *expected_peer, int is_server)
 {
 	char crtp[PATH_MAX], keyp[PATH_MAX], cap[PATH_MAX];
 	SSL_CTX *ctx;

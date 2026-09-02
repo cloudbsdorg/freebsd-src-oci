@@ -45,81 +45,81 @@
 
 /* Resource limits structure */
 struct ns_resource_limits {
-    uint64_t memory_limit;      /* bytes */
-    uint64_t memory_reservation;/* bytes */
-    uint64_t cpu_limit;         /* percent * 100 (e.g., 8000 = 80%) */
-    uint64_t cpu_reservation;   /* percent * 100 */
-    uint64_t processes_max;     /* max processes */
-    uint64_t files_max;         /* max open files */
-    uint64_t sockets_max;       /* max sockets */
-    uint64_t vmemory_limit;     /* virtual memory limit */
-    uint64_t stack_limit;       /* stack size limit */
-    uint64_t coredump_limit;    /* core dump size */
+	uint64_t memory_limit;      /* bytes */
+	uint64_t memory_reservation;/* bytes */
+	uint64_t cpu_limit;         /* percent * 100 (e.g., 8000 = 80%) */
+	uint64_t cpu_reservation;   /* percent * 100 */
+	uint64_t processes_max;     /* max processes */
+	uint64_t files_max;         /* max open files */
+	uint64_t sockets_max;       /* max sockets */
+	uint64_t vmemory_limit;     /* virtual memory limit */
+	uint64_t stack_limit;       /* stack size limit */
+	uint64_t coredump_limit;    /* core dump size */
 };
 
 /* Network policy */
 struct ns_network_policy {
-    bool allow_external;        /* allow external traffic */
-    bool allow_internal;        /* allow inter-namespace traffic */
-    bool egress_limit;         /* apply egress rate limiting */
-    uint64_t egress_rate;       /* bytes per second */
-    char *allowed_networks;    /* comma-separated CIDRs */
-    char *denied_networks;      /* comma-separated CIDRs */
+	bool allow_external;        /* allow external traffic */
+	bool allow_internal;        /* allow inter-namespace traffic */
+	bool egress_limit;         /* apply egress rate limiting */
+	uint64_t egress_rate;       /* bytes per second */
+	char *allowed_networks;    /* comma-separated CIDRs */
+	char *denied_networks;      /* comma-separated CIDRs */
 };
 
 /* Volume access policy */
 struct ns_volume_policy {
-    bool allow_shared;          /* allow shared volumes */
-    bool allow_exclusive;       /* allow exclusive volumes */
-    bool allow_readonly;        /* allow read-only volumes */
-    char **allowed_datasets;    /* allowed ZFS datasets */
-    char **denied_datasets;     /* denied ZFS datasets */
+	bool allow_shared;          /* allow shared volumes */
+	bool allow_exclusive;       /* allow exclusive volumes */
+	bool allow_readonly;        /* allow read-only volumes */
+	char **allowed_datasets;    /* allowed ZFS datasets */
+	char **denied_datasets;     /* denied ZFS datasets */
 };
 
 /* Namespace structure */
 struct namespace {
-    char name[256];             /* namespace name */
-    uint32_t id;                /* numeric namespace ID */
-    int state;                  /* NS_STATE_* */
-    time_t created;             /* creation timestamp */
-    time_t updated;             /* last update timestamp */
+	char name[256];             /* namespace name */
+	uint32_t id;                /* numeric namespace ID */
+	int state;                  /* NS_STATE_* */
+	time_t created;             /* creation timestamp */
+	time_t updated;             /* last update timestamp */
 
-    /* Resource limits */
-    struct ns_resource_limits limits;
+	/* Resource limits */
+	struct ns_resource_limits limits;
 
-    /* Security */
-    char mac_label[256];        /* MAC label, e.g. prod/high */
-    int security_level;         /* securelevel */
+	/* Security */
+	char mac_label[256];        /* MAC label, e.g. prod/high */
+	int security_level;         /* securelevel */
 
-    /* Network policy */
-    struct ns_network_policy net_policy;
+	/* Network policy */
+	struct ns_network_policy net_policy;
 
-    /* Volume policy */
-    struct ns_volume_policy vol_policy;
+	/* Volume policy */
+	struct ns_volume_policy vol_policy;
 
-    /* Quota */
-    uint64_t pod_limit;         /* max pods */
-    uint64_t service_limit;     /* max services */
-    uint64_t volume_limit;      /* max volumes */
-    uint64_t secret_limit;      /* max secrets */
+	/* Quota */
+	uint64_t pod_limit;         /* max pods */
+	uint64_t service_limit;     /* max services */
+	uint64_t volume_limit;      /* max volumes */
+	uint64_t secret_limit;      /* max secrets */
 
-    /* Usage counters */
-    uint32_t pod_count;
-    uint32_t service_count;
-    uint32_t volume_count;
-    uint32_t secret_count;
+	/* Usage counters */
+	uint32_t pod_count;
+	uint32_t service_count;
+	uint32_t volume_count;
+	uint32_t secret_count;
 
-    /* RBAC */
-    char *allowed_users;        /* comma-separated users */
-    char *allowed_groups;       /* comma-separated groups */
+	/* RBAC */
+	char *allowed_users;        /* comma-separated users */
+	char *allowed_groups;       /* comma-separated groups */
 
-    /* Annotations */
-    char **annotations;
-    char **labels;
+	/* Annotations */
+	char **annotations;
+	char **labels;
 
-    /* Internal */
-    RB_ENTRY(namespace) entry;
-    pthread_mutex_t lock;
+	/* Internal */
+	RB_ENTRY(namespace) entry;
+	pthread_mutex_t lock;
 };
 
 /* Namespace RB tree */

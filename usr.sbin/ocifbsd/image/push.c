@@ -311,7 +311,7 @@ upload_abort(struct upload_session *sess)
  */
 int
 push_layer(struct registry *reg, const char *layer_path,
-    const char *digest, progress_cb cb, void *opaque)
+	const char *digest, progress_cb cb, void *opaque)
 {
 	struct upload_session *sess = NULL;
 	FILE *f;
@@ -490,7 +490,7 @@ create_tar_from_directory(const char *srcdir, const char *destfile)
  */
 int
 create_layer_from_directory(const char *srcdir, const char *destfile,
-    const char **exclude_patterns __unused, int nexclude __unused)
+	const char **exclude_patterns __unused, int nexclude __unused)
 {
 	return (create_tar_from_directory(srcdir, destfile));
 }
@@ -500,7 +500,7 @@ create_layer_from_directory(const char *srcdir, const char *destfile,
  */
 int
 push_image(struct registry *reg, const char *reference,
-    const char *sourcedir, progress_cb cb, void *opaque)
+	const char *sourcedir, progress_cb cb, void *opaque)
 {
 	char *registry, *repo, *tag, *digest;
 	char manifest_path[PATH_MAX];
@@ -642,7 +642,7 @@ cleanup:
  */
 int
 create_manifest(const char *config_digest, struct oci_layer **layers,
-    int nlayers, char **manifest_json)
+	int nlayers, char **manifest_json)
 {
 	json_object *manifest;
 	json_object *config;
@@ -690,7 +690,7 @@ create_manifest(const char *config_digest, struct oci_layer **layers,
  */
 int
 push_manifest(struct registry *reg, const char *repo, const char *tag,
-    const char *manifest_json)
+	const char *manifest_json)
 {
 	char *url;
 	CURL *curl;

@@ -199,7 +199,7 @@ vnet_setup_nat(const char *jail_name, const char *external_iface, const char *in
  */
 static int
 vnet_get_interface_stats(const char *jail_name, const char *interface,
-    uint64_t *rx_bytes, uint64_t *tx_bytes, uint64_t *rx_packets, uint64_t *tx_packets)
+	uint64_t *rx_bytes, uint64_t *tx_bytes, uint64_t *rx_packets, uint64_t *tx_packets)
 {
 	char buf[256];
 	char *out = NULL;

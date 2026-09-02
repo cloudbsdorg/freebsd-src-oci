@@ -200,9 +200,9 @@ json_escape(const char *str)
  */
 char *
 native_format_service(const char *name, const char *image,
-    int replicas, const char *ports, const char *volumes,
-    const char *environment, const char *networks,
-    const char *depends_on, struct convert_options *opts)
+	int replicas, const char *ports, const char *volumes,
+	const char *environment, const char *networks,
+	const char *depends_on, struct convert_options *opts)
 {
 	char *result;
 
@@ -226,7 +226,7 @@ native_format_service(const char *name, const char *image,
 
 char *
 native_format_network(const char *name, const char *driver,
-    const char *subnet, struct convert_options *opts)
+	const char *subnet, struct convert_options *opts)
 {
 	char *result;
 
@@ -245,7 +245,7 @@ native_format_network(const char *name, const char *driver,
 
 char *
 native_format_volume(const char *name, const char *driver,
-    const char *opts, struct convert_options *copts)
+	const char *opts, struct convert_options *copts)
 {
 	char *result;
 
@@ -260,8 +260,8 @@ native_format_volume(const char *name, const char *driver,
 
 char *
 native_format_stack(const char *name, const char *services,
-    const char *networks, const char *volumes,
-    struct convert_options *opts)
+	const char *networks, const char *volumes,
+	struct convert_options *opts)
 {
 	char *result;
 

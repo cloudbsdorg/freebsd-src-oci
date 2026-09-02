@@ -78,7 +78,7 @@ same_replica(const struct agent_replica *a, const struct agent_replica *b)
 
 static const struct agent_replica *
 find_replica(const struct agent_replica *set, int n,
-    const struct agent_replica *want)
+	const struct agent_replica *want)
 {
 	for (int i = 0; i < n; i++)
 		if (same_replica(&set[i], want))
@@ -88,8 +88,8 @@ find_replica(const struct agent_replica *set, int n,
 
 int
 agent_reconcile(const struct agent_replica *desired, int nd,
-    const struct agent_replica *running, int nr,
-    struct agent_action *out, int max, int *nout)
+	const struct agent_replica *running, int nr,
+	struct agent_action *out, int max, int *nout)
 {
 	int k = 0;
 
@@ -140,7 +140,7 @@ replica_name(const struct agent_replica *r, char *buf, size_t buflen)
 
 int
 agent_launch_argv(const struct agent_replica *r, const char *ocifbsd,
-    char *namebuf, size_t namelen, const char *argv[], int max, int *argc)
+	char *namebuf, size_t namelen, const char *argv[], int max, int *argc)
 {
 	int k = 0;
 
@@ -162,7 +162,7 @@ agent_launch_argv(const struct agent_replica *r, const char *ocifbsd,
 
 int
 agent_stop_argv(const struct agent_replica *r, const char *ocifbsd,
-    char *namebuf, size_t namelen, const char *argv[], int max, int *argc)
+	char *namebuf, size_t namelen, const char *argv[], int max, int *argc)
 {
 	int k = 0;
 

@@ -333,7 +333,7 @@ netcfg_to_json(const struct netcfg *nc)
 
 static void
 parse_str_array(struct json_object *root, const char *key,
-    char ***arrp, size_t *np)
+	char ***arrp, size_t *np)
 {
 	struct json_object *arr, *el;
 	size_t i, len;

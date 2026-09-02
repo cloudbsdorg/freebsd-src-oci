@@ -47,55 +47,55 @@
 
 /* Metric value */
 struct metric_value {
-    double value;
-    uint64_t timestamp;
+	double value;
+	uint64_t timestamp;
 };
 
 /* Histogram bucket */
 struct histogram_bucket {
-    double le;          /* less than or equal */
-    uint64_t count;
+	double le;          /* less than or equal */
+	uint64_t count;
 };
 
 /* Histogram */
 struct metric_histogram {
-    double *bounds;
-    int nbuckets;
-    uint64_t count;
-    double sum;
-    double sum_squared;
+	double *bounds;
+	int nbuckets;
+	uint64_t count;
+	double sum;
+	double sum_squared;
 };
 
 /* Summary */
 struct metric_summary {
-    double quantile;
-    double value;
+	double quantile;
+	double value;
 };
 
 /* Single metric */
 struct metric {
-    char name[256];
-    char help[512];
-    int type;               /* METRIC_TYPE_* */
+	char name[256];
+	char help[512];
+	int type;               /* METRIC_TYPE_* */
 
-    /* Current value for gauge/counter */
-    double value;
-    uint64_t last_update;
+	/* Current value for gauge/counter */
+	double value;
+	uint64_t last_update;
 
-    /* Labels */
-    char **label_names;
-    char **label_values;
-    int nlabels;
+	/* Labels */
+	char **label_names;
+	char **label_values;
+	int nlabels;
 
-    /* Histogram data */
-    struct metric_histogram *histogram;
+	/* Histogram data */
+	struct metric_histogram *histogram;
 
-    /* Summary data */
-    struct metric_summary *quantiles;
-    int nquantiles;
+	/* Summary data */
+	struct metric_summary *quantiles;
+	int nquantiles;
 
-    /* Tree entry */
-    RB_ENTRY(metric) entry;
+	/* Tree entry */
+	RB_ENTRY(metric) entry;
 };
 
 /* Metrics registry */
@@ -104,110 +104,110 @@ RB_PROTOTYPE(metric_tree, metric, entry, metric_compare);
 
 /* Node metrics */
 struct node_metrics {
-    /* CPU */
-    double cpu_user;
-    double cpu_system;
-    double cpu_idle;
-    double cpu_interrupt;
-    uint64_t cpu_threads;
+	/* CPU */
+	double cpu_user;
+	double cpu_system;
+	double cpu_idle;
+	double cpu_interrupt;
+	uint64_t cpu_threads;
 
-    /* Memory */
-    uint64_t mem_total;
-    uint64_t mem_free;
-    uint64_t mem_available;
-    uint64_t mem_cached;
-    uint64_t mem_buffers;
-    uint64_t mem_swap_total;
-    uint64_t mem_swap_used;
+	/* Memory */
+	uint64_t mem_total;
+	uint64_t mem_free;
+	uint64_t mem_available;
+	uint64_t mem_cached;
+	uint64_t mem_buffers;
+	uint64_t mem_swap_total;
+	uint64_t mem_swap_used;
 
-    /* Disk */
-    uint64_t disk_total;
-    uint64_t disk_free;
-    uint64_t disk_inodes_total;
-    uint64_t disk_inodes_free;
+	/* Disk */
+	uint64_t disk_total;
+	uint64_t disk_free;
+	uint64_t disk_inodes_total;
+	uint64_t disk_inodes_free;
 
-    /* Network */
-    uint64_t net_rx_bytes;
-    uint64_t net_tx_bytes;
-    uint64_t net_rx_packets;
-    uint64_t net_tx_packets;
-    uint64_t net_rx_errors;
-    uint64_t net_tx_errors;
+	/* Network */
+	uint64_t net_rx_bytes;
+	uint64_t net_tx_bytes;
+	uint64_t net_rx_packets;
+	uint64_t net_tx_packets;
+	uint64_t net_rx_errors;
+	uint64_t net_tx_errors;
 
-    /* Load */
-    double loadavg_1m;
-    double loadavg_5m;
-    double loadavg_15m;
+	/* Load */
+	double loadavg_1m;
+	double loadavg_5m;
+	double loadavg_15m;
 
-    /* Time */
-    uint64_t timestamp;
+	/* Time */
+	uint64_t timestamp;
 };
 
 /* Pod metrics */
 struct pod_metrics {
-    char pod_name[256];
-    char namespace[256];
-    char node[256];
+	char pod_name[256];
+	char namespace[256];
+	char node[256];
 
-    /* CPU */
-    double cpu_usage;
-    double cpu_limit;
-    double cpu_request;
+	/* CPU */
+	double cpu_usage;
+	double cpu_limit;
+	double cpu_request;
 
-    /* Memory */
-    uint64_t mem_usage;
-    uint64_t mem_limit;
-    uint64_t mem_request;
+	/* Memory */
+	uint64_t mem_usage;
+	uint64_t mem_limit;
+	uint64_t mem_request;
 
-    /* Network */
-    uint64_t net_rx_bytes;
-    uint64_t net_tx_bytes;
+	/* Network */
+	uint64_t net_rx_bytes;
+	uint64_t net_tx_bytes;
 
-    /* Disk */
-    uint64_t disk_usage;
+	/* Disk */
+	uint64_t disk_usage;
 
-    /* Processes */
-    uint64_t process_count;
-    uint64_t thread_count;
-    uint64_t file_descriptors;
+	/* Processes */
+	uint64_t process_count;
+	uint64_t thread_count;
+	uint64_t file_descriptors;
 
-    /* Time */
-    uint64_t timestamp;
+	/* Time */
+	uint64_t timestamp;
 };
 
 /* Service metrics */
 struct service_metrics {
-    char service_name[256];
-    char namespace[256];
+	char service_name[256];
+	char namespace[256];
 
-    /* Replicas */
-    int replicas_desired;
-    int replicas_available;
-    int replicas_unavailable;
+	/* Replicas */
+	int replicas_desired;
+	int replicas_available;
+	int replicas_unavailable;
 
-    /* Requests */
-    uint64_t requests_total;
-    uint64_t requests_success;
-    uint64_t requests_error;
-    uint64_t requests_timeout;
-    double request_duration_ms_avg;
-    double request_duration_ms_p99;
+	/* Requests */
+	uint64_t requests_total;
+	uint64_t requests_success;
+	uint64_t requests_error;
+	uint64_t requests_timeout;
+	double request_duration_ms_avg;
+	double request_duration_ms_p99;
 
-    /* Time */
-    uint64_t timestamp;
+	/* Time */
+	uint64_t timestamp;
 };
 
 /* Metrics collector configuration */
 struct metrics_config {
-    int collection_interval;    /* seconds */
-    int retention_period;       /* seconds */
-    int export_interval;        /* seconds */
-    char *export_endpoint;      /* Prometheus endpoint */
-    bool enable_host_metrics;
-    bool enable_pod_metrics;
-    bool enable_service_metrics;
-    bool enable_network_metrics;
-    int histogram_buckets;      /* number of histogram buckets */
+	int collection_interval;    /* seconds */
+	int retention_period;       /* seconds */
+	int export_interval;        /* seconds */
+	char *export_endpoint;      /* Prometheus endpoint */
+	bool enable_host_metrics;
+	bool enable_pod_metrics;
+	bool enable_service_metrics;
+	bool enable_network_metrics;
+	int histogram_buckets;      /* number of histogram buckets */
 };
 
 /* Metrics functions */
@@ -247,10 +247,10 @@ char *metrics_serialize_prometheus(void);
 
 /* Alerting */
 struct metrics_threshold {
-    char metric_name[256];
-    double warning;
-    double critical;
-    int comparison;     /* 0 = above, 1 = below */
+	char metric_name[256];
+	double warning;
+	double critical;
+	int comparison;     /* 0 = above, 1 = below */
 };
 
 int metrics_set_threshold(const char *name, double warning, double critical, int comparison);

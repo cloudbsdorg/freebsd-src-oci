@@ -69,7 +69,7 @@ static void	*rotation_worker(void *arg);
 static void	*forward_worker(void *arg);
 static void	*alert_worker(void *arg);
 static int	log_write_internal(int severity, int source,
-    const char *source_name, const char *fields_json, const char *message);
+	const char *source_name, const char *fields_json, const char *message);
 static int	log_write_entry(struct log_entry *entry);
 static int	event_compare(struct event_entry *a, struct event_entry *b);
 static int	alert_compare(struct alert_rule *a, struct alert_rule *b);
@@ -77,11 +77,11 @@ static void	event_trigger_webhooks(struct event_entry *event);
 static struct log_forwarder *forwarder_find(const char *name);
 static int	forwarder_send_udp(struct log_forwarder *fw, const char *line);
 static int	forwarder_send_fluentd(struct log_forwarder *fw,
-    const char *line);
+	const char *line);
 static int	forwarder_send_elastic(struct log_forwarder *fw,
-    const char *line);
+	const char *line);
 static int	forwarder_send_splunk(struct log_forwarder *fw,
-    const char *line);
+	const char *line);
 static int	forwarder_send_custom(struct log_forwarder *fw, const char *line);
 static int	webhook_deliver(struct webhook_delivery *wh);
 static void	sig_handler(int sig);
@@ -192,13 +192,13 @@ safe_shell_exec(const char *command)
 
 /* Severity level names */
 static const char *severity_names[] = {
-    "emerg", "alert", "crit", "err", "warning",
-    "notice", "info", "debug", "trace"
+	"emerg", "alert", "crit", "err", "warning",
+	"notice", "info", "debug", "trace"
 };
 
 /* Source type names */
 static const char *source_names[] = {
-    "jail", "host", "container", "service", "api"
+	"jail", "host", "container", "service", "api"
 };
 
 /*
@@ -209,19 +209,19 @@ static const char *source_names[] = {
 static const char *
 severity_name(int severity)
 {
-    if (severity < 0 ||
-        (size_t)severity >= sizeof(severity_names) / sizeof(severity_names[0]))
-        return ("unknown");
-    return (severity_names[severity]);
+	if (severity < 0 ||
+		(size_t)severity >= sizeof(severity_names) / sizeof(severity_names[0]))
+		return ("unknown");
+	return (severity_names[severity]);
 }
 
 static const char *
 source_name(int source)
 {
-    if (source < 0 ||
-        (size_t)source >= sizeof(source_names) / sizeof(source_names[0]))
-        return ("unknown");
-    return (source_names[source]);
+	if (source < 0 ||
+		(size_t)source >= sizeof(source_names) / sizeof(source_names[0]))
+		return ("unknown");
+	return (source_names[source]);
 }
 
 /*
@@ -230,57 +230,57 @@ source_name(int source)
 int
 logd_init(struct logd_config *cfg)
 {
-    if (initialized)
-        return (0);
+	if (initialized)
+		return (0);
 
-    /* Get hostname */
-    gethostname(hostname, sizeof(hostname));
+	/* Get hostname */
+	gethostname(hostname, sizeof(hostname));
 
-    /* Initialize or use provided config */
-    if (cfg != NULL) {
-        config = *cfg;
-    } else {
-        /* Default configuration */
-        memset(&config, 0, sizeof(config));
-        config.log_level = LOG_INFO;
-        config.ringbuf_size = 100000;  /* 100K entries */
-        config.retention_hot = 1;
-        config.retention_warm = 7;
-        config.retention_cold = 30;
-        config.retention_archive = 365;
-        config.storage_path = strdup("/var/log/ocifbsd");
-        config.enable_prometheus = true;
-        config.prometheus_port = 9090;
-        config.query_timeout = 30;
-        config.forward_batch_size = 100;
-        config.forward_interval = 1000;
-    }
+	/* Initialize or use provided config */
+	if (cfg != NULL) {
+		config = *cfg;
+	} else {
+		/* Default configuration */
+		memset(&config, 0, sizeof(config));
+		config.log_level = LOG_INFO;
+		config.ringbuf_size = 100000;  /* 100K entries */
+		config.retention_hot = 1;
+		config.retention_warm = 7;
+		config.retention_cold = 30;
+		config.retention_archive = 365;
+		config.storage_path = strdup("/var/log/ocifbsd");
+		config.enable_prometheus = true;
+		config.prometheus_port = 9090;
+		config.query_timeout = 30;
+		config.forward_batch_size = 100;
+		config.forward_interval = 1000;
+	}
 
-    /* Initialize ring buffer */
-    main_ringbuf = ringbuf_create(config.ringbuf_size);
-    if (main_ringbuf == NULL) {
-        fprintf(stderr, "Failed to create ring buffer\n");
-        return (-1);
-    }
+	/* Initialize ring buffer */
+	main_ringbuf = ringbuf_create(config.ringbuf_size);
+	if (main_ringbuf == NULL) {
+		fprintf(stderr, "Failed to create ring buffer\n");
+		return (-1);
+	}
 
-    /* Initialize lists */
-    LIST_INIT(&forwarders);
-    RB_INIT(&alert_rules);
-    RB_INIT(&events);
-    STAILQ_INIT(&webhooks);
+	/* Initialize lists */
+	LIST_INIT(&forwarders);
+	RB_INIT(&alert_rules);
+	RB_INIT(&events);
+	STAILQ_INIT(&webhooks);
 
-    /* Start background threads */
-    pthread_create(&rotate_thread, NULL, rotation_worker, NULL);
-    pthread_create(&forward_thread, NULL, forward_worker, NULL);
-    pthread_create(&alert_thread, NULL, alert_worker, NULL);
+	/* Start background threads */
+	pthread_create(&rotate_thread, NULL, rotation_worker, NULL);
+	pthread_create(&forward_thread, NULL, forward_worker, NULL);
+	pthread_create(&alert_thread, NULL, alert_worker, NULL);
 
-    /* Open syslog */
-    openlog("ocifbsd-logd", LOG_PID, LOG_DAEMON);
+	/* Open syslog */
+	openlog("ocifbsd-logd", LOG_PID, LOG_DAEMON);
 
-    initialized = 1;
-    syslog(LOG_INFO, "ocifbsd-logd initialized");
+	initialized = 1;
+	syslog(LOG_INFO, "ocifbsd-logd initialized");
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -289,25 +289,25 @@ logd_init(struct logd_config *cfg)
 void
 logd_shutdown(void)
 {
-    if (!initialized)
-        return;
+	if (!initialized)
+		return;
 
-    running = 0;
+	running = 0;
 
-    /* Signal threads to stop */
-    pthread_join(rotate_thread, NULL);
-    pthread_join(forward_thread, NULL);
-    pthread_join(alert_thread, NULL);
+	/* Signal threads to stop */
+	pthread_join(rotate_thread, NULL);
+	pthread_join(forward_thread, NULL);
+	pthread_join(alert_thread, NULL);
 
-    /* Flush forwarders */
-    forwarder_flush();
+	/* Flush forwarders */
+	forwarder_flush();
 
-    /* Destroy ring buffer */
-    if (main_ringbuf)
-        ringbuf_destroy(main_ringbuf);
+	/* Destroy ring buffer */
+	if (main_ringbuf)
+		ringbuf_destroy(main_ringbuf);
 
-    closelog();
-    initialized = 0;
+	closelog();
+	initialized = 0;
 }
 
 /*
@@ -316,17 +316,17 @@ logd_shutdown(void)
 int
 log_write(int severity, int source, const char *source_name, const char *fmt, ...)
 {
-    va_list ap;
-    char msg[4096];
+	va_list ap;
+	char msg[4096];
 
-    if (!initialized || severity > config.log_level)
-        return (0);
+	if (!initialized || severity > config.log_level)
+		return (0);
 
-    va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
 
-    return (log_write_internal(severity, source, source_name, NULL, msg));
+	return (log_write_internal(severity, source, source_name, NULL, msg));
 }
 
 /*
@@ -334,19 +334,19 @@ log_write(int severity, int source, const char *source_name, const char *fmt, ..
  */
 int
 log_write_structured(int severity, int source, const char *source_name,
-    const char *fields_json, const char *fmt, ...)
+	const char *fields_json, const char *fmt, ...)
 {
-    va_list ap;
-    char msg[4096];
+	va_list ap;
+	char msg[4096];
 
-    if (!initialized || severity > config.log_level)
-        return (0);
+	if (!initialized || severity > config.log_level)
+		return (0);
 
-    va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
 
-    return (log_write_internal(severity, source, source_name, fields_json, msg));
+	return (log_write_internal(severity, source, source_name, fields_json, msg));
 }
 
 /*
@@ -354,57 +354,57 @@ log_write_structured(int severity, int source, const char *source_name,
  */
 int
 log_write_internal(int severity, int source, const char *source_name,
-    const char *fields_json, const char *message)
+	const char *fields_json, const char *message)
 {
-    struct log_entry entry;
+	struct log_entry entry;
 
-    memset(&entry, 0, sizeof(entry));
+	memset(&entry, 0, sizeof(entry));
 
-    entry.id = __sync_fetch_and_add(&next_log_id, 1);
-    entry.timestamp = time(NULL);
-    entry.severity = severity;
-    entry.source = source;
+	entry.id = __sync_fetch_and_add(&next_log_id, 1);
+	entry.timestamp = time(NULL);
+	entry.severity = severity;
+	entry.source = source;
 
-    if (source_name)
-        strlcpy(entry.source_name, source_name, sizeof(entry.source_name));
-    if (message)
-        strlcpy(entry.message, message, sizeof(entry.message));
-    if (fields_json)
-        strlcpy(entry.fields, fields_json, sizeof(entry.fields));
+	if (source_name)
+		strlcpy(entry.source_name, source_name, sizeof(entry.source_name));
+	if (message)
+		strlcpy(entry.message, message, sizeof(entry.message));
+	if (fields_json)
+		strlcpy(entry.fields, fields_json, sizeof(entry.fields));
 
-    strlcpy(entry.hostname, hostname, sizeof(entry.hostname));
+	strlcpy(entry.hostname, hostname, sizeof(entry.hostname));
 
-    entry.pid = getpid();
-    entry.tid = (uint32_t)(uintptr_t)pthread_self();
+	entry.pid = getpid();
+	entry.tid = (uint32_t)(uintptr_t)pthread_self();
 
-    /* Get username if available */
-    struct passwd *pw = getpwuid(getuid());
-    if (pw)
-        strlcpy(entry.username, pw->pw_name, sizeof(entry.username));
+	/* Get username if available */
+	struct passwd *pw = getpwuid(getuid());
+	if (pw)
+		strlcpy(entry.username, pw->pw_name, sizeof(entry.username));
 
-    /* Write to ring buffer */
-    if (main_ringbuf)
-        ringbuf_write(main_ringbuf, &entry);
+	/* Write to ring buffer */
+	if (main_ringbuf)
+		ringbuf_write(main_ringbuf, &entry);
 
-    /* Process alerts */
-    alert_process_entry(&entry);
+	/* Process alerts */
+	alert_process_entry(&entry);
 
-    /* Syslog for host logs */
-    if (source == LOG_SOURCE_HOST) {
-        int pri = LOG_INFO;
-        switch (severity) {
-        case LOG_EMERG: pri = LOG_EMERG; break;
-        case LOG_ALERT: pri = LOG_ALERT; break;
-        case LOG_CRIT: pri = LOG_CRIT; break;
-        case LOG_ERR: pri = LOG_ERR; break;
-        case LOG_WARNING: pri = LOG_WARNING; break;
-        case LOG_NOTICE: pri = LOG_NOTICE; break;
-        case LOG_DEBUG: pri = LOG_DEBUG; break;
-        }
-        syslog(pri, "[%s] %s", source_name ? source_name : "unknown", message);
-    }
+	/* Syslog for host logs */
+	if (source == LOG_SOURCE_HOST) {
+		int pri = LOG_INFO;
+		switch (severity) {
+		case LOG_EMERG: pri = LOG_EMERG; break;
+		case LOG_ALERT: pri = LOG_ALERT; break;
+		case LOG_CRIT: pri = LOG_CRIT; break;
+		case LOG_ERR: pri = LOG_ERR; break;
+		case LOG_WARNING: pri = LOG_WARNING; break;
+		case LOG_NOTICE: pri = LOG_NOTICE; break;
+		case LOG_DEBUG: pri = LOG_DEBUG; break;
+		}
+		syslog(pri, "[%s] %s", source_name ? source_name : "unknown", message);
+	}
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -413,7 +413,7 @@ log_write_internal(int severity, int source, const char *source_name,
 int
 log_write_from_jail(const char *jail_name, int severity, const char *message)
 {
-    return (log_write(severity, LOG_SOURCE_JAIL, jail_name, "%s", message));
+	return (log_write(severity, LOG_SOURCE_JAIL, jail_name, "%s", message));
 }
 
 /*
@@ -422,19 +422,19 @@ log_write_from_jail(const char *jail_name, int severity, const char *message)
 int
 log_write_entry(struct log_entry *entry)
 {
-    if (!initialized || entry->severity > config.log_level)
-        return (0);
+	if (!initialized || entry->severity > config.log_level)
+		return (0);
 
-    entry->id = __sync_fetch_and_add(&next_log_id, 1);
-    if (entry->hostname[0] == '\0')
-        strlcpy(entry->hostname, hostname, sizeof(entry->hostname));
+	entry->id = __sync_fetch_and_add(&next_log_id, 1);
+	if (entry->hostname[0] == '\0')
+		strlcpy(entry->hostname, hostname, sizeof(entry->hostname));
 
-    if (main_ringbuf)
-        ringbuf_write(main_ringbuf, entry);
+	if (main_ringbuf)
+		ringbuf_write(main_ringbuf, entry);
 
-    alert_process_entry(entry);
+	alert_process_entry(entry);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -443,57 +443,57 @@ log_write_entry(struct log_entry *entry)
 struct log_entry **
 log_query_exec(struct log_query *query, uint64_t *count)
 {
-    struct log_entry **results = NULL;
-    uint64_t n = 0;
-    uint64_t cursor = 0;
-    struct log_entry e;
+	struct log_entry **results = NULL;
+	uint64_t n = 0;
+	uint64_t cursor = 0;
+	struct log_entry e;
 
-    if (query == NULL || count == NULL)
-        return (NULL);
+	if (query == NULL || count == NULL)
+		return (NULL);
 
-    *count = 0;
+	*count = 0;
 
-    if (main_ringbuf == NULL)
-        return (NULL);
+	if (main_ringbuf == NULL)
+		return (NULL);
 
-    /* Results are heap COPIES (ringbuf_iterate copies out under the lock);
-     * the caller owns them and must free every results[i] then the array. */
-    while (ringbuf_iterate(main_ringbuf, &cursor, &e) == 0) {
-        struct log_entry *copy;
+	/* Results are heap COPIES (ringbuf_iterate copies out under the lock);
+	 * the caller owns them and must free every results[i] then the array. */
+	while (ringbuf_iterate(main_ringbuf, &cursor, &e) == 0) {
+		struct log_entry *copy;
 
-        /* Apply filters */
-        if (query->start_time && e.timestamp < query->start_time)
-            continue;
-        if (query->end_time && e.timestamp > query->end_time)
-            continue;
-        if (query->severity_min && e.severity < query->severity_min)
-            continue;
-        if (query->severity_max && e.severity > query->severity_max)
-            continue;
-        if (query->source_name &&
-            fnmatch(query->source_name, e.source_name, 0) != 0)
-            continue;
+		/* Apply filters */
+		if (query->start_time && e.timestamp < query->start_time)
+			continue;
+		if (query->end_time && e.timestamp > query->end_time)
+			continue;
+		if (query->severity_min && e.severity < query->severity_min)
+			continue;
+		if (query->severity_max && e.severity > query->severity_max)
+			continue;
+		if (query->source_name &&
+			fnmatch(query->source_name, e.source_name, 0) != 0)
+			continue;
 
-        REALLOC_SAFE(results, (n + 1) * sizeof(*results), realloc_fail);
-        copy = malloc(sizeof(*copy));
-        if (copy == NULL)
-            goto realloc_fail;
-        *copy = e;
-        results[n++] = copy;
+		REALLOC_SAFE(results, (n + 1) * sizeof(*results), realloc_fail);
+		copy = malloc(sizeof(*copy));
+		if (copy == NULL)
+			goto realloc_fail;
+		*copy = e;
+		results[n++] = copy;
 
-        if (query->limit && n >= query->limit)
-            break;
-    }
+		if (query->limit && n >= query->limit)
+			break;
+	}
 
-    *count = n;
-    return (results);
+	*count = n;
+	return (results);
 
 realloc_fail:
-    for (uint64_t i = 0; i < n; i++)
-        free(results[i]);
-    free(results);
-    *count = 0;
-    return (NULL);
+	for (uint64_t i = 0; i < n; i++)
+		free(results[i]);
+	free(results);
+	*count = 0;
+	return (NULL);
 }
 
 /*
@@ -502,62 +502,62 @@ realloc_fail:
 char *
 log_format_entry(struct log_entry *entry, int format)
 {
-    static char buf[8192];
-    struct tm *tm;
-    char ts[64];
+	static char buf[8192];
+	struct tm *tm;
+	char ts[64];
 
-    if (entry == NULL)
-        return (NULL);
+	if (entry == NULL)
+		return (NULL);
 
-    tm = localtime(&entry->timestamp);
-    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", tm);
+	tm = localtime(&entry->timestamp);
+	strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", tm);
 
-    switch (format) {
-    case LOG_FORMAT_JSON: {
-        /*
-         * hostname and message are attacker-influenceable free-form text;
-         * escape them so an embedded quote/newline cannot forge a log record
-         * or break a JSON consumer (log injection). severity/source come from
-         * fixed enum tables and need no escaping.
-         */
-        static char emsg[sizeof(entry->message) * 6];
-        static char ehost[sizeof(entry->hostname) * 6];
+	switch (format) {
+	case LOG_FORMAT_JSON: {
+		/*
+		 * hostname and message are attacker-influenceable free-form text;
+		 * escape them so an embedded quote/newline cannot forge a log record
+		 * or break a JSON consumer (log injection). severity/source come from
+		 * fixed enum tables and need no escaping.
+		 */
+		static char emsg[sizeof(entry->message) * 6];
+		static char ehost[sizeof(entry->hostname) * 6];
 
-        snprintf(buf, sizeof(buf),
-            "{\"timestamp\":\"%s\",\"severity\":\"%s\",\"source\":\"%s\","
-            "\"hostname\":\"%s\",\"message\":\"%s\",\"id\":%lu}",
-            ts,
-            severity_name(entry->severity),
-            source_name(entry->source),
-            ocifbsd_json_escape(entry->hostname, ehost, sizeof(ehost)),
-            ocifbsd_json_escape(entry->message, emsg, sizeof(emsg)),
-            (unsigned long)entry->id);
-        break;
-    }
+		snprintf(buf, sizeof(buf),
+			"{\"timestamp\":\"%s\",\"severity\":\"%s\",\"source\":\"%s\","
+			"\"hostname\":\"%s\",\"message\":\"%s\",\"id\":%lu}",
+			ts,
+			severity_name(entry->severity),
+			source_name(entry->source),
+			ocifbsd_json_escape(entry->hostname, ehost, sizeof(ehost)),
+			ocifbsd_json_escape(entry->message, emsg, sizeof(emsg)),
+			(unsigned long)entry->id);
+		break;
+	}
 
-    case LOG_FORMAT_TEXT:
-        snprintf(buf, sizeof(buf), "%s %s[%s]: %s",
-            ts,
-            severity_name(entry->severity),
-            entry->source_name,
-            entry->message);
-        break;
+	case LOG_FORMAT_TEXT:
+		snprintf(buf, sizeof(buf), "%s %s[%s]: %s",
+			ts,
+			severity_name(entry->severity),
+			entry->source_name,
+			entry->message);
+		break;
 
-    case LOG_FORMAT_SYSLOG:
-        snprintf(buf, sizeof(buf), "<%d>%s %s ocifbsd[%u]: [%s] %s",
-            entry->severity + (3 << 3), /* priorities */
-            ts,
-            entry->hostname,
-            (unsigned)entry->pid,
-            entry->source_name,
-            entry->message);
-        break;
+	case LOG_FORMAT_SYSLOG:
+		snprintf(buf, sizeof(buf), "<%d>%s %s ocifbsd[%u]: [%s] %s",
+			entry->severity + (3 << 3), /* priorities */
+			ts,
+			entry->hostname,
+			(unsigned)entry->pid,
+			entry->source_name,
+			entry->message);
+		break;
 
-    default:
-        buf[0] = '\0';
-    }
+	default:
+		buf[0] = '\0';
+	}
 
-    return (buf);
+	return (buf);
 }
 
 /*
@@ -566,26 +566,26 @@ log_format_entry(struct log_entry *entry, int format)
 int
 log_stats_get(struct log_stats *stats)
 {
-    if (stats == NULL || main_ringbuf == NULL)
-        return (-1);
+	if (stats == NULL || main_ringbuf == NULL)
+		return (-1);
 
-    pthread_mutex_lock(&main_ringbuf->lock);
+	pthread_mutex_lock(&main_ringbuf->lock);
 
-    memset(stats, 0, sizeof(*stats));
-    stats->entries_total = main_ringbuf->total_written;
-    stats->entries_written = main_ringbuf->count;
-    if (main_ringbuf->count > 0) {
-        uint64_t newest = (main_ringbuf->head + main_ringbuf->size - 1) %
-            main_ringbuf->size;
-        stats->oldest_entry =
-            main_ringbuf->entries[main_ringbuf->tail].timestamp;
-        /* head is the next unwritten slot; newest is the one before it. */
-        stats->newest_entry = main_ringbuf->entries[newest].timestamp;
-    }
+	memset(stats, 0, sizeof(*stats));
+	stats->entries_total = main_ringbuf->total_written;
+	stats->entries_written = main_ringbuf->count;
+	if (main_ringbuf->count > 0) {
+		uint64_t newest = (main_ringbuf->head + main_ringbuf->size - 1) %
+			main_ringbuf->size;
+		stats->oldest_entry =
+			main_ringbuf->entries[main_ringbuf->tail].timestamp;
+		/* head is the next unwritten slot; newest is the one before it. */
+		stats->newest_entry = main_ringbuf->entries[newest].timestamp;
+	}
 
-    pthread_mutex_unlock(&main_ringbuf->lock);
+	pthread_mutex_unlock(&main_ringbuf->lock);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -594,25 +594,25 @@ log_stats_get(struct log_stats *stats)
 int
 log_stats_json(char **json_out)
 {
-    struct log_stats stats;
+	struct log_stats stats;
 
-    if (json_out == NULL)
-        return (-1);
+	if (json_out == NULL)
+		return (-1);
 
-    if (log_stats_get(&stats) != 0)
-        return (-1);
+	if (log_stats_get(&stats) != 0)
+		return (-1);
 
-    if (asprintf(json_out,
-        "{\"entries_total\":%lu,\"entries_in_buffer\":%lu,"
-        "\"oldest_entry\":%ld,\"newest_entry\":%ld}",
-        (unsigned long)stats.entries_total,
-        (unsigned long)stats.entries_written,
-        (long)stats.oldest_entry,
-        (long)stats.newest_entry) == -1) {
-        return (-1);
-    }
+	if (asprintf(json_out,
+		"{\"entries_total\":%lu,\"entries_in_buffer\":%lu,"
+		"\"oldest_entry\":%ld,\"newest_entry\":%ld}",
+		(unsigned long)stats.entries_total,
+		(unsigned long)stats.entries_written,
+		(long)stats.oldest_entry,
+		(long)stats.newest_entry) == -1) {
+		return (-1);
+	}
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -621,33 +621,33 @@ log_stats_json(char **json_out)
 int
 log_stats_prometheus(FILE *fp)
 {
-    struct log_stats stats;
+	struct log_stats stats;
 
-    if (fp == NULL)
-        return (-1);
+	if (fp == NULL)
+		return (-1);
 
-    if (log_stats_get(&stats) != 0)
-        return (-1);
+	if (log_stats_get(&stats) != 0)
+		return (-1);
 
-    fprintf(fp, "# HELP ocifbsd_log_entries_total Total log entries written\n");
-    fprintf(fp, "# TYPE ocifbsd_log_entries_total counter\n");
-    fprintf(fp, "ocifbsd_log_entries_total %lu\n",
-        (unsigned long)stats.entries_total);
+	fprintf(fp, "# HELP ocifbsd_log_entries_total Total log entries written\n");
+	fprintf(fp, "# TYPE ocifbsd_log_entries_total counter\n");
+	fprintf(fp, "ocifbsd_log_entries_total %lu\n",
+		(unsigned long)stats.entries_total);
 
-    fprintf(fp, "# HELP ocifbsd_log_entries_buffered Entries in memory buffer\n");
-    fprintf(fp, "# TYPE ocifbsd_log_entries_buffered gauge\n");
-    fprintf(fp, "ocifbsd_log_entries_buffered %lu\n",
-        (unsigned long)stats.entries_written);
+	fprintf(fp, "# HELP ocifbsd_log_entries_buffered Entries in memory buffer\n");
+	fprintf(fp, "# TYPE ocifbsd_log_entries_buffered gauge\n");
+	fprintf(fp, "ocifbsd_log_entries_buffered %lu\n",
+		(unsigned long)stats.entries_written);
 
-    fprintf(fp, "# HELP ocifbsd_log_oldest_timestamp Oldest log entry timestamp\n");
-    fprintf(fp, "# TYPE ocifbsd_log_oldest_timestamp gauge\n");
-    fprintf(fp, "ocifbsd_log_oldest_timestamp %ld\n", (long)stats.oldest_entry);
+	fprintf(fp, "# HELP ocifbsd_log_oldest_timestamp Oldest log entry timestamp\n");
+	fprintf(fp, "# TYPE ocifbsd_log_oldest_timestamp gauge\n");
+	fprintf(fp, "ocifbsd_log_oldest_timestamp %ld\n", (long)stats.oldest_entry);
 
-    fprintf(fp, "# HELP ocifbsd_log_newest_timestamp Newest log entry timestamp\n");
-    fprintf(fp, "# TYPE ocifbsd_log_newest_timestamp gauge\n");
-    fprintf(fp, "ocifbsd_log_newest_timestamp %ld\n", (long)stats.newest_entry);
+	fprintf(fp, "# HELP ocifbsd_log_newest_timestamp Newest log entry timestamp\n");
+	fprintf(fp, "# TYPE ocifbsd_log_newest_timestamp gauge\n");
+	fprintf(fp, "ocifbsd_log_newest_timestamp %ld\n", (long)stats.newest_entry);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -656,19 +656,19 @@ log_stats_prometheus(FILE *fp)
 static void *
 rotation_worker(void *arg)
 {
-    (void)arg;
+	(void)arg;
 
-    while (running) {
-        sleep(3600);  /* Check every hour */
+	while (running) {
+		sleep(3600);  /* Check every hour */
 
-        if (!running)
-            break;
+		if (!running)
+			break;
 
-        log_rotate();
-        log_retention_apply();
-    }
+		log_rotate();
+		log_retention_apply();
+	}
 
-    return (NULL);
+	return (NULL);
 }
 
 /*
@@ -677,15 +677,15 @@ rotation_worker(void *arg)
 static void *
 forward_worker(void *arg)
 {
-    (void)arg;
+	(void)arg;
 
-    while (running) {
-        usleep(config.forward_interval * 1000);  /* Configurable interval */
-        forwarder_flush();
-        webhook_process();
-    }
+	while (running) {
+		usleep(config.forward_interval * 1000);  /* Configurable interval */
+		forwarder_flush();
+		webhook_process();
+	}
 
-    return (NULL);
+	return (NULL);
 }
 
 /*
@@ -694,14 +694,14 @@ forward_worker(void *arg)
 static void *
 alert_worker(void *arg)
 {
-    (void)arg;
+	(void)arg;
 
-    /* Alert processing is done synchronously in alert_process_entry */
-    while (running) {
-        sleep(1);  /* Check for time-based alert windows */
-    }
+	/* Alert processing is done synchronously in alert_process_entry */
+	while (running) {
+		sleep(1);  /* Check for time-based alert windows */
+	}
 
-    return (NULL);
+	return (NULL);
 }
 
 /*
@@ -710,36 +710,36 @@ alert_worker(void *arg)
 int
 log_rotate(void)
 {
-    char path[PATH_MAX];
-    FILE *fp;
-    time_t now = time(NULL);
+	char path[PATH_MAX];
+	FILE *fp;
+	time_t now = time(NULL);
 
-    /* Create rotated log file */
-    struct tm *tm = localtime(&now);
-    char timestamp[64];
-    strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", tm);
+	/* Create rotated log file */
+	struct tm *tm = localtime(&now);
+	char timestamp[64];
+	strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", tm);
 
-    snprintf(path, sizeof(path), "%s/ocifbsd.%s.log",
-        config.storage_path, timestamp);
+	snprintf(path, sizeof(path), "%s/ocifbsd.%s.log",
+		config.storage_path, timestamp);
 
-    mkdirp(config.storage_path, 0755);
+	mkdirp(config.storage_path, 0755);
 
-    /* Write recent entries to rotated file */
-    fp = fopen(path, "w");
-    if (fp) {
-        uint64_t cursor = 0;
-        struct log_entry entry;
+	/* Write recent entries to rotated file */
+	fp = fopen(path, "w");
+	if (fp) {
+		uint64_t cursor = 0;
+		struct log_entry entry;
 
-        while (ringbuf_iterate(main_ringbuf, &cursor, &entry) == 0) {
-            fprintf(fp, "%s\n", log_format_entry(&entry, LOG_FORMAT_TEXT));
-        }
+		while (ringbuf_iterate(main_ringbuf, &cursor, &entry) == 0) {
+			fprintf(fp, "%s\n", log_format_entry(&entry, LOG_FORMAT_TEXT));
+		}
 
-        fclose(fp);
-    }
+		fclose(fp);
+	}
 
-    syslog(LOG_INFO, "Log rotation completed: %s", path);
+	syslog(LOG_INFO, "Log rotation completed: %s", path);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -748,18 +748,18 @@ log_rotate(void)
 int
 log_retention_apply(void)
 {
-    char cmd[PATH_MAX];
+	char cmd[PATH_MAX];
 
-    /* Delete hot logs older than retention_hot days */
-    snprintf(cmd, sizeof(cmd),
-        "find %s -name 'ocifbsd.*.log' -mtime +%d -delete",
-        config.storage_path, config.retention_hot);
+	/* Delete hot logs older than retention_hot days */
+	snprintf(cmd, sizeof(cmd),
+		"find %s -name 'ocifbsd.*.log' -mtime +%d -delete",
+		config.storage_path, config.retention_hot);
 
-    if (safe_shell_exec(cmd) != 0) {
-        syslog(LOG_WARNING, "Retention policy failed: %s", cmd);
-    }
+	if (safe_shell_exec(cmd) != 0) {
+		syslog(LOG_WARNING, "Retention policy failed: %s", cmd);
+	}
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -768,7 +768,7 @@ log_retention_apply(void)
 struct logd_config *
 logd_get_config(void)
 {
-    return (&config);
+	return (&config);
 }
 
 /*
@@ -777,18 +777,18 @@ logd_get_config(void)
 int
 logd_reload_config(const char *config_path)
 {
-    /* Configuration reload would parse config file here */
-    (void)config_path;
-    return (0);
+	/* Configuration reload would parse config file here */
+	(void)config_path;
+	return (0);
 }
 
 /* Event tree comparison */
 static int
 event_compare(struct event_entry *a, struct event_entry *b)
 {
-    if (a->id < b->id) return (-1);
-    if (a->id > b->id) return (1);
-    return (0);
+	if (a->id < b->id) return (-1);
+	if (a->id > b->id) return (1);
+	return (0);
 }
 RB_GENERATE(event_tree, event_entry, entry, event_compare);
 
@@ -798,30 +798,30 @@ RB_GENERATE(event_tree, event_entry, entry, event_compare);
 int
 event_publish(int type, const char *source, const char *subject, const char *data)
 {
-    struct event_entry *event;
-    static uint64_t next_event_id = 1;
+	struct event_entry *event;
+	static uint64_t next_event_id = 1;
 
-    event = calloc(1, sizeof(*event));
-    if (event == NULL)
-        return (-1);
+	event = calloc(1, sizeof(*event));
+	if (event == NULL)
+		return (-1);
 
-    event->id = __sync_fetch_and_add(&next_event_id, 1);
-    event->timestamp = time(NULL);
-    event->type = type;
+	event->id = __sync_fetch_and_add(&next_event_id, 1);
+	event->timestamp = time(NULL);
+	event->type = type;
 
-    if (source)
-        strlcpy(event->source, source, sizeof(event->source));
-    if (subject)
-        strlcpy(event->subject, subject, sizeof(event->subject));
-    if (data)
-        event->data = strdup(data);
+	if (source)
+		strlcpy(event->source, source, sizeof(event->source));
+	if (subject)
+		strlcpy(event->subject, subject, sizeof(event->subject));
+	if (data)
+		event->data = strdup(data);
 
-    RB_INSERT(event_tree, &events, event);
+	RB_INSERT(event_tree, &events, event);
 
-    /* Trigger webhooks */
-    event_trigger_webhooks(event);
+	/* Trigger webhooks */
+	event_trigger_webhooks(event);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -829,49 +829,49 @@ event_publish(int type, const char *source, const char *subject, const char *dat
  */
 struct event_entry **
 event_query(time_t start, time_t end, int *types, int num_types,
-    uint64_t limit, uint64_t *count)
+	uint64_t limit, uint64_t *count)
 {
-    struct event_entry **results = NULL;
-    struct event_entry *event, *next;
-    uint64_t n = 0;
+	struct event_entry **results = NULL;
+	struct event_entry *event, *next;
+	uint64_t n = 0;
 
-    if (count == NULL)
-        return (NULL);
+	if (count == NULL)
+		return (NULL);
 
-    *count = 0;
+	*count = 0;
 
-    RB_FOREACH_SAFE(event, event_tree, &events, next) {
-        if (event->timestamp < start)
-            continue;
-        if (event->timestamp > end)
-            continue;
+	RB_FOREACH_SAFE(event, event_tree, &events, next) {
+		if (event->timestamp < start)
+			continue;
+		if (event->timestamp > end)
+			continue;
 
-        if (num_types > 0 && types != NULL) {
-            bool match = false;
-            for (int i = 0; i < num_types; i++) {
-                if (event->type == types[i]) {
-                    match = true;
-                    break;
-                }
-            }
-            if (!match)
-                continue;
-        }
+		if (num_types > 0 && types != NULL) {
+			bool match = false;
+			for (int i = 0; i < num_types; i++) {
+				if (event->type == types[i]) {
+					match = true;
+					break;
+				}
+			}
+			if (!match)
+				continue;
+		}
 
-        REALLOC_SAFE(results, (n + 1) * sizeof(*results), realloc_fail);
-        results[n++] = event;
+		REALLOC_SAFE(results, (n + 1) * sizeof(*results), realloc_fail);
+		results[n++] = event;
 
-        if (limit && n >= limit)
-            break;
-    }
+		if (limit && n >= limit)
+			break;
+	}
 
-    *count = n;
-    return (results);
+	*count = n;
+	return (results);
 
 realloc_fail:
-    free(results);
-    *count = 0;
-    return (NULL);
+	free(results);
+	*count = 0;
+	return (NULL);
 }
 
 /*
@@ -880,9 +880,9 @@ realloc_fail:
 static void
 event_trigger_webhooks(struct event_entry *event)
 {
-    /* Webhook delivery for events */
-    (void)event;
-    /* Implementation would check registered webhooks and deliver */
+	/* Webhook delivery for events */
+	(void)event;
+	/* Implementation would check registered webhooks and deliver */
 }
 
 /*
@@ -891,7 +891,7 @@ event_trigger_webhooks(struct event_entry *event)
 static int
 alert_compare(struct alert_rule *a, struct alert_rule *b)
 {
-    return (strcmp(a->name, b->name));
+	return (strcmp(a->name, b->name));
 }
 RB_GENERATE(alert_rule_tree, alert_rule, entry, alert_compare);
 
@@ -901,33 +901,33 @@ RB_GENERATE(alert_rule_tree, alert_rule, entry, alert_compare);
 int
 alert_rule_add(struct alert_rule *rule)
 {
-    if (rule == NULL || rule->name[0] == '\0')
-        return (-1);
+	if (rule == NULL || rule->name[0] == '\0')
+		return (-1);
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    struct alert_rule *existing;
-    existing = RB_FIND(alert_rule_tree, &alert_rules, rule);
-    if (existing != NULL) {
-        pthread_mutex_unlock(&logd_state_lock);
-        return (-1);  /* Already exists */
-    }
+	struct alert_rule *existing;
+	existing = RB_FIND(alert_rule_tree, &alert_rules, rule);
+	if (existing != NULL) {
+		pthread_mutex_unlock(&logd_state_lock);
+		return (-1);  /* Already exists */
+	}
 
-    /*
-     * Compile the match regex ONCE here instead of per log entry. The old
-     * code ran regcomp() for every rule for every incoming log line while
-     * holding logd_state_lock — O(entries x rules x compile) and a serial
-     * bottleneck on the logging hot path. Compile once, reuse compiled_re.
-     */
-    if (rule->match_pattern != NULL &&
-        regcomp(&rule->compiled_re, rule->match_pattern, REG_EXTENDED) == 0)
-        rule->re_compiled = true;
+	/*
+	 * Compile the match regex ONCE here instead of per log entry. The old
+	 * code ran regcomp() for every rule for every incoming log line while
+	 * holding logd_state_lock — O(entries x rules x compile) and a serial
+	 * bottleneck on the logging hot path. Compile once, reuse compiled_re.
+	 */
+	if (rule->match_pattern != NULL &&
+		regcomp(&rule->compiled_re, rule->match_pattern, REG_EXTENDED) == 0)
+		rule->re_compiled = true;
 
-    RB_INSERT(alert_rule_tree, &alert_rules, rule);
+	RB_INSERT(alert_rule_tree, &alert_rules, rule);
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -936,25 +936,25 @@ alert_rule_add(struct alert_rule *rule)
 int
 alert_rule_remove(const char *name)
 {
-    struct alert_rule key, *rule;
+	struct alert_rule key, *rule;
 
-    if (name == NULL)
-        return (-1);
+	if (name == NULL)
+		return (-1);
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    strlcpy(key.name, name, sizeof(key.name));
-    rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
-    if (rule) {
-        RB_REMOVE(alert_rule_tree, &alert_rules, rule);
-        if (rule->re_compiled)
-            regfree(&rule->compiled_re);
-        free(rule);
-    }
+	strlcpy(key.name, name, sizeof(key.name));
+	rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
+	if (rule) {
+		RB_REMOVE(alert_rule_tree, &alert_rules, rule);
+		if (rule->re_compiled)
+			regfree(&rule->compiled_re);
+		free(rule);
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (rule ? 0 : -1);
+	return (rule ? 0 : -1);
 }
 
 /*
@@ -963,30 +963,30 @@ alert_rule_remove(const char *name)
 struct alert_rule **
 alert_rule_list(int *count)
 {
-    struct alert_rule **rules = NULL;
-    struct alert_rule *rule;
-    int n = 0;
+	struct alert_rule **rules = NULL;
+	struct alert_rule *rule;
+	int n = 0;
 
-    if (count == NULL)
-        return (NULL);
+	if (count == NULL)
+		return (NULL);
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
-        REALLOC_SAFE(rules, (n + 1) * sizeof(*rules), realloc_fail);
-        rules[n++] = rule;
-    }
+	RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
+		REALLOC_SAFE(rules, (n + 1) * sizeof(*rules), realloc_fail);
+		rules[n++] = rule;
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    *count = n;
-    return (rules);
+	*count = n;
+	return (rules);
 
 realloc_fail:
-    pthread_mutex_unlock(&logd_state_lock);
-    free(rules);
-    *count = 0;
-    return (NULL);
+	pthread_mutex_unlock(&logd_state_lock);
+	free(rules);
+	*count = 0;
+	return (NULL);
 }
 
 /*
@@ -995,58 +995,58 @@ realloc_fail:
 int
 alert_process_entry(struct log_entry *entry)
 {
-    struct alert_rule *rule;
+	struct alert_rule *rule;
 
-    if (entry == NULL)
-        return (0);
+	if (entry == NULL)
+		return (0);
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
-        /* enabled + silence-expiry policy (auto-unsilences a timed silence) */
-        if (!alert_rule_active(rule, time(NULL)))
-            continue;
+	RB_FOREACH(rule, alert_rule_tree, &alert_rules) {
+		/* enabled + silence-expiry policy (auto-unsilences a timed silence) */
+		if (!alert_rule_active(rule, time(NULL)))
+			continue;
 
-        /* Check severity */
-        if (entry->severity < rule->severity)
-            continue;
+		/* Check severity */
+		if (entry->severity < rule->severity)
+			continue;
 
-        /* Check source filter */
-        if (rule->source >= 0 && entry->source != rule->source)
-            continue;
+		/* Check source filter */
+		if (rule->source >= 0 && entry->source != rule->source)
+			continue;
 
-        /* Check namespace */
-        if (rule->namespace && strcmp(entry->namespace, rule->namespace) != 0)
-            continue;
+		/* Check namespace */
+		if (rule->namespace && strcmp(entry->namespace, rule->namespace) != 0)
+			continue;
 
-        /* Check source name */
-        if (rule->source_name && fnmatch(rule->source_name, entry->source_name, 0) != 0)
-            continue;
+		/* Check source name */
+		if (rule->source_name && fnmatch(rule->source_name, entry->source_name, 0) != 0)
+			continue;
 
-        /* Check message pattern against the pre-compiled regex. */
-        if (rule->re_compiled) {
-            if (regexec(&rule->compiled_re, entry->message, 0, NULL, 0) != 0)
-                continue;
-        }
+		/* Check message pattern against the pre-compiled regex. */
+		if (rule->re_compiled) {
+			if (regexec(&rule->compiled_re, entry->message, 0, NULL, 0) != 0)
+				continue;
+		}
 
-        /* Match! Update count */
-        rule->current_count++;
+		/* Match! Update count */
+		rule->current_count++;
 
-        /* Check if threshold reached */
-        if (rule->current_count >= rule->count_threshold) {
-            /* Check time window */
-            if (rule->count_window == 0 ||
-                (time(NULL) - rule->last_triggered) <= rule->count_window) {
-                alert_trigger(rule, entry);
-                rule->last_triggered = time(NULL);
-                rule->current_count = 0;
-            }
-        }
-    }
+		/* Check if threshold reached */
+		if (rule->current_count >= rule->count_threshold) {
+			/* Check time window */
+			if (rule->count_window == 0 ||
+				(time(NULL) - rule->last_triggered) <= rule->count_window) {
+				alert_trigger(rule, entry);
+				rule->last_triggered = time(NULL);
+				rule->current_count = 0;
+			}
+		}
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -1055,43 +1055,43 @@ alert_process_entry(struct log_entry *entry)
 int
 alert_trigger(struct alert_rule *rule, struct log_entry *entry)
 {
-    char payload[4096];
-    /* Escape free-form fields so they cannot inject webhook-payload JSON. */
-    char ename[sizeof(rule->name) * 6];
-    char emsg[sizeof(entry->message) * 6];
-    char esrc[sizeof(entry->source_name) * 6];
+	char payload[4096];
+	/* Escape free-form fields so they cannot inject webhook-payload JSON. */
+	char ename[sizeof(rule->name) * 6];
+	char emsg[sizeof(entry->message) * 6];
+	char esrc[sizeof(entry->source_name) * 6];
 
-    if (rule == NULL)
-        return (-1);
+	if (rule == NULL)
+		return (-1);
 
-    /* Create webhook payload */
-    snprintf(payload, sizeof(payload),
-        "{\"alert\":\"%s\",\"severity\":%d,\"message\":\"%s\","
-        "\"source\":\"%s\",\"timestamp\":%ld}",
-        ocifbsd_json_escape(rule->name, ename, sizeof(ename)),
-        entry->severity,
-        ocifbsd_json_escape(entry->message, emsg, sizeof(emsg)),
-        ocifbsd_json_escape(entry->source_name, esrc, sizeof(esrc)),
-        (long)entry->timestamp);
+	/* Create webhook payload */
+	snprintf(payload, sizeof(payload),
+		"{\"alert\":\"%s\",\"severity\":%d,\"message\":\"%s\","
+		"\"source\":\"%s\",\"timestamp\":%ld}",
+		ocifbsd_json_escape(rule->name, ename, sizeof(ename)),
+		entry->severity,
+		ocifbsd_json_escape(entry->message, emsg, sizeof(emsg)),
+		ocifbsd_json_escape(entry->source_name, esrc, sizeof(esrc)),
+		(long)entry->timestamp);
 
-    /* Enqueue webhook if configured */
-    if (rule->notify_webhook && rule->webhook_url[0] != '\0') {
-        webhook_enqueue(rule->webhook_url, payload);
-    }
+	/* Enqueue webhook if configured */
+	if (rule->notify_webhook && rule->webhook_url[0] != '\0') {
+		webhook_enqueue(rule->webhook_url, payload);
+	}
 
-    /* Execute command if configured */
-    if (rule->execute_command && rule->command[0] != '\0') {
-        /* Execute in background */
-        if (fork() == 0) {
-            safe_shell_exec(rule->command);
-            _exit(0);
-        }
-    }
+	/* Execute command if configured */
+	if (rule->execute_command && rule->command[0] != '\0') {
+		/* Execute in background */
+		if (fork() == 0) {
+			safe_shell_exec(rule->command);
+			_exit(0);
+		}
+	}
 
-    syslog(LOG_WARNING, "ALERT triggered: %s - %s",
-        rule->name, rule->description);
+	syslog(LOG_WARNING, "ALERT triggered: %s - %s",
+		rule->name, rule->description);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -1100,24 +1100,24 @@ alert_trigger(struct alert_rule *rule, struct log_entry *entry)
 int
 alert_silence(const char *name, time_t until)
 {
-    struct alert_rule key, *rule;
+	struct alert_rule key, *rule;
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    strlcpy(key.name, name, sizeof(key.name));
-    rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
-    if (rule) {
-        rule->silenced = true;
-        /*
-         * Record when the silence expires so alert_worker can auto-unsilence.
-         * A non-positive `until` means silence until manually cleared.
-         */
-        rule->silenced_until = (until > 0) ? until : 0;
-    }
+	strlcpy(key.name, name, sizeof(key.name));
+	rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
+	if (rule) {
+		rule->silenced = true;
+		/*
+		 * Record when the silence expires so alert_worker can auto-unsilence.
+		 * A non-positive `until` means silence until manually cleared.
+		 */
+		rule->silenced_until = (until > 0) ? until : 0;
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (rule ? 0 : -1);
+	return (rule ? 0 : -1);
 }
 
 /*
@@ -1126,7 +1126,7 @@ alert_silence(const char *name, time_t until)
 int
 alert_unsilence(const char *name)
 {
-    return (alert_silence(name, 0));
+	return (alert_silence(name, 0));
 }
 
 /*
@@ -1135,19 +1135,19 @@ alert_unsilence(const char *name)
 bool
 alert_is_silenced(const char *name)
 {
-    struct alert_rule key, *rule;
-    bool silenced = false;
+	struct alert_rule key, *rule;
+	bool silenced = false;
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    strlcpy(key.name, name, sizeof(key.name));
-    rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
-    if (rule)
-        silenced = rule->silenced;
+	strlcpy(key.name, name, sizeof(key.name));
+	rule = RB_FIND(alert_rule_tree, &alert_rules, &key);
+	if (rule)
+		silenced = rule->silenced;
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (silenced);
+	return (silenced);
 }
 
 /*
@@ -1156,12 +1156,12 @@ alert_is_silenced(const char *name)
 static struct log_forwarder *
 forwarder_find(const char *name)
 {
-    struct log_forwarder *fw;
-    LIST_FOREACH(fw, &forwarders, next) {
-        if (strcmp(fw->name, name) == 0)
-            return (fw);
-    }
-    return (NULL);
+	struct log_forwarder *fw;
+	LIST_FOREACH(fw, &forwarders, next) {
+		if (strcmp(fw->name, name) == 0)
+			return (fw);
+	}
+	return (NULL);
 }
 
 /*
@@ -1170,21 +1170,21 @@ forwarder_find(const char *name)
 int
 forwarder_add(struct log_forwarder *fw)
 {
-    if (fw == NULL || fw->name[0] == '\0')
-        return (-1);
+	if (fw == NULL || fw->name[0] == '\0')
+		return (-1);
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    if (forwarder_find(fw->name) != NULL) {
-        pthread_mutex_unlock(&logd_state_lock);
-        return (-1);
-    }
+	if (forwarder_find(fw->name) != NULL) {
+		pthread_mutex_unlock(&logd_state_lock);
+		return (-1);
+	}
 
-    LIST_INSERT_HEAD(&forwarders, fw, next);
+	LIST_INSERT_HEAD(&forwarders, fw, next);
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -1193,19 +1193,19 @@ forwarder_add(struct log_forwarder *fw)
 int
 forwarder_remove(const char *name)
 {
-    struct log_forwarder *fw;
+	struct log_forwarder *fw;
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    fw = forwarder_find(name);
-    if (fw) {
-        LIST_REMOVE(fw, next);
-        free(fw);
-    }
+	fw = forwarder_find(name);
+	if (fw) {
+		LIST_REMOVE(fw, next);
+		free(fw);
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (fw ? 0 : -1);
+	return (fw ? 0 : -1);
 }
 
 /*
@@ -1214,30 +1214,30 @@ forwarder_remove(const char *name)
 struct log_forwarder **
 forwarder_list(int *count)
 {
-    struct log_forwarder **list = NULL;
-    struct log_forwarder *fw;
-    int n = 0;
+	struct log_forwarder **list = NULL;
+	struct log_forwarder *fw;
+	int n = 0;
 
-    if (count == NULL)
-        return (NULL);
+	if (count == NULL)
+		return (NULL);
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    LIST_FOREACH(fw, &forwarders, next) {
-        REALLOC_SAFE(list, (n + 1) * sizeof(*list), realloc_fail);
-        list[n++] = fw;
-    }
+	LIST_FOREACH(fw, &forwarders, next) {
+		REALLOC_SAFE(list, (n + 1) * sizeof(*list), realloc_fail);
+		list[n++] = fw;
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    *count = n;
-    return (list);
+	*count = n;
+	return (list);
 
 realloc_fail:
-    pthread_mutex_unlock(&logd_state_lock);
-    free(list);
-    *count = 0;
-    return (NULL);
+	pthread_mutex_unlock(&logd_state_lock);
+	free(list);
+	*count = 0;
+	return (NULL);
 }
 
 /*
@@ -1246,39 +1246,39 @@ realloc_fail:
 int
 forwarder_enable(const char *name)
 {
-    struct log_forwarder *fw;
-    int ret = -1;
+	struct log_forwarder *fw;
+	int ret = -1;
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    fw = forwarder_find(name);
-    if (fw) {
-        fw->enabled = true;
-        ret = 0;
-    }
+	fw = forwarder_find(name);
+	if (fw) {
+		fw->enabled = true;
+		ret = 0;
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (ret);
+	return (ret);
 }
 
 int
 forwarder_disable(const char *name)
 {
-    struct log_forwarder *fw;
-    int ret = -1;
+	struct log_forwarder *fw;
+	int ret = -1;
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    fw = forwarder_find(name);
-    if (fw) {
-        fw->enabled = false;
-        ret = 0;
-    }
+	fw = forwarder_find(name);
+	if (fw) {
+		fw->enabled = false;
+		ret = 0;
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    return (ret);
+	return (ret);
 }
 
 /*
@@ -1287,47 +1287,47 @@ forwarder_disable(const char *name)
 int
 forwarder_send(struct log_entry *entry)
 {
-    struct log_forwarder *fw;
-    char *line;
+	struct log_forwarder *fw;
+	char *line;
 
-    if (entry == NULL)
-        return (0);
+	if (entry == NULL)
+		return (0);
 
-    line = log_format_entry(entry, LOG_FORMAT_JSON);
-    if (line == NULL)
-        return (-1);
+	line = log_format_entry(entry, LOG_FORMAT_JSON);
+	if (line == NULL)
+		return (-1);
 
-    pthread_mutex_lock(&logd_state_lock);
+	pthread_mutex_lock(&logd_state_lock);
 
-    LIST_FOREACH(fw, &forwarders, next) {
-        if (!fw->enabled)
-            continue;
+	LIST_FOREACH(fw, &forwarders, next) {
+		if (!fw->enabled)
+			continue;
 
-        /* Send to endpoint based on type */
-        switch (fw->type) {
-        case 0: /* syslog */
-            /* Send via network */
-            forwarder_send_udp(fw, line);
-            break;
-        case 1: /* fluentd */
-            forwarder_send_fluentd(fw, line);
-            break;
-        case 2: /* elasticsearch */
-            forwarder_send_elastic(fw, line);
-            break;
-        case 3: /* splunk */
-            forwarder_send_splunk(fw, line);
-            break;
-        default:
-            forwarder_send_custom(fw, line);
-            break;
-        }
-    }
+		/* Send to endpoint based on type */
+		switch (fw->type) {
+		case 0: /* syslog */
+			/* Send via network */
+			forwarder_send_udp(fw, line);
+			break;
+		case 1: /* fluentd */
+			forwarder_send_fluentd(fw, line);
+			break;
+		case 2: /* elasticsearch */
+			forwarder_send_elastic(fw, line);
+			break;
+		case 3: /* splunk */
+			forwarder_send_splunk(fw, line);
+			break;
+		default:
+			forwarder_send_custom(fw, line);
+			break;
+		}
+	}
 
-    pthread_mutex_unlock(&logd_state_lock);
+	pthread_mutex_unlock(&logd_state_lock);
 
-    free(line);
-    return (0);
+	free(line);
+	return (0);
 }
 
 /*
@@ -1336,30 +1336,30 @@ forwarder_send(struct log_entry *entry)
 int
 forwarder_flush(void)
 {
-    uint64_t cursor = 0;
-    struct log_entry entry;
+	uint64_t cursor = 0;
+	struct log_entry entry;
 
-    if (main_ringbuf == NULL)
-        return (0);
+	if (main_ringbuf == NULL)
+		return (0);
 
-    /*
-     * Do NOT hold main_ringbuf->lock here: ringbuf_iterate acquires the
-     * same non-recursive lock internally, so holding it deadlocked the
-     * forward worker (and, transitively, every log_write). ringbuf_iterate
-     * is self-synchronizing.
-     */
-    uint64_t count = 0;
-    cursor = 0;
-    while (ringbuf_iterate(main_ringbuf, &cursor, &entry) == 0) {
-        forwarder_send(&entry);
-        count++;
+	/*
+	 * Do NOT hold main_ringbuf->lock here: ringbuf_iterate acquires the
+	 * same non-recursive lock internally, so holding it deadlocked the
+	 * forward worker (and, transitively, every log_write). ringbuf_iterate
+	 * is self-synchronizing.
+	 */
+	uint64_t count = 0;
+	cursor = 0;
+	while (ringbuf_iterate(main_ringbuf, &cursor, &entry) == 0) {
+		forwarder_send(&entry);
+		count++;
 
-        /* Batch limit */
-        if (count >= (uint64_t)config.forward_batch_size)
-            break;
-    }
+		/* Batch limit */
+		if (count >= (uint64_t)config.forward_batch_size)
+			break;
+	}
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -1372,48 +1372,48 @@ forwarder_flush(void)
  */
 static int
 forwarder_split_hostport(const char *endpoint, char *host, size_t hostlen,
-    char *service, size_t servicelen)
+	char *service, size_t servicelen)
 {
-    const char *colon;
-    size_t hlen;
+	const char *colon;
+	size_t hlen;
 
-    if (endpoint == NULL || endpoint[0] == '\0')
-        return (-1);
+	if (endpoint == NULL || endpoint[0] == '\0')
+		return (-1);
 
-    if (endpoint[0] == '[') {
-        const char *rb = strchr(endpoint, ']');
+	if (endpoint[0] == '[') {
+		const char *rb = strchr(endpoint, ']');
 
-        if (rb == NULL)
-            return (-1);
-        hlen = (size_t)(rb - (endpoint + 1));
-        if (hlen >= hostlen)
-            return (-1);
-        memcpy(host, endpoint + 1, hlen);
-        host[hlen] = '\0';
-        colon = (rb[1] == ':') ? rb + 1 : NULL;
-    } else {
-        /* Bare host or host:port; split on the last ':' so IPv4 and
-         * hostnames work, and reject a colon that is part of an
-         * unbracketed IPv6 literal by treating multiple colons as none. */
-        colon = strrchr(endpoint, ':');
-        if (colon != NULL && strchr(endpoint, ':') != colon)
-            colon = NULL;	/* unbracketed IPv6 literal: no port */
-        hlen = (colon != NULL) ? (size_t)(colon - endpoint)
-                               : strlen(endpoint);
-        if (hlen >= hostlen)
-            return (-1);
-        memcpy(host, endpoint, hlen);
-        host[hlen] = '\0';
-    }
+		if (rb == NULL)
+			return (-1);
+		hlen = (size_t)(rb - (endpoint + 1));
+		if (hlen >= hostlen)
+			return (-1);
+		memcpy(host, endpoint + 1, hlen);
+		host[hlen] = '\0';
+		colon = (rb[1] == ':') ? rb + 1 : NULL;
+	} else {
+		/* Bare host or host:port; split on the last ':' so IPv4 and
+		 * hostnames work, and reject a colon that is part of an
+		 * unbracketed IPv6 literal by treating multiple colons as none. */
+		colon = strrchr(endpoint, ':');
+		if (colon != NULL && strchr(endpoint, ':') != colon)
+			colon = NULL;	/* unbracketed IPv6 literal: no port */
+		hlen = (colon != NULL) ? (size_t)(colon - endpoint)
+							   : strlen(endpoint);
+		if (hlen >= hostlen)
+			return (-1);
+		memcpy(host, endpoint, hlen);
+		host[hlen] = '\0';
+	}
 
-    if (colon != NULL && colon[1] != '\0') {
-        if (strlcpy(service, colon + 1, servicelen) >= servicelen)
-            return (-1);
-    } else {
-        if (strlcpy(service, "514", servicelen) >= servicelen)
-            return (-1);
-    }
-    return (0);
+	if (colon != NULL && colon[1] != '\0') {
+		if (strlcpy(service, colon + 1, servicelen) >= servicelen)
+			return (-1);
+	} else {
+		if (strlcpy(service, "514", servicelen) >= servicelen)
+			return (-1);
+	}
+	return (0);
 }
 
 /*
@@ -1426,110 +1426,110 @@ forwarder_split_hostport(const char *endpoint, char *host, size_t hostlen,
 static int
 forwarder_send_udp(struct log_forwarder *fw, const char *line)
 {
-    struct addrinfo hints, *res, *ai;
-    char host[256], service[32];
-    int sock, err;
+	struct addrinfo hints, *res, *ai;
+	char host[256], service[32];
+	int sock, err;
 
-    if (fw == NULL || line == NULL)
-        return (-1);
+	if (fw == NULL || line == NULL)
+		return (-1);
 
-    if (forwarder_split_hostport(fw->endpoint, host, sizeof(host),
-        service, sizeof(service)) != 0) {
-        syslog(LOG_WARNING, "forwarder %s: bad endpoint '%s'",
-            fw->name, fw->endpoint);
-        return (-1);
-    }
+	if (forwarder_split_hostport(fw->endpoint, host, sizeof(host),
+		service, sizeof(service)) != 0) {
+		syslog(LOG_WARNING, "forwarder %s: bad endpoint '%s'",
+			fw->name, fw->endpoint);
+		return (-1);
+	}
 
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = IPPROTO_UDP;
-    err = getaddrinfo(host, service, &hints, &res);
-    if (err != 0) {
-        syslog(LOG_WARNING, "forwarder %s: resolve %s:%s failed: %s",
-            fw->name, host, service, gai_strerror(err));
-        return (-1);
-    }
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_protocol = IPPROTO_UDP;
+	err = getaddrinfo(host, service, &hints, &res);
+	if (err != 0) {
+		syslog(LOG_WARNING, "forwarder %s: resolve %s:%s failed: %s",
+			fw->name, host, service, gai_strerror(err));
+		return (-1);
+	}
 
-    for (ai = res; ai != NULL; ai = ai->ai_next) {
-        sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (sock < 0)
-            continue;
-        if (sendto(sock, line, strlen(line), 0, ai->ai_addr,
-            ai->ai_addrlen) >= 0) {
-            close(sock);
-            freeaddrinfo(res);
-            return (0);
-        }
-        close(sock);
-    }
+	for (ai = res; ai != NULL; ai = ai->ai_next) {
+		sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (sock < 0)
+			continue;
+		if (sendto(sock, line, strlen(line), 0, ai->ai_addr,
+			ai->ai_addrlen) >= 0) {
+			close(sock);
+			freeaddrinfo(res);
+			return (0);
+		}
+		close(sock);
+	}
 
-    freeaddrinfo(res);
-    syslog(LOG_WARNING, "forwarder %s: send to %s:%s failed",
-        fw->name, host, service);
-    return (-1);
+	freeaddrinfo(res);
+	syslog(LOG_WARNING, "forwarder %s: send to %s:%s failed",
+		fw->name, host, service);
+	return (-1);
 }
 
 static int
 forwarder_send_fluentd(struct log_forwarder *fw, const char *line)
 {
-    /* Fluentd's HTTP input accepts a JSON record POSTed to the tag URL. */
-    if (fw == NULL || line == NULL)
-        return (-1);
-    return (logd_http_post(fw->endpoint, line, "application/json", NULL));
+	/* Fluentd's HTTP input accepts a JSON record POSTed to the tag URL. */
+	if (fw == NULL || line == NULL)
+		return (-1);
+	return (logd_http_post(fw->endpoint, line, "application/json", NULL));
 }
 
 static int
 forwarder_send_elastic(struct log_forwarder *fw, const char *line)
 {
-    char url[640];
+	char url[640];
 
-    /* Index a single document: POST <endpoint>/_doc with the JSON line. */
-    if (fw == NULL || line == NULL)
-        return (-1);
-    if ((size_t)snprintf(url, sizeof(url), "%s/_doc", fw->endpoint) >=
-        sizeof(url))
-        return (-1);
-    return (logd_http_post(url, line, "application/json", NULL));
+	/* Index a single document: POST <endpoint>/_doc with the JSON line. */
+	if (fw == NULL || line == NULL)
+		return (-1);
+	if ((size_t)snprintf(url, sizeof(url), "%s/_doc", fw->endpoint) >=
+		sizeof(url))
+		return (-1);
+	return (logd_http_post(url, line, "application/json", NULL));
 }
 
 static int
 forwarder_send_splunk(struct log_forwarder *fw, const char *line)
 {
-    char *body = NULL, *auth = NULL;
-    const char *token;
-    int ret;
+	char *body = NULL, *auth = NULL;
+	const char *token;
+	int ret;
 
-    /*
-     * Splunk HEC wraps the record as {"event": <record>} and authenticates
-     * with an "Authorization: Splunk <token>" header. The token is taken
-     * from the OCIFBSD_SPLUNK_TOKEN environment variable when set (the
-     * forwarder struct does not model per-destination secrets); without a
-     * token the POST is still made, which suits a tokenless test collector.
-     */
-    if (fw == NULL || line == NULL)
-        return (-1);
-    if (asprintf(&body, "{\"event\": %s}", line) < 0)
-        return (-1);
-    token = getenv("OCIFBSD_SPLUNK_TOKEN");
-    if (token != NULL && token[0] != '\0' &&
-        asprintf(&auth, "Authorization: Splunk %s", token) < 0) {
-        free(body);
-        return (-1);
-    }
-    ret = logd_http_post(fw->endpoint, body, "application/json", auth);
-    free(body);
-    free(auth);
-    return (ret);
+	/*
+	 * Splunk HEC wraps the record as {"event": <record>} and authenticates
+	 * with an "Authorization: Splunk <token>" header. The token is taken
+	 * from the OCIFBSD_SPLUNK_TOKEN environment variable when set (the
+	 * forwarder struct does not model per-destination secrets); without a
+	 * token the POST is still made, which suits a tokenless test collector.
+	 */
+	if (fw == NULL || line == NULL)
+		return (-1);
+	if (asprintf(&body, "{\"event\": %s}", line) < 0)
+		return (-1);
+	token = getenv("OCIFBSD_SPLUNK_TOKEN");
+	if (token != NULL && token[0] != '\0' &&
+		asprintf(&auth, "Authorization: Splunk %s", token) < 0) {
+		free(body);
+		return (-1);
+	}
+	ret = logd_http_post(fw->endpoint, body, "application/json", auth);
+	free(body);
+	free(auth);
+	return (ret);
 }
 
 static int
 forwarder_send_custom(struct log_forwarder *fw, const char *line)
 {
-    /* Generic webhook: POST the JSON record to the configured endpoint. */
-    if (fw == NULL || line == NULL)
-        return (-1);
-    return (logd_http_post(fw->endpoint, line, "application/json", NULL));
+	/* Generic webhook: POST the JSON record to the configured endpoint. */
+	if (fw == NULL || line == NULL)
+		return (-1);
+	return (logd_http_post(fw->endpoint, line, "application/json", NULL));
 }
 
 /*
@@ -1538,23 +1538,23 @@ forwarder_send_custom(struct log_forwarder *fw, const char *line)
 int
 webhook_enqueue(const char *url, const char *payload)
 {
-    struct webhook_delivery *wh;
+	struct webhook_delivery *wh;
 
-    if (url == NULL || payload == NULL)
-        return (-1);
+	if (url == NULL || payload == NULL)
+		return (-1);
 
-    wh = calloc(1, sizeof(*wh));
-    if (wh == NULL)
-        return (-1);
+	wh = calloc(1, sizeof(*wh));
+	if (wh == NULL)
+		return (-1);
 
-    strlcpy(wh->url, url, sizeof(wh->url));
-    wh->payload = strdup(payload);
-    wh->attempts = 0;
-    wh->next_retry = time(NULL);
+	strlcpy(wh->url, url, sizeof(wh->url));
+	wh->payload = strdup(payload);
+	wh->attempts = 0;
+	wh->next_retry = time(NULL);
 
-    STAILQ_INSERT_TAIL(&webhooks, wh, next);
+	STAILQ_INSERT_TAIL(&webhooks, wh, next);
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -1563,36 +1563,36 @@ webhook_enqueue(const char *url, const char *payload)
 int
 webhook_process(void)
 {
-    struct webhook_delivery *wh;
-    int ret;
+	struct webhook_delivery *wh;
+	int ret;
 
-    while ((wh = STAILQ_FIRST(&webhooks)) != NULL) {
-        if (wh->next_retry > time(NULL))
-            break;
+	while ((wh = STAILQ_FIRST(&webhooks)) != NULL) {
+		if (wh->next_retry > time(NULL))
+			break;
 
-        ret = webhook_deliver(wh);
+		ret = webhook_deliver(wh);
 
-        if (ret == 0) {
-            STAILQ_REMOVE_HEAD(&webhooks, next);
-            free(wh->payload);
-            free(wh);
-        } else {
-            wh->attempts++;
-            if (wh->attempts >= 5) {
-                /* Give up after 5 attempts */
-                syslog(LOG_WARNING, "Webhook delivery failed after 5 attempts: %s",
-                    wh->url);
-                STAILQ_REMOVE_HEAD(&webhooks, next);
-                free(wh->payload);
-                free(wh);
-            } else {
-                /* Exponential backoff */
-                wh->next_retry = time(NULL) + (1 << wh->attempts);
-            }
-        }
-    }
+		if (ret == 0) {
+			STAILQ_REMOVE_HEAD(&webhooks, next);
+			free(wh->payload);
+			free(wh);
+		} else {
+			wh->attempts++;
+			if (wh->attempts >= 5) {
+				/* Give up after 5 attempts */
+				syslog(LOG_WARNING, "Webhook delivery failed after 5 attempts: %s",
+					wh->url);
+				STAILQ_REMOVE_HEAD(&webhooks, next);
+				free(wh->payload);
+				free(wh);
+			} else {
+				/* Exponential backoff */
+				wh->next_retry = time(NULL) + (1 << wh->attempts);
+			}
+		}
+	}
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -1601,18 +1601,18 @@ webhook_process(void)
 static int
 webhook_deliver(struct webhook_delivery *wh)
 {
-    int sock;
-    (void)wh;
+	int sock;
+	(void)wh;
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0)
-        return (-1);
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0)
+		return (-1);
 
-    /* HTTP POST implementation */
-    /* This would be a proper HTTP client implementation */
+	/* HTTP POST implementation */
+	/* This would be a proper HTTP client implementation */
 
-    close(sock);
-    return (0);
+	close(sock);
+	return (0);
 }
 
 /*
@@ -1621,48 +1621,48 @@ webhook_deliver(struct webhook_delivery *wh)
 int
 main(int argc, char *argv[])
 {
-    struct logd_config *cfg = NULL;
-    int foreground = 0;
-    int ch;
+	struct logd_config *cfg = NULL;
+	int foreground = 0;
+	int ch;
 
-    /* Parse arguments */
-    while ((ch = getopt(argc, argv, "fc:l:")) != -1) {
-        switch (ch) {
-        case 'f':
-            foreground = 1;
-            break;
-        case 'c':
-            /* Load config from file */
-            break;
-        case 'l':
-            /* Set log level */
-            break;
-        }
-    }
+	/* Parse arguments */
+	while ((ch = getopt(argc, argv, "fc:l:")) != -1) {
+		switch (ch) {
+		case 'f':
+			foreground = 1;
+			break;
+		case 'c':
+			/* Load config from file */
+			break;
+		case 'l':
+			/* Set log level */
+			break;
+		}
+	}
 
-    /* Daemonize unless foreground */
-    if (!foreground) {
-        daemon(0, 0);
-    }
+	/* Daemonize unless foreground */
+	if (!foreground) {
+		daemon(0, 0);
+	}
 
-    /* Initialize */
-    if (logd_init(cfg) != 0) {
-        fprintf(stderr, "Failed to initialize log daemon\n");
-        return (1);
-    }
+	/* Initialize */
+	if (logd_init(cfg) != 0) {
+		fprintf(stderr, "Failed to initialize log daemon\n");
+		return (1);
+	}
 
-    /* Signal handling */
-    signal(SIGTERM, sig_handler);
-    signal(SIGINT, sig_handler);
-    signal(SIGHUP, sig_handler);
+	/* Signal handling */
+	signal(SIGTERM, sig_handler);
+	signal(SIGINT, sig_handler);
+	signal(SIGHUP, sig_handler);
 
-    /* Run event loop */
-    event_loop();
+	/* Run event loop */
+	event_loop();
 
-    /* Shutdown */
-    logd_shutdown();
+	/* Shutdown */
+	logd_shutdown();
 
-    return (0);
+	return (0);
 }
 
 /*
@@ -1671,13 +1671,13 @@ main(int argc, char *argv[])
 static void
 sig_handler(int sig)
 {
-    if (sig == SIGHUP) {
-        /* Reload config */
-        logd_reload_config(NULL);
-    } else {
-        /* Shutdown */
-        running = 0;
-    }
+	if (sig == SIGHUP) {
+		/* Reload config */
+		logd_reload_config(NULL);
+	} else {
+		/* Shutdown */
+		running = 0;
+	}
 }
 
 /*
@@ -1686,10 +1686,10 @@ sig_handler(int sig)
 static void
 event_loop(void)
 {
-    while (running) {
-        sleep(1);
+	while (running) {
+		sleep(1);
 
-        /* Process pending work */
-        /* In production, this would use kqueue/poll */
-    }
+		/* Process pending work */
+		/* In production, this would use kqueue/poll */
+	}
 }

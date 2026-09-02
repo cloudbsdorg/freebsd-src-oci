@@ -833,7 +833,7 @@ join_addrs_no_prefix(char **arr, int n)
  */
 static int
 add_param_free_value(struct jailparam **pp, size_t *np, size_t *capp,
-    const char *name, char *value)
+	const char *name, char *value)
 {
 	struct jailparam *params = *pp;
 	size_t n = *np, capacity = *capp;

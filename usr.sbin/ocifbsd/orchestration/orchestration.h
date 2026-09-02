@@ -412,7 +412,7 @@ typedef void (*orch_event_callback_t)(const struct orch_event *event, void *arg)
 int	orch_event_subscribe(orch_event_callback_t callback, void *arg);
 int	orch_event_unsubscribe(int subscription_id);
 int	orch_event_publish(const char *type, const char *object,
-    const char *namespace, const char *message, ...);
+	const char *namespace, const char *message, ...);
 struct orch_event **orch_event_list(const char *namespace, int *count);
 
 /*
@@ -508,7 +508,7 @@ int		rolling_update_pause(struct rolling_update_state *state);
 int		rolling_update_resume(struct rolling_update_state *state);
 int		rolling_update_rollback(struct rolling_update_state *state);
 struct rolling_update_state *rolling_update_get_status(const char *service,
-    const char *namespace);
+	const char *namespace);
 int		rolling_update_complete(struct rolling_update_state *state);
 
 /*

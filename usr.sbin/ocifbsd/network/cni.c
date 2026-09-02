@@ -226,7 +226,7 @@ cni_find_config(const char *network_name, struct cni_config **config)
  */
 static int
 cni_call_plugin(const char *plugin, int argc, const char **argv,
-    char **env, int nenv, const char *stdin_json, char **output)
+	char **env, int nenv, const char *stdin_json, char **output)
 {
 	pid_t pid;
 	int status;
@@ -342,8 +342,8 @@ cni_call_plugin(const char *plugin, int argc, const char **argv,
  */
 static int
 cni_build_env(const char *command, const char *container_id,
-    const char *network_ns, const char *interface_name, char ***env,
-    int *nenv)
+	const char *network_ns, const char *interface_name, char ***env,
+	int *nenv)
 {
 	char **e = NULL;
 	int n = 0;
@@ -393,7 +393,7 @@ cni_alloc_fail:
  */
 int
 cni_add(const char *network_name, const char *container_id,
-    const char *interface_name, char **result_json)
+	const char *interface_name, char **result_json)
 {
 	struct cni_config *config;
 	int ret = -1;
@@ -449,7 +449,7 @@ cni_add(const char *network_name, const char *container_id,
  */
 int
 cni_del(const char *network_name, const char *container_id,
-    const char *interface_name)
+	const char *interface_name)
 {
 	struct cni_config *config;
 	int ret = -1;

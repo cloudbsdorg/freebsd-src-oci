@@ -444,7 +444,7 @@ apply_whiteouts(const char *dir)
  */
 static int
 extract_entry(struct archive *ar, struct archive_entry *entry,
-    const char *dest, struct unpack_options *opts)
+	const char *dest, struct unpack_options *opts)
 {
 	const char *pathname;
 	char path[PATH_MAX];
@@ -628,7 +628,7 @@ extract_entry(struct archive *ar, struct archive_entry *entry,
  */
 int
 unpack_layer(const char *tarball, const char *dest,
-    struct unpack_options *opts)
+	struct unpack_options *opts)
 {
 	struct archive *a;
 	struct archive_entry *entry;
@@ -708,7 +708,7 @@ unpack_layer(const char *tarball, const char *dest,
  */
 int
 unpack_layers(const char **tarballs, int ntarballs, const char *dest,
-    struct unpack_options *opts)
+	struct unpack_options *opts)
 {
 	int i, ret = 0;
 	char layer_dir[PATH_MAX];
@@ -735,7 +735,7 @@ unpack_layers(const char **tarballs, int ntarballs, const char *dest,
  */
 int
 unpack_image(const char *imagedir, const char *dest,
-    struct unpack_options *opts)
+	struct unpack_options *opts)
 {
 	char layers_dir[PATH_MAX];
 	char **tarballs = NULL;

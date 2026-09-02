@@ -513,7 +513,7 @@ next_line:
  */
 int
 rctl_set_limit(const char *jail_name, rctl_resource_t resource,
-    uint64_t limit, rctl_action_t action)
+	uint64_t limit, rctl_action_t action)
 {
 	char rule[512];
 	char action_str[32];

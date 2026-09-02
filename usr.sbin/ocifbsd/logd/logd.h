@@ -76,143 +76,143 @@
 
 /* Log entry structure */
 struct log_entry {
-    uint64_t        id;                 /* Unique log ID */
-    time_t          timestamp;          /* Log timestamp */
-    int             severity;            /* LOG_* level */
-    int             source;             /* LOG_SOURCE_* */
-    char            source_name[256];    /* Container/jail name */
-    char            message[4096];       /* Log message */
-    char            fields[2048];        /* Structured fields (JSON) */
-    char            hostname[256];       /* Origin hostname */
-    char            namespace[128];      /* orchestration namespace */
-    char            pod_name[256];       /* Pod name */
-    char            container_name[128]; /* Container name */
-    uint32_t        pid;                /* Process ID */
-    uint32_t        tid;                /* Thread ID */
-    char            username[64];        /* User if applicable */
-    uint64_t        size;               /* Entry size in bytes */
+	uint64_t        id;                 /* Unique log ID */
+	time_t          timestamp;          /* Log timestamp */
+	int             severity;            /* LOG_* level */
+	int             source;             /* LOG_SOURCE_* */
+	char            source_name[256];    /* Container/jail name */
+	char            message[4096];       /* Log message */
+	char            fields[2048];        /* Structured fields (JSON) */
+	char            hostname[256];       /* Origin hostname */
+	char            namespace[128];      /* orchestration namespace */
+	char            pod_name[256];       /* Pod name */
+	char            container_name[128]; /* Container name */
+	uint32_t        pid;                /* Process ID */
+	uint32_t        tid;                /* Thread ID */
+	char            username[64];        /* User if applicable */
+	uint64_t        size;               /* Entry size in bytes */
 
-    /* Links for queue/ring buffer */
-    TAILQ_ENTRY(log_entry) next;
-    LIST_ENTRY(log_entry) hash_next;
+	/* Links for queue/ring buffer */
+	TAILQ_ENTRY(log_entry) next;
+	LIST_ENTRY(log_entry) hash_next;
 };
 
 /* Ring buffer for in-memory log storage */
 struct log_ringbuf {
-    struct log_entry *entries;      /* Circular buffer */
-    uint64_t         *ids;           /* Slot status (0=free, ID=used) */
-    uint64_t         size;           /* Buffer size (max entries) */
-    uint64_t         head;           /* Next write position */
-    uint64_t         tail;           /* Oldest entry position */
-    uint64_t         count;          /* Current entry count */
-    uint64_t         total_written;  /* Total entries written (monotonic) */
-    bool             entries_mmapped;/* true: entries via mmap; false: calloc */
-    size_t           entries_bytes;  /* byte size of the entries mapping */
-    pthread_mutex_t  lock;
+	struct log_entry *entries;      /* Circular buffer */
+	uint64_t         *ids;           /* Slot status (0=free, ID=used) */
+	uint64_t         size;           /* Buffer size (max entries) */
+	uint64_t         head;           /* Next write position */
+	uint64_t         tail;           /* Oldest entry position */
+	uint64_t         count;          /* Current entry count */
+	uint64_t         total_written;  /* Total entries written (monotonic) */
+	bool             entries_mmapped;/* true: entries via mmap; false: calloc */
+	size_t           entries_bytes;  /* byte size of the entries mapping */
+	pthread_mutex_t  lock;
 };
 
 /* Forwarder destination */
 struct log_forwarder {
-    char            name[128];       /* Forwarder name */
-    int             type;            /* syslog/fluentd/elk/splunk/custom */
-    char            endpoint[512];   /* Destination URL/address */
-    int             protocol;        /* TCP/UDP/TCP+TLS */
-    int             format;          /* LOG_FORMAT_* */
-    bool            enabled;
-    int             retry_count;
-    time_t          last_retry;
-    pthread_mutex_t lock;
-    LIST_ENTRY(log_forwarder) next;
+	char            name[128];       /* Forwarder name */
+	int             type;            /* syslog/fluentd/elk/splunk/custom */
+	char            endpoint[512];   /* Destination URL/address */
+	int             protocol;        /* TCP/UDP/TCP+TLS */
+	int             format;          /* LOG_FORMAT_* */
+	bool            enabled;
+	int             retry_count;
+	time_t          last_retry;
+	pthread_mutex_t lock;
+	LIST_ENTRY(log_forwarder) next;
 };
 LIST_HEAD(forwarder_list, log_forwarder);
 
 /* Alert rule */
 struct alert_rule {
-    char            name[128];       /* Rule name */
-    char            description[512];
-    int             severity;        /* Minimum severity to match */
-    int             source;          /* Source filter (-1 = any) */
-    char            *match_pattern;  /* Regex to match message */
-    char            *namespace;      /* Namespace filter */
-    char            *source_name;     /* Source name filter */
-    int             count_threshold; /* Trigger after N matches */
-    int             count_window;    /* Time window in seconds */
-    time_t          last_triggered;
-    int             current_count;
-    bool            enabled;
-    bool            silenced;        /* Temporarily disabled */
-    time_t          silenced_until;  /* auto-unsilence at this time (0 = manual) */
-    regex_t         compiled_re;     /* match_pattern compiled once at add */
-    bool            re_compiled;     /* true if compiled_re is valid */
+	char            name[128];       /* Rule name */
+	char            description[512];
+	int             severity;        /* Minimum severity to match */
+	int             source;          /* Source filter (-1 = any) */
+	char            *match_pattern;  /* Regex to match message */
+	char            *namespace;      /* Namespace filter */
+	char            *source_name;     /* Source name filter */
+	int             count_threshold; /* Trigger after N matches */
+	int             count_window;    /* Time window in seconds */
+	time_t          last_triggered;
+	int             current_count;
+	bool            enabled;
+	bool            silenced;        /* Temporarily disabled */
+	time_t          silenced_until;  /* auto-unsilence at this time (0 = manual) */
+	regex_t         compiled_re;     /* match_pattern compiled once at add */
+	bool            re_compiled;     /* true if compiled_re is valid */
 
-    /* Actions */
-    bool            notify_webhook;
-    char            webhook_url[512];
-    bool            notify_email;
-    char            email_to[256];
-    bool            execute_command;
-    char            command[1024];
+	/* Actions */
+	bool            notify_webhook;
+	char            webhook_url[512];
+	bool            notify_email;
+	char            email_to[256];
+	bool            execute_command;
+	char            command[1024];
 
-    pthread_mutex_t lock;
-    RB_ENTRY(alert_rule) entry;
+	pthread_mutex_t lock;
+	RB_ENTRY(alert_rule) entry;
 };
 RB_HEAD(alert_rule_tree, alert_rule);
 RB_PROTOTYPE(alert_rule_tree, alert_rule, entry, alert_compare);
 
 /* Log query parameters */
 struct log_query {
-    time_t          start_time;
-    time_t          end_time;
-    int             severity_min;
-    int             severity_max;
-    int             *sources;        /* NULL = all sources */
-    int             num_sources;
-    char            *source_name;    /* Glob pattern */
-    char            *message_pattern;/* Regex pattern */
-    char            *namespace;
-    char            *hostname;
-    char            *username;
-    uint64_t        limit;           /* Max results */
-    uint64_t        offset;
-    bool            descending;       /* Newest first */
-    char            **fields;        /* Fields to return */
-    int             num_fields;
+	time_t          start_time;
+	time_t          end_time;
+	int             severity_min;
+	int             severity_max;
+	int             *sources;        /* NULL = all sources */
+	int             num_sources;
+	char            *source_name;    /* Glob pattern */
+	char            *message_pattern;/* Regex pattern */
+	char            *namespace;
+	char            *hostname;
+	char            *username;
+	uint64_t        limit;           /* Max results */
+	uint64_t        offset;
+	bool            descending;       /* Newest first */
+	char            **fields;        /* Fields to return */
+	int             num_fields;
 };
 
 /* Log statistics */
 struct log_stats {
-    uint64_t        entries_total;
-    uint64_t        entries_written;
-    uint64_t        entries_read;
-    uint64_t        entries_dropped;
-    uint64_t        entries_forwarded;
-    uint64_t        alerts_triggered;
-    uint64_t        bytes_written;
-    uint64_t        bytes_read;
-    time_t          oldest_entry;
-    time_t          newest_entry;
+	uint64_t        entries_total;
+	uint64_t        entries_written;
+	uint64_t        entries_read;
+	uint64_t        entries_dropped;
+	uint64_t        entries_forwarded;
+	uint64_t        alerts_triggered;
+	uint64_t        bytes_written;
+	uint64_t        bytes_read;
+	time_t          oldest_entry;
+	time_t          newest_entry;
 };
 
 /* Log daemon configuration */
 struct logd_config {
-    int             log_level;          /* Minimum log level to capture */
-    uint64_t        ringbuf_size;        /* Max entries in memory */
-    int             retention_hot;       /* Hot retention in days */
-    int             retention_warm;      /* Warm retention in days */
-    int             retention_cold;      /* Cold retention in days */
-    int             retention_archive;   /* Archive retention in days */
-    char            *storage_path;      /* ZFS dataset path */
-    int             forwarder_count;
-    struct log_forwarder *forwarders;
-    int             alert_rule_count;
-    struct alert_rule *alert_rules;
-    bool            enable_local_syslog;
-    bool            enable_journald;
-    bool            enable_prometheus;
-    int             prometheus_port;
-    int             query_timeout;       /* Query timeout in seconds */
-    int             forward_batch_size;  /* Batch size for forwarding */
-    int             forward_interval;    /* Forward interval in ms */
+	int             log_level;          /* Minimum log level to capture */
+	uint64_t        ringbuf_size;        /* Max entries in memory */
+	int             retention_hot;       /* Hot retention in days */
+	int             retention_warm;      /* Warm retention in days */
+	int             retention_cold;      /* Cold retention in days */
+	int             retention_archive;   /* Archive retention in days */
+	char            *storage_path;      /* ZFS dataset path */
+	int             forwarder_count;
+	struct log_forwarder *forwarders;
+	int             alert_rule_count;
+	struct alert_rule *alert_rules;
+	bool            enable_local_syslog;
+	bool            enable_journald;
+	bool            enable_prometheus;
+	int             prometheus_port;
+	int             query_timeout;       /* Query timeout in seconds */
+	int             forward_batch_size;  /* Batch size for forwarding */
+	int             forward_interval;    /* Forward interval in ms */
 };
 
 /* Event types for event stream */
@@ -232,14 +232,14 @@ struct logd_config {
 
 /* Event entry (lightweight) */
 struct event_entry {
-    uint64_t        id;
-    time_t          timestamp;
-    int             type;           /* EVENT_* */
-    char            source[256];   /* Who generated it */
-    char            subject[512];  /* What it happened to */
-    char            *data;         /* JSON additional data */
-    char            *user;         /* User who triggered (if applicable) */
-    RB_ENTRY(event_entry) entry;
+	uint64_t        id;
+	time_t          timestamp;
+	int             type;           /* EVENT_* */
+	char            source[256];   /* Who generated it */
+	char            subject[512];  /* What it happened to */
+	char            *data;         /* JSON additional data */
+	char            *user;         /* User who triggered (if applicable) */
+	RB_ENTRY(event_entry) entry;
 };
 RB_HEAD(event_tree, event_entry);
 RB_PROTOTYPE(event_tree, event_entry, entry, event_compare);
@@ -265,19 +265,19 @@ int     ringbuf_write(struct log_ringbuf *rb, struct log_entry *entry);
  */
 int ringbuf_read(struct log_ringbuf *rb, uint64_t id, struct log_entry *out);
 int ringbuf_iterate(struct log_ringbuf *rb, uint64_t *cursor,
-    struct log_entry *out);
+	struct log_entry *out);
 int     ringbuf_query(struct log_ringbuf *rb, struct log_query *query,
-            struct log_entry ***results, uint64_t *count);
+			struct log_entry ***results, uint64_t *count);
 uint64_t ringbuf_oldest_id(struct log_ringbuf *rb);
 uint64_t ringbuf_newest_id(struct log_ringbuf *rb);
 
 /* Log ingestion */
 int     log_write(int severity, int source, const char *source_name,
-            const char *fmt, ...) __printflike(4, 5);
+			const char *fmt, ...) __printflike(4, 5);
 int     log_write_structured(int severity, int source, const char *source_name,
-            const char *fields_json, const char *fmt, ...) __printflike(5, 6);
+			const char *fields_json, const char *fmt, ...) __printflike(5, 6);
 int     log_write_from_jail(const char *jail_name, int severity,
-            const char *message);
+			const char *message);
 int     log_capture_fd(int fd, const char *source_name);
 
 /* Log forwarding */
@@ -305,19 +305,19 @@ int     alert_process_entry(struct log_entry *entry);
 
 /* Event stream */
 int     event_publish(int type, const char *source, const char *subject,
-            const char *data);
+			const char *data);
 struct event_entry **event_query(time_t start, time_t end,
-            int *types, int num_types, uint64_t limit, uint64_t *count);
+			int *types, int num_types, uint64_t limit, uint64_t *count);
 int     event_subscribe(int *types, int num_types,
-            void (*callback)(struct event_entry *));
+			void (*callback)(struct event_entry *));
 int     event_webhook_register(const char *name, const char *url,
-            int *types, int num_types);
+			int *types, int num_types);
 int     event_webhook_unregister(const char *name);
 
 /* Log query */
 struct log_entry **log_query_exec(struct log_query *query, uint64_t *count);
 int     log_query_export(struct log_query *query, const char *format,
-            FILE *fp);
+			FILE *fp);
 char    *log_format_entry(struct log_entry *entry, int format);
 
 /* Log statistics */
@@ -333,11 +333,11 @@ int     log_retention_apply(void);
 
 /* Webhook delivery */
 struct webhook_delivery {
-    char            url[512];
-    char            *payload;
-    int             attempts;
-    time_t          next_retry;
-    STAILQ_ENTRY(webhook_delivery) next;
+	char            url[512];
+	char            *payload;
+	int             attempts;
+	time_t          next_retry;
+	STAILQ_ENTRY(webhook_delivery) next;
 };
 STAILQ_HEAD(webhook_queue, webhook_delivery);
 

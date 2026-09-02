@@ -196,7 +196,7 @@ ensemble_resolve_namespace(const char *namespace, struct convert_options *opts)
  */
 int
 ensemble_convert_deployment(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
@@ -265,7 +265,7 @@ ensemble_convert_deployment(const char *yaml, char **output,
  */
 int
 ensemble_convert_service(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
@@ -329,7 +329,7 @@ ensemble_convert_service(const char *yaml, char **output,
  */
 int
 ensemble_convert_configmap(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
@@ -370,7 +370,7 @@ ensemble_convert_configmap(const char *yaml, char **output,
  */
 int
 ensemble_convert_secret(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
@@ -412,7 +412,7 @@ ensemble_convert_secret(const char *yaml, char **output,
  */
 int
 ensemble_convert_ingress(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
@@ -461,7 +461,7 @@ ensemble_convert_ingress(const char *yaml, char **output,
  */
 int
 ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 	char *namespace = yaml_get_field(yaml, "namespace");
@@ -519,7 +519,7 @@ ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
  */
 int
 ensemble_convert_namespace(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *name = yaml_get_field(yaml, "name");
 
@@ -544,7 +544,7 @@ ensemble_convert_namespace(const char *yaml, char **output,
  */
 int
 ensemble_convert_multi(const char *yaml, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char *result = NULL;
 	size_t result_cap = 0;

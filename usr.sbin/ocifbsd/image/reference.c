@@ -43,7 +43,7 @@ looks_like_registry(const char *p, const char *slash)
  */
 int
 parse_reference(const char *ref, char **registry, char **repo,
-    char **tag, char **digest)
+	char **tag, char **digest)
 {
 	const char *p = ref;
 	const char *slash, *at;

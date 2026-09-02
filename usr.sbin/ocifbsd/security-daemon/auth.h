@@ -66,14 +66,14 @@
 
 /* Role binding */
 struct role_binding {
-    char name[256];
-    char namespace[256];
-    char role[64];           /* role name */
-    char **subjects;          /* users/groups */
-    int n_subjects;
-    time_t created;
-    time_t updated;
-    RB_ENTRY(role_binding) entry;
+	char name[256];
+	char namespace[256];
+	char role[64];           /* role name */
+	char **subjects;          /* users/groups */
+	int n_subjects;
+	time_t created;
+	time_t updated;
+	RB_ENTRY(role_binding) entry;
 };
 
 RB_HEAD(role_binding_tree, role_binding);
@@ -81,33 +81,33 @@ RB_PROTOTYPE(role_binding_tree, role_binding, entry, rb_compare);
 
 /* User identity */
 struct user_identity {
-    char username[256];
-    char **groups;
-    int n_groups;
-    char **roles;
-    int n_roles;
-    time_t last_login;
-    time_t password_expires;
-    bool enabled;
-    /*
-     * crypt(3)-format password hash. "*" (or empty) means no password login
-     * is possible (the account authenticates by token/cert only) — never a
-     * match. Set by auth_user_create; checked by auth_authenticate.
-     */
-    char password_hash[128];
+	char username[256];
+	char **groups;
+	int n_groups;
+	char **roles;
+	int n_roles;
+	time_t last_login;
+	time_t password_expires;
+	bool enabled;
+	/*
+	 * crypt(3)-format password hash. "*" (or empty) means no password login
+	 * is possible (the account authenticates by token/cert only) — never a
+	 * match. Set by auth_user_create; checked by auth_authenticate.
+	 */
+	char password_hash[128];
 };
 
 /* Token/session */
 struct auth_token {
-    char token_id[128];       /* token hash */
-    char username[256];
-    time_t created;
-    time_t expires;
-    time_t last_used;
-    char remote_addr[64];
-    char user_agent[256];
-    int permissions;          /* bitmap of PERM_* */
-    RB_ENTRY(auth_token) entry;
+	char token_id[128];       /* token hash */
+	char username[256];
+	time_t created;
+	time_t expires;
+	time_t last_used;
+	char remote_addr[64];
+	char user_agent[256];
+	int permissions;          /* bitmap of PERM_* */
+	RB_ENTRY(auth_token) entry;
 };
 
 RB_HEAD(token_tree, auth_token);
@@ -115,15 +115,15 @@ RB_PROTOTYPE(token_tree, auth_token, entry, token_compare);
 
 /* Secret */
 struct secret {
-    char name[256];
-    char namespace[256];
-    char type[64];            /* opaque, registry, tls */
-    char *data;               /* encrypted secret data */
-    size_t data_len;
-    time_t created;
-    time_t updated;
-    int version;
-    RB_ENTRY(secret) entry;
+	char name[256];
+	char namespace[256];
+	char type[64];            /* opaque, registry, tls */
+	char *data;               /* encrypted secret data */
+	size_t data_len;
+	time_t created;
+	time_t updated;
+	int version;
+	RB_ENTRY(secret) entry;
 };
 
 RB_HEAD(secret_tree, secret);
@@ -131,16 +131,16 @@ RB_PROTOTYPE(secret_tree, secret, entry, secret_compare);
 
 /* Audit log entry */
 struct audit_entry {
-    uint64_t id;
-    time_t timestamp;
-    char user[256];
-    char action[128];
-    char resource[256];
-    char resource_name[256];
-    char result[32];          /* success, failure, denied */
-    char remote_addr[64];
-    char details[1024];
-    RB_ENTRY(audit_entry) entry;
+	uint64_t id;
+	time_t timestamp;
+	char user[256];
+	char action[128];
+	char resource[256];
+	char resource_name[256];
+	char result[32];          /* success, failure, denied */
+	char remote_addr[64];
+	char details[1024];
+	RB_ENTRY(audit_entry) entry;
 };
 
 RB_HEAD(audit_tree, audit_entry);
@@ -148,19 +148,19 @@ RB_PROTOTYPE(audit_tree, audit_entry, entry, audit_compare);
 
 /* TLS certificate */
 struct tls_cert {
-    char name[256];
-    char type[32];            /* ca, node, api, service */
-    char cert_file[PATH_MAX];
-    char key_file[PATH_MAX];
-    char *cert_pem;
-    char *key_pem;
-    time_t not_before;
-    time_t not_after;
-    char issuer[256];
-    char subject[256];
-    char **sans;              /* subject alternative names */
-    int n_sans;
-    int version;
+	char name[256];
+	char type[32];            /* ca, node, api, service */
+	char cert_file[PATH_MAX];
+	char key_file[PATH_MAX];
+	char *cert_pem;
+	char *key_pem;
+	time_t not_before;
+	time_t not_after;
+	char issuer[256];
+	char subject[256];
+	char **sans;              /* subject alternative names */
+	int n_sans;
+	int version;
 };
 
 /* Authentication functions */
@@ -215,9 +215,9 @@ int cert_check_expiry(const char *name, int warning_days, int critical_days);
 
 /* Audit logging */
 int audit_log(const char *user, const char *action, const char *resource,
-    const char *resource_name, const char *result, const char *details);
+	const char *resource_name, const char *result, const char *details);
 struct audit_entry **audit_query(time_t start, time_t end, const char *user,
-    const char *action, const char *resource, int *count);
+	const char *action, const char *resource, int *count);
 int audit_export_json(FILE *fp, time_t start, time_t end);
 int audit_export_syslog(const char *syslog_facility);
 

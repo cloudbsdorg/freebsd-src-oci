@@ -52,7 +52,7 @@ int	ocifbsd_logs(const char *cid, int tail, bool follow);
 
 int
 ocifbsd_create_container(const char *name, const char *image,
-    const char *command, char **args, uid_t uid, char **container_id)
+	const char *command, char **args, uid_t uid, char **container_id)
 {
 	(void)name;
 	(void)image;

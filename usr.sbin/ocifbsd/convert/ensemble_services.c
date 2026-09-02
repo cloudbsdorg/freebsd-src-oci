@@ -323,7 +323,7 @@ ensemble_services_find_block(const char *compose, const char *name)
  */
 int
 ensemble_services_convert(const char *compose, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	int version = ensemble_services_detect_version(compose);
 
@@ -341,7 +341,7 @@ ensemble_services_convert(const char *compose, char **output,
  */
 int
 ensemble_services_convert_v2(const char *compose, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char **services;
 	int count;
@@ -456,7 +456,7 @@ ensemble_services_convert_v2(const char *compose, char **output,
  */
 int
 ensemble_services_convert_v3(const char *compose, char **output,
-    struct convert_options *opts)
+	struct convert_options *opts)
 {
 	char **services;
 	int count;

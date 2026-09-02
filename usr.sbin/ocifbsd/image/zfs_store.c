@@ -212,7 +212,7 @@ ensure_dir(const char *path)
 
 static int
 make_dataset_name(const char *prefix, const char *name, char *buf,
-    size_t buflen)
+	size_t buflen)
 {
 	/* Replace slashes with colons in name */
 	const char *p;
@@ -250,7 +250,7 @@ make_dataset_name(const char *prefix, const char *name, char *buf,
  */
 static int
 make_image_dataset(const char *registry, const char *repo, const char *tag,
-    char *buf, size_t buflen)
+	char *buf, size_t buflen)
 {
 	char name[PATH_MAX];
 
@@ -650,7 +650,7 @@ zfs_layer_set_shared(const char *digest, bool shared)
  */
 int
 zfs_store_create_image(const char *registry, const char *repo,
-    const char *tag, const char *digest)
+	const char *tag, const char *digest)
 {
 	char dataset[PATH_MAX];
 	char mp[PATH_MAX];
@@ -763,7 +763,7 @@ zfs_store_add_layer(const char *image_dataset, const char *layer_digest)
 
 int
 zfs_store_destroy_image(const char *registry, const char *repo,
-    const char *tag)
+	const char *tag)
 {
 	char dataset[PATH_MAX];
 	int ret;
@@ -808,7 +808,7 @@ zfs_store_list_images(struct zfs_image ***images, int *nimages)
 
 int
 zfs_store_get_image(const char *registry, const char *repo,
-    const char *tag, struct zfs_image **image)
+	const char *tag, struct zfs_image **image)
 {
 	/*
 	 * Looking up a specific image is not yet implemented. Needs to:

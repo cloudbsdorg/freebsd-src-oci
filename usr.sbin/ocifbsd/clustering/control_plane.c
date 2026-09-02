@@ -87,7 +87,7 @@ parse_int(const char *s, int *out)
 
 static int
 svc_upsert(struct cp_state *st, const char *name, int replicas,
-    const char *image)
+	const char *image)
 {
 	struct cp_service *s = find_service(st, name);
 
@@ -141,7 +141,7 @@ svc_delete(struct cp_state *st, const char *name)
 
 static int
 placement_assign(struct cp_state *st, const char *svc, int rid,
-    const char *node)
+	const char *node)
 {
 	struct cp_placement *p;
 
@@ -288,7 +288,7 @@ cp_service_name(const struct cp_state *st, int i)
 
 int
 cp_service_placements(const struct cp_state *st, const char *svc, int *ids,
-    int max)
+	int max)
 {
 	int n = 0;
 
@@ -357,7 +357,7 @@ cp_replica_endpoint(const struct cp_state *st, const char *svc, int replica_id)
 
 int
 cp_service_endpoints(const struct cp_state *st, const char *svc,
-    char ips[][64], int max)
+	char ips[][64], int max)
 {
 	int n = 0;
 
@@ -391,7 +391,7 @@ cp_placement_count(const struct cp_state *st)
 
 int
 cp_placement_at(const struct cp_state *st, int i, char *svc, size_t svclen,
-    int *id, char *node, size_t nodelen)
+	int *id, char *node, size_t nodelen)
 {
 	if (st == NULL || i < 0 || i >= st->npls)
 		return (-1);

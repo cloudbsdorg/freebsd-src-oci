@@ -472,7 +472,7 @@ container_jail_name(const struct ocifbsd_container *c, char *buf, size_t len)
  */
 static int
 container_epair_sidecar(const struct ocifbsd_container *c, char *buf,
-    size_t len)
+	size_t len)
 {
 	if (c == NULL || c->id == NULL)
 		return (-1);
@@ -827,7 +827,7 @@ setup_process_env(struct ocifbsd_container *c)
  */
 static void
 container_overlay_netcfg(struct ocifbsd_container *c,
-    struct oci_runtime_spec *spec)
+	struct oci_runtime_spec *spec)
 {
 	const char *ddir;
 	char ncpath[PATH_MAX];
@@ -861,7 +861,7 @@ container_overlay_netcfg(struct ocifbsd_container *c,
  */
 static int
 create_jail_from_spec(struct ocifbsd_container *c,
-    struct oci_runtime_spec *spec)
+	struct oci_runtime_spec *spec)
 {
 	struct jailparam *params;
 	size_t nparams, pi;
@@ -1003,7 +1003,7 @@ container_reconfigure_network(struct ocifbsd_container *c)
  */
 static int
 establish_secure_rootfs(struct ocifbsd_container *c,
-    struct oci_runtime_spec *spec)
+	struct oci_runtime_spec *spec)
 {
 	char jailroot[PATH_MAX];
 	char opts[64];
@@ -1069,7 +1069,7 @@ establish_secure_rootfs(struct ocifbsd_container *c,
  */
 int
 container_create(struct ocifbsd_container **cp, const char *bundle_path,
-    const char *name)
+	const char *name)
 {
 	struct ocifbsd_container *c;
 	struct oci_runtime_spec *spec;

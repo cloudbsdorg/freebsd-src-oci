@@ -810,7 +810,7 @@ network_delete(const char *network_id)
 
 int
 network_connect(const char *network_id, const char *container_id,
-    struct endpoint **ep)
+	struct endpoint **ep)
 {
 	if (!net_id_is_valid(network_id))
 		return (-1);
@@ -1078,7 +1078,7 @@ network_list(struct network_config ***networks, int *nnetworks)
  */
 int
 vnet_wire_jail(int jid, const char *ip4cidr, const char *gw4,
-    const char *bridge, char **out_side_a)
+	const char *bridge, char **out_side_a)
 {
 	char *side_a = NULL, *side_b = NULL;
 	char jidstr[16];

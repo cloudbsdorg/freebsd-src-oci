@@ -203,8 +203,8 @@ bridge_flush_fdb(const char *bridge, bool static_only)
  */
 static int
 bridge_get_port_stats(const char *bridge, const char *port,
-    uint64_t *rx_packets, uint64_t *tx_packets,
-    uint64_t *rx_bytes, uint64_t *tx_bytes)
+	uint64_t *rx_packets, uint64_t *tx_packets,
+	uint64_t *rx_bytes, uint64_t *tx_bytes)
 {
 	char *out = NULL;
 

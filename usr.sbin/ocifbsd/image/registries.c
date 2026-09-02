@@ -79,7 +79,7 @@ parse_insecure(const char *tls)
 
 static void
 upsert(const char *name, const char *api_host, const char *realm,
-    const char *service, int insecure)
+	const char *service, int insecure)
 {
 	struct alias_entry *e;
 

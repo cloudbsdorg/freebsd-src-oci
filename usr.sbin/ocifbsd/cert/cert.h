@@ -61,91 +61,91 @@
 
 /* Certificate structure */
 struct cert_info {
-    char            name[256];             /* Certificate name */
-    int             type;                  /* CERT_TYPE_* */
-    char            cn[256];              /* Common Name */
-    char            *sans;                /* Subject Alternative Names (JSON array) */
-    char            issuer[256];          /* Issuer CN */
-    time_t          created;
-    time_t          expires;
-    time_t          last_rotated;
-    int             status;               /* CERT_STATUS_* */
-    char            key_path[PATH_MAX];
-    char            cert_path[PATH_MAX];
-    char            *metadata;
-    RB_ENTRY(cert_info) entry;
+	char            name[256];             /* Certificate name */
+	int             type;                  /* CERT_TYPE_* */
+	char            cn[256];              /* Common Name */
+	char            *sans;                /* Subject Alternative Names (JSON array) */
+	char            issuer[256];          /* Issuer CN */
+	time_t          created;
+	time_t          expires;
+	time_t          last_rotated;
+	int             status;               /* CERT_STATUS_* */
+	char            key_path[PATH_MAX];
+	char            cert_path[PATH_MAX];
+	char            *metadata;
+	RB_ENTRY(cert_info) entry;
 };
 RB_HEAD(cert_tree, cert_info);
 RB_PROTOTYPE(cert_tree, cert_info, entry, cert_info_cmp);
 
 /* Certificate rotation config */
 struct rotation_config {
-    int             ca_rotation_years;     /* CA rotation in years */
-    int             node_rotation_days;     /* Node cert rotation days */
-    int             api_rotation_days;     /* API server rotation days */
-    int             service_rotation_days; /* Service account rotation */
-    int             warning_days;          /* Days before expiry to warn */
-    int             critical_days;          /* Days before expiry for critical */
-    bool            auto_rotate;
-    bool            dual_cert_mode;         /* During rotation */
+	int             ca_rotation_years;     /* CA rotation in years */
+	int             node_rotation_days;     /* Node cert rotation days */
+	int             api_rotation_days;     /* API server rotation days */
+	int             service_rotation_days; /* Service account rotation */
+	int             warning_days;          /* Days before expiry to warn */
+	int             critical_days;          /* Days before expiry for critical */
+	bool            auto_rotate;
+	bool            dual_cert_mode;         /* During rotation */
 };
 
 /* Certificate backup */
 struct cert_backup {
-    char            cert_name[256];
-    time_t          backed_up;
-    char            backup_path[PATH_MAX];
-    char            checksum[128];
-    bool            encrypted;
-    char            *metadata;
+	char            cert_name[256];
+	time_t          backed_up;
+	char            backup_path[PATH_MAX];
+	char            checksum[128];
+	bool            encrypted;
+	char            *metadata;
 };
 
 /* ACME/Let's Encrypt configuration */
 struct acme_config {
-    bool            enabled;
-    char            server_url[512];
-    char            email[256];
-    char            agree_tos;
-    char            *private_key_path;
-    char            *certificate_path;
-    char            *chain_path;
-    char            *challenges_dir;        /* HTTP-01 challenge dir */
-    bool            dns_provider_enabled;
-    char            dns_provider[128];
-    char            dns_credentials_path[PATH_MAX];
+	bool            enabled;
+	char            server_url[512];
+	char            email[256];
+	char            agree_tos;
+	char            *private_key_path;
+	char            *certificate_path;
+	char            *chain_path;
+	char            *challenges_dir;        /* HTTP-01 challenge dir */
+	bool            dns_provider_enabled;
+	char            dns_provider[128];
+	char            dns_credentials_path[PATH_MAX];
 };
 
 /* External CA configuration */
 struct external_ca_config {
-    bool            enabled;
-    int             type;                   /* ADCS/VAULT/OTHER */
-    char            server_url[512];
-    char            *ca_name;               /* Template name */
-    char            *credentials_path;       /* Auth credentials */
-    char            *intermediate_certs;     /* Trust chain */
-    int             enrollment_type;         /* SCEP/EST/CMS */
+	bool            enabled;
+	int             type;                   /* ADCS/VAULT/OTHER */
+	char            server_url[512];
+	char            *ca_name;               /* Template name */
+	char            *credentials_path;       /* Auth credentials */
+	char            *intermediate_certs;     /* Trust chain */
+	int             enrollment_type;         /* SCEP/EST/CMS */
 };
 
 /* Certificate monitoring */
 struct cert_expiry_alert {
-    char            cert_name[256];
-    int             days_until_expiry;
-    int             severity;               /* INFO/WARNING/CRITICAL */
-    time_t          alerted_at;
-    bool            acknowledged;
+	char            cert_name[256];
+	int             days_until_expiry;
+	int             severity;               /* INFO/WARNING/CRITICAL */
+	time_t          alerted_at;
+	bool            acknowledged;
 };
 
 /* Certificate statistics */
 struct cert_stats {
-    uint32_t        total_certs;
-    uint32_t        valid_certs;
-    uint32_t        expiring_certs;
-    uint32_t        expired_certs;
-    uint32_t        revoked_certs;
-    uint32_t        rotations_performed;
-    uint32_t        rotations_failed;
-    time_t          last_rotation;
-    time_t          next_scheduled_rotation;
+	uint32_t        total_certs;
+	uint32_t        valid_certs;
+	uint32_t        expiring_certs;
+	uint32_t        expired_certs;
+	uint32_t        revoked_certs;
+	uint32_t        rotations_performed;
+	uint32_t        rotations_failed;
+	time_t          last_rotation;
+	time_t          next_scheduled_rotation;
 };
 
 /* Function declarations */
@@ -209,7 +209,7 @@ int     cert_recover_from_token(const char *token);
 int     cert_recover_expired(const char *name);
 
 int     cert_self_service_recovery(const char *username, const char *token,
-            const char *new_key_pem);
+			const char *new_key_pem);
 int     cert_admin_recovery(const char *name, const char *admin_token);
 
 /* Certificate distribution */
@@ -254,9 +254,9 @@ int     extca_revoke(const char *name, const char *reason);
 int     extca_chain_install(const char *chain_pem);
 
 int     extca_scep_enroll(const char *url, const char *ca_cert,
-            const char *challenge, char **key, char **cert);
+			const char *challenge, char **key, char **cert);
 int     extca_est_enroll(const char *url, const char *profile,
-            char **key, char **cert);
+			char **key, char **cert);
 
 /* Statistics */
 int     cert_stats_get(struct cert_stats *stats);

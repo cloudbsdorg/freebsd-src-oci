@@ -306,7 +306,7 @@ orch_event_unsubscribe(int subscription_id)
  */
 int
 orch_event_publish(const char *type, const char *object,
-    const char *namespace, const char *message, ...)
+	const char *namespace, const char *message, ...)
 {
 	struct orch_event event;
 	va_list ap;
