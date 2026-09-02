@@ -200,13 +200,11 @@ run_cmd_output(char **output, int argc, ...)
 		if (dup2(fds[1], STDOUT_FILENO) < 0)
 			_exit(127);
 		/*
-		 * Merge stderr into the captured pipe. ifconfig writes its
-		 * "interface <x> does not exist" diagnostic to stderr, and
-		 * bridge_exists() decides existence by scanning that text; if
-		 * stderr stayed attached to our terminal the probe would both
-		 * leak the message to the user and never match. Callers that
-		 * parse a created interface name read stdout, which ifconfig
-		 * writes only on success, so the merge is harmless for them.
+		 * Merge stderr into the captured pipe so a command's diagnostics
+		 * (which ifconfig writes to stderr) are captured with its output
+		 * instead of leaking to the user's terminal. Callers that parse a
+		 * created interface name read stdout, which ifconfig writes only
+		 * on success, so the merge is harmless for them.
 		 */
 		if (dup2(fds[1], STDERR_FILENO) < 0)
 			_exit(127);
@@ -288,13 +286,11 @@ net_capture_argv(char **output, char *const argv[])
 		if (dup2(fds[1], STDOUT_FILENO) < 0)
 			_exit(127);
 		/*
-		 * Merge stderr into the captured pipe. ifconfig writes its
-		 * "interface <x> does not exist" diagnostic to stderr, and
-		 * bridge_exists() decides existence by scanning that text; if
-		 * stderr stayed attached to our terminal the probe would both
-		 * leak the message to the user and never match. Callers that
-		 * parse a created interface name read stdout, which ifconfig
-		 * writes only on success, so the merge is harmless for them.
+		 * Merge stderr into the captured pipe so a command's diagnostics
+		 * (which ifconfig writes to stderr) are captured with its output
+		 * instead of leaking to the user's terminal. Callers that parse a
+		 * created interface name read stdout, which ifconfig writes only
+		 * on success, so the merge is harmless for them.
 		 */
 		if (dup2(fds[1], STDERR_FILENO) < 0)
 			_exit(127);
@@ -492,16 +488,16 @@ bridge_list_interfaces(const char *bridge, char ***interfaces, int *ninterfaces)
 bool
 bridge_exists(const char *name)
 {
-	char *output = NULL;
-	bool exists = false;
-
-	if (run_cmd_output(&output, 2, "ifconfig", name) == 0) {
-		if (strstr(output, "does not exist") == NULL)
-			exists = true;
-	}
-
-	free(output);
-	return (exists);
+	/*
+	 * An interface exists iff the kernel maps its name to an index. This is
+	 * a single getifaddrs-backed lookup in libc — no fork/exec of ifconfig
+	 * and no parsing its human-readable output for "does not exist" (which
+	 * would also misfire on any interface whose config text happened to
+	 * contain that phrase).
+	 */
+	if (name == NULL)
+		return (false);
+	return (if_nametoindex(name) != 0);
 }
 
 /*
