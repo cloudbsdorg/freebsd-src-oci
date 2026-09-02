@@ -673,10 +673,10 @@ write_challenge(const char *token)
 	free(tp);
 	/* Standard webroot layout: <dir>/.well-known/acme-challenge/<token>. */
 	snprintf(dir, sizeof(dir), "%s/.well-known", actx.challenges_dir);
-	mkdir(dir, 0755);
+	(void)mkdir(dir, 0755);	/* errors surface at the open() below */
 	snprintf(dir, sizeof(dir), "%s/.well-known/acme-challenge",
 	    actx.challenges_dir);
-	mkdir(dir, 0755);
+	(void)mkdir(dir, 0755);	/* idem */
 	if (strchr(token, '/') != NULL) {	/* token is server-chosen b64url */
 		free(keyauth);
 		return (-1);
