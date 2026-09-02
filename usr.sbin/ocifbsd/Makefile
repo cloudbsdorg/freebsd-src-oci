@@ -186,6 +186,21 @@ ${OCIFBSD_NETWORK_LIB}: .PHONY
 DPADD+=		${OCIFBSD_NETWORK_LIB}
 LDADD+=		${OCIFBSD_NETWORK_LIB}
 
+#
+# Orchestration module (pods, stacks, services). Linked so `ocifbsd
+# pod|service|stack` dispatch to orch_cli_dispatch and the pod/service logic
+# drives real containers through the ocifbsd_*_container shims defined in the
+# binary (which override the library's stub fallbacks).
+#
+OCIFBSD_ORCH_OBJDIR!=	cd ${.CURDIR}/orchestration && ${MAKE} -V .OBJDIR
+OCIFBSD_ORCH_LIB=	${OCIFBSD_ORCH_OBJDIR}/libocifbsd_orchestration.a
+
+${OCIFBSD_ORCH_LIB}: .PHONY
+	@cd ${.CURDIR}/orchestration && ${MAKE} all
+
+DPADD+=		${OCIFBSD_ORCH_LIB}
+LDADD+=		${OCIFBSD_ORCH_LIB}
+
 # Enable test suite
 HAS_TESTS=
 SUBDIR.${MK_TESTS}+=	tests
@@ -206,7 +221,8 @@ SUBDIR.${MK_TESTS}+=	tests
 .PATH: ${.CURDIR}/src
 
 # Ensure the bundled libraries exist before linking the PROG
-beforebuild: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB} ${OCIFBSD_NETWORK_LIB}
+beforebuild: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB} ${OCIFBSD_NETWORK_LIB} \
+		${OCIFBSD_ORCH_LIB}
 
 # Disable the default /usr/obj objdir. The ocifbsd build is a standalone
 # checkout (not in /usr/src), so we put .o files in the current directory.
@@ -938,5 +954,6 @@ banner:
 # updated library code. Depending PROG_FULL on the archives forces the relink.
 # (A clean build always links correctly; this only matters for incremental
 # rebuilds after touching a bundled library.)
-${PROG_FULL}: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB} ${OCIFBSD_NETWORK_LIB}
+${PROG_FULL}: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB} ${OCIFBSD_NETWORK_LIB} \
+		${OCIFBSD_ORCH_LIB}
 .endif

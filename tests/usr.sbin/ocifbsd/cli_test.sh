@@ -24,7 +24,29 @@ help_lists_commands_body()
 	atf_check -s exit:0 -e match:"create" -e match:"start" \
 	    -e match:"kill" -e match:"delete" -e match:"state" \
 	    -e match:"pull" -e match:"images" -e match:"rmi" \
+	    -e match:"pod" -e match:"service" -e match:"stack" \
 	    "${bin}" --help
+}
+
+atf_test_case orch_commands_dispatch
+orch_commands_dispatch_head()
+{
+	atf_set "descr" "pod/service/stack reach the orchestration dispatcher"
+}
+orch_commands_dispatch_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	# `pod list` reaches the linked orchestration module (empty list is OK)
+	# and is NOT rejected as an unknown command.
+	atf_check -s exit:0 -o match:"NAME" -e ignore \
+	    env OCIFBSD_STATE_DIR="${PWD}/state" "${bin}" pod list
+	atf_check -s not-exit:0 -e match:"unknown command" \
+	    "${bin}" definitelynotacommand
 }
 
 atf_test_case version_prints
@@ -454,6 +476,7 @@ rmi_symlink_escape_safe_body()
 atf_init_test_cases()
 {
 	atf_add_test_case help_lists_commands
+	atf_add_test_case orch_commands_dispatch
 	atf_add_test_case version_prints
 	atf_add_test_case unknown_command_fails
 	atf_add_test_case pull_dry_run

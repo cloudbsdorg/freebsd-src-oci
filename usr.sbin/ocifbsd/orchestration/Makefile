@@ -14,6 +14,10 @@ MAN=	ocifbsd_orchestration.3
 # pod.c and stack.c use json_object_* from the vendored json-c (below).
 WARNS?=	3
 
+# Static archive is linked into the PIE ocifbsd binary; compile PIC so the
+# archived objects relocate correctly in the position-independent executable.
+CFLAGS+=	-fPIC
+
 # json-c is vendored in-tree (contrib/json-c); no port needed.
 JSONC_DIR=	${.CURDIR:H}/contrib/json-c
 .include "${.CURDIR:H}/jsonc.inc.mk"

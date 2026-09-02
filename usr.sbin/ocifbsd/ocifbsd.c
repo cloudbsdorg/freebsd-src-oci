@@ -129,6 +129,9 @@ usage(const char *prog, const char *cmd)
 		fprintf(stderr, "  images                            List local image store paths\n");
 		fprintf(stderr, "  rmi <reference>                   Remove a local image store\n");
 		fprintf(stderr, "  network <list|set> [args]         View/modify container network config\n");
+		fprintf(stderr, "  pod <create|list|delete|logs>     Manage pods (orchestration)\n");
+		fprintf(stderr, "  service <create|scale|...>        Manage services (orchestration)\n");
+		fprintf(stderr, "  stack <create|up|...>             Manage stacks (orchestration)\n");
 		fprintf(stderr, "\nRun '%s help <command>' for more information on a command.\n",
 		    prog);
 	} else {
@@ -236,6 +239,159 @@ image_store_ready(const char *store)
 	if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode))
 		return (0);
 	return (1);
+}
+
+/*
+ * Backing container-lifecycle shims for the orchestration library.
+ *
+ * The orchestration module (pods, stacks, services) drives containers through
+ * these ocifbsd_*_container() entry points. In the standalone library they are
+ * -1 stubs (orchestration/stubs.c); linked into this binary these real
+ * definitions take precedence and bridge to the container_* runtime, giving
+ * orchestration an actual backing runtime.
+ *
+ * image may be an image reference resolved through the local store, or a path
+ * to an OCI bundle directory. command/args/pod_id are advisory only — the
+ * process to run comes from the bundle's config.json — and are accepted for
+ * API compatibility. The prototypes come from <ocifbsd.h>.
+ */
+int
+ocifbsd_create_container(const char *name, const char *image,
+    const char *command, const char *args, const char *pod_id,
+    char **container_id)
+{
+	struct ocifbsd_container *c = NULL;
+	char *store = NULL;
+	const char *bundle = NULL;
+	int ret;
+
+	(void)command;
+	(void)args;
+	(void)pod_id;
+
+	if (image == NULL)
+		return (-1);
+
+	/* Prefer a local image store; fall back to a bundle directory path. */
+	store = resolve_image_store(image);
+	if (store != NULL && image_store_ready(store)) {
+		bundle = store;
+	} else if (image_store_ready(image)) {
+		bundle = image;
+	} else {
+		fprintf(stderr, "error: no usable image store or bundle for "
+		    "'%s'\n", image);
+		free(store);
+		return (-1);
+	}
+
+	ret = container_create(&c, bundle, name);
+	free(store);
+	if (ret != 0 || c == NULL)
+		return (-1);
+
+	if (container_id != NULL)
+		*container_id = (c->id != NULL) ? strdup(c->id) : NULL;
+	container_free(c);
+	return (0);
+}
+
+int
+ocifbsd_start_container(const char *container_id)
+{
+	struct ocifbsd_container *c;
+	int ret;
+
+	if (container_id == NULL)
+		return (-1);
+	c = container_get_by_id(container_id);
+	if (c == NULL)
+		return (-1);
+	ret = container_start(c);
+	container_free(c);
+	return (ret);
+}
+
+int
+ocifbsd_stop_container(const char *cid, int sig)
+{
+	struct ocifbsd_container *c;
+	int ret;
+
+	if (cid == NULL)
+		return (-1);
+	c = container_get_by_id(cid);
+	if (c == NULL)
+		return (-1);
+	ret = container_kill(c, sig != 0 ? sig : SIGTERM);
+	container_free(c);
+	return (ret);
+}
+
+int
+ocifbsd_delete_container(const char *cid, bool force)
+{
+	struct ocifbsd_container *c;
+	int ret;
+
+	(void)force;
+	if (cid == NULL)
+		return (-1);
+	c = container_get_by_id(cid);
+	if (c == NULL)
+		return (-1);
+	ret = container_delete(c);
+	container_free(c);
+	return (ret);
+}
+
+int
+ocifbsd_get_container_state(const char *cid, container_state_t *state,
+    int *exit_code)
+{
+	struct ocifbsd_container *c;
+
+	if (cid == NULL)
+		return (-1);
+	c = container_get_by_id(cid);
+	if (c == NULL)
+		return (-1);
+	if (state != NULL)
+		*state = (container_state_t)c->state;
+	if (exit_code != NULL)
+		*exit_code = c->exit_code;
+	container_free(c);
+	return (0);
+}
+
+int
+ocifbsd_logs(const char *cid, int tail, bool follow)
+{
+	struct ocifbsd_container *c;
+	FILE *f;
+	char line[4096];
+
+	(void)tail;
+	(void)follow;
+	if (cid == NULL)
+		return (-1);
+	c = container_get_by_id(cid);
+	if (c == NULL)
+		return (-1);
+	if (c->log_path == NULL) {
+		container_free(c);
+		return (-1);
+	}
+	f = fopen(c->log_path, "r");
+	if (f == NULL) {
+		container_free(c);
+		return (-1);
+	}
+	while (fgets(line, sizeof(line), f) != NULL)
+		fputs(line, stdout);
+	fclose(f);
+	container_free(c);
+	return (0);
 }
 
 /*
@@ -2349,6 +2505,37 @@ struct command {
 	const char *help;
 };
 
+/*
+ * Orchestration CLI bridge. The orchestration library exposes a dispatcher
+ * that expects argv[1] to be the object (pod|service|stack); our command
+ * table hands the handler argv[0] as that object, so prepend a program-name
+ * slot before delegating. orch_init() prepares orchestration state (best
+ * effort). Declared here to avoid pulling the orchestration headers into the
+ * whole CLI translation unit.
+ */
+extern int orch_cli_dispatch(int argc, char **argv);
+extern int orch_init(void);
+
+static int
+cmd_orch(int argc, char **argv)
+{
+	char **nargv;
+	int i, ret;
+
+	nargv = calloc((size_t)argc + 2, sizeof(char *));
+	if (nargv == NULL)
+		return (1);
+	nargv[0] = __DECONST(char *, "ocifbsd");
+	for (i = 0; i < argc; i++)
+		nargv[i + 1] = argv[i];
+	nargv[argc + 1] = NULL;
+
+	(void)orch_init();
+	ret = orch_cli_dispatch(argc + 1, nargv);
+	free(nargv);
+	return (ret);
+}
+
 static struct command commands[] = {
 	{ "create",	cmd_create,	"Create a container from OCI bundle" },
 	{ "start",	cmd_start,	"Start a created container" },
@@ -2368,6 +2555,9 @@ static struct command commands[] = {
 	{ "images",	cmd_images,	"List local image store" },
 	{ "rmi",	cmd_rmi,	"Remove a local image" },
 	{ "network",	cmd_network,	"List/modify container network config" },
+	{ "pod",	cmd_orch,	"Manage pods (orchestration)" },
+	{ "service",	cmd_orch,	"Manage services (orchestration)" },
+	{ "stack",	cmd_orch,	"Manage stacks (orchestration)" },
 	{ NULL,		NULL,		NULL },
 };
 
