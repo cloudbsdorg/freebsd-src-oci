@@ -1281,28 +1281,108 @@ proxy_reap(int sig)
 		;
 }
 
+/*
+ * One accept worker. Multiple of these run as pre-forked processes sharing the
+ * same listening socket (the kernel load-balances accept across them, using all
+ * cores), which is how the balancer scales past a single accept loop. Each
+ * accepted connection is still handed to a forked child; the backend dial
+ * happens there so accept never blocks.
+ */
+static void
+proxy_accept_loop(int lfd, struct proxy_backend *backends, int nbackends,
+    enum proxy_algo algo, int *conns, int timeout_ms)
+{
+	int rr = 0;
+
+	signal(SIGCHLD, proxy_reap);
+	signal(SIGPIPE, SIG_IGN);
+	for (;;) {
+		struct sockaddr_storage ss;
+		socklen_t sslen = sizeof(ss);
+		int cfd = accept(lfd, (struct sockaddr *)&ss, &sslen);
+		int start;
+		pid_t pid;
+
+		if (cfd < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		switch (algo) {
+		case ALGO_RANDOM:
+			start = (int)(random() % nbackends);
+			break;
+		case ALGO_SOURCEHASH:
+			start = (int)(proxy_addr_hash((struct sockaddr *)&ss,
+			    sslen) % (unsigned long)nbackends);
+			break;
+		case ALGO_LEASTCONN: {
+			int m = 0;
+
+			for (int i = 1; i < nbackends; i++)
+				if (conns[i] < conns[m])
+					m = i;
+			start = m;
+			break;
+		}
+		case ALGO_ROUNDROBIN:
+		default:
+			start = rr;
+			break;
+		}
+		rr = (start + 1) % nbackends;
+
+		pid = fork();
+		if (pid == 0) {
+			int bfd = -1, tries, chosen = -1;
+
+			for (tries = 0; tries < nbackends; tries++) {
+				int idx = (start + tries) % nbackends;
+
+				bfd = proxy_dial(backends[idx].host,
+				    backends[idx].port, timeout_ms);
+				if (bfd >= 0) {
+					chosen = idx;
+					break;
+				}
+			}
+			if (bfd < 0)
+				_exit(1);
+			if (conns != NULL)
+				conns[chosen]++;
+			proxy_pump(cfd, bfd);
+			if (conns != NULL)
+				conns[chosen]--;
+			_exit(0);
+		}
+		close(cfd);
+	}
+}
+
 static int
 cmd_proxy(int argc, char **argv)
 {
 	const char *listen_spec = NULL;
 	struct proxy_backend backends[64];
-	int nbackends = 0, ch, timeout_ms = 2000, lfd, rr = 0;
+	int nbackends = 0, ch, timeout_ms = 2000, lfd;
 	char lhost[256], lport[16];
 	enum proxy_algo algo = ALGO_ROUNDROBIN;
 	int *conns = NULL;	/* shared active-connection counts (least-conn) */
+	int workers = 0;	/* accept workers; 0 => one per CPU */
 
 	static struct option longopts[] = {
 		{ "listen",	required_argument,	NULL, 'l' },
 		{ "backend",	required_argument,	NULL, 'b' },
 		{ "timeout",	required_argument,	NULL, 't' },
 		{ "algo",	required_argument,	NULL, 'a' },
+		{ "workers",	required_argument,	NULL, 'w' },
 		{ "help",	no_argument,		NULL, 'h' },
 		{ NULL,		0,			NULL, 0 }
 	};
 
 	optreset = 1;
 	optind = 1;
-	while ((ch = getopt_long(argc, argv, "l:b:t:a:h", longopts,
+	while ((ch = getopt_long(argc, argv, "l:b:t:a:w:h", longopts,
 	    NULL)) != -1) {
 		switch (ch) {
 		case 'l':
@@ -1310,6 +1390,9 @@ cmd_proxy(int argc, char **argv)
 			break;
 		case 'a':
 			algo = proxy_algo_parse(optarg);
+			break;
+		case 'w':
+			workers = atoi(optarg);
 			break;
 		case 'b': {
 			char *colon = strrchr(optarg, ':');
@@ -1395,7 +1478,7 @@ cmd_proxy(int argc, char **argv)
 			return (1);
 		}
 		freeaddrinfo(res);
-		if (listen(lfd, 128) != 0) {
+		if (listen(lfd, 1024) != 0) {
 			perror("listen");
 			return (1);
 		}
@@ -1415,84 +1498,52 @@ cmd_proxy(int argc, char **argv)
 		}
 	}
 
-	signal(SIGCHLD, proxy_reap);
-	signal(SIGPIPE, SIG_IGN);
+	if (workers <= 0) {
+		long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+
+		workers = (ncpu > 0) ? (int)ncpu : 4;
+	}
+
 	{
 		const char *an = algo == ALGO_RANDOM ? "random" :
 		    algo == ALGO_SOURCEHASH ? "source-hash (sticky)" :
 		    algo == ALGO_LEASTCONN ? "least-conn" : "round-robin";
 
 		printf("ocifbsd proxy: listening on %s -> %d backend(s), "
-		    "algo=%s, failover on\n", listen_spec, nbackends, an);
+		    "algo=%s, %d accept workers, failover on\n",
+		    listen_spec, nbackends, an, workers);
 		fflush(stdout);
 	}
 
-	for (;;) {
-		struct sockaddr_storage ss;
-		socklen_t sslen = sizeof(ss);
-		int cfd = accept(lfd, (struct sockaddr *)&ss, &sslen);
-		int bfd = -1, tries, start, chosen = -1;
-		pid_t pid;
-
-		if (cfd < 0) {
-			if (errno == EINTR)
-				continue;
-			break;
-		}
-
-		/* Choose the preferred starting backend per algorithm. */
-		switch (algo) {
-		case ALGO_RANDOM:
-			start = (int)(random() % nbackends);
-			break;
-		case ALGO_SOURCEHASH:
-			start = (int)(proxy_addr_hash((struct sockaddr *)&ss,
-			    sslen) % (unsigned long)nbackends);
-			break;
-		case ALGO_LEASTCONN: {
-			int m = 0;
-
-			for (int i = 1; i < nbackends; i++)
-				if (conns[i] < conns[m])
-					m = i;
-			start = m;
-			break;
-		}
-		case ALGO_ROUNDROBIN:
-		default:
-			start = rr;
-			break;
-		}
-
-		/* Try from the preferred index, failing over to the rest. */
-		for (tries = 0; tries < nbackends; tries++) {
-			int idx = (start + tries) % nbackends;
-
-			bfd = proxy_dial(backends[idx].host,
-			    backends[idx].port, timeout_ms);
-			if (bfd >= 0) {
-				chosen = idx;
-				break;
-			}
-		}
-		if (bfd < 0) {		/* all backends unreachable */
-			close(cfd);
-			continue;
-		}
-		rr = (chosen + 1) % nbackends;
-		if (conns != NULL)
-			conns[chosen]++;
-
-		pid = fork();
-		if (pid == 0) {
-			close(lfd);
-			proxy_pump(cfd, bfd);
-			if (conns != NULL)
-				conns[chosen]--;
+	/*
+	 * Pre-fork the accept workers. They share `lfd`; the kernel balances
+	 * incoming connections across them so accept scales across cores
+	 * instead of bottlenecking on one loop. The parent just supervises
+	 * and replaces any worker that dies.
+	 */
+	signal(SIGPIPE, SIG_IGN);
+	for (int w = 0; w < workers; w++) {
+		if (fork() == 0) {
+			proxy_accept_loop(lfd, backends, nbackends, algo, conns,
+			    timeout_ms);
 			_exit(0);
 		}
-		close(cfd);
-		close(bfd);
+	}
+	for (;;) {
+		int status;
+		pid_t dead = wait(&status);
+
+		if (dead < 0) {
+			if (errno == EINTR)
+				continue;
+			break;		/* no children left */
+		}
+		/* A worker died; respawn one to keep the pool full. */
+		if (fork() == 0) {
+			proxy_accept_loop(lfd, backends, nbackends, algo, conns,
+			    timeout_ms);
+			_exit(0);
+		}
 	}
 	close(lfd);
 	return (0);
