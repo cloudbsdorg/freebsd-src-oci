@@ -1469,6 +1469,42 @@ free_config(struct oci_config *config)
 /*
  * Pull a single layer
  */
+/*
+ * Copy a regular file. Used to move a layer between the shared content-address
+ * cache and a pull's destination. Returns 0 on success.
+ */
+static int
+copy_regular_file(const char *src, const char *dst)
+{
+	FILE *in, *out;
+	char buf[65536];
+	size_t n;
+	int ok = 0;
+
+	in = fopen(src, "rb");
+	if (in == NULL)
+		return (-1);
+	out = fopen(dst, "wb");
+	if (out == NULL) {
+		fclose(in);
+		return (-1);
+	}
+	while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+		if (fwrite(buf, 1, n, out) != n) {
+			ok = -1;
+			break;
+		}
+	}
+	if (ferror(in))
+		ok = -1;
+	fclose(in);
+	if (fclose(out) != 0)
+		ok = -1;
+	if (ok != 0)
+		unlink(dst);
+	return (ok);
+}
+
 int
 registry_pull_layer(struct registry *reg, struct oci_layer *layer,
     const char *destdir, progress_cb cb, void *opaque)
@@ -1477,6 +1513,7 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 	char *path;
 	FILE *out;
 	char filename[PATH_MAX];
+	char *cachep = NULL;
 	struct download_state ds;
 	struct curl_slist *headers = NULL;
 	int ret = -1;
@@ -1495,26 +1532,52 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 		return (-1);
 	}
 
+	/* Destination for this pull (digest may contain ':'). */
+	snprintf(filename, sizeof(filename), "%s/%s.layer",
+	    destdir, layer->digest);
+
+	/*
+	 * Image cache: layers are content-addressed by digest, so a layer
+	 * already present in the shared cache (<data-dir>/layers/<digest>) is
+	 * identical no matter which image references it. On a cache hit that
+	 * verifies, copy it into place and skip the network entirely — this is
+	 * what makes a re-pull, or a pull of an image sharing a base layer,
+	 * cheap. A corrupt/short cache entry fails verify_layer and falls back
+	 * to a normal download.
+	 */
+	cachep = zfs_layer_path(layer->digest);
+	if (cachep != NULL && access(cachep, R_OK) == 0 &&
+	    verify_layer(cachep, layer->digest) == 0 &&
+	    copy_regular_file(cachep, filename) == 0) {
+		if (cb != NULL)
+			cb(opaque, layer->digest, (off_t)layer->size,
+			    (off_t)layer->size);
+		free(cachep);
+		return (0);
+	}
+
 	if (layer->url == NULL) {
 		const char *repo = reg->repository != NULL ? reg->repository :
 		    reg->host;
 
 		/* OCI Distribution: /v2/<name>/blobs/<digest> */
 		if (asprintf(&path, "/v2/%s/blobs/%s", repo, layer->digest) ==
-		    -1)
+		    -1) {
+			free(cachep);
 			return (-1);
+		}
 		url = build_url(reg, path);
 		free(path);
 	} else {
 		url = strdup(layer->url);
 	}
 
-	if (url == NULL)
+	if (url == NULL) {
+		free(cachep);
 		return (-1);
+	}
 
-	/* Create output file (digest may contain ':') */
-	snprintf(filename, sizeof(filename), "%s/%s.layer",
-	    destdir, layer->digest);
+	/* Create output file. */
 	out = fopen(filename, "wb");
 	if (out == NULL) {
 		free(url);
@@ -1576,11 +1639,25 @@ registry_pull_layer(struct registry *reg, struct oci_layer *layer,
 			    layer->digest);
 			unlink(filename);
 			ret = -1;
+		} else if (cachep != NULL) {
+			/*
+			 * Populate the shared cache so subsequent pulls of this
+			 * (or any image sharing the layer) hit it. Best effort:
+			 * a cache-store failure must not fail the pull.
+			 */
+			char *slash = strrchr(cachep, '/');
+			if (slash != NULL) {
+				*slash = '\0';
+				(void)mkdirp_path(cachep, 0755);
+				*slash = '/';
+			}
+			(void)copy_regular_file(filename, cachep);
 		}
 	} else {
 		unlink(filename);
 	}
 
+	free(cachep);
 	return (ret);
 }
 
