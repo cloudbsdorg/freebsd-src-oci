@@ -674,7 +674,6 @@ int
 network_create(struct network_config *config)
 {
 	char bridge_name[64];
-	char *side_a, *side_b;
 	int ret = -1;
 
 	if (config == NULL) {
@@ -699,28 +698,17 @@ network_create(struct network_config *config)
 			bridge_set_mtu(bridge_name, atoi(config->mtu));
 		}
 
-		/* Create epair for the host side */
-		if (epair_create("ocifbsd", &side_a, &side_b) == 0) {
-			/* Add host-side epair to bridge */
-			bridge_add_interface(bridge_name, side_a);
-
-			/* Configure host-side with gateway IP */
-			char cmd[256];
-			if (config->gateway) {
-				snprintf(cmd, sizeof(cmd), "%s %s netmask %s",
-				    config->gateway, side_a,
-				    "255.255.255.0");
-				run_cmd(6, "ifconfig", side_a, config->gateway,
-				    "netmask", "255.255.255.0", "up");
-			}
-
-			/* Configure gateway on jail side */
-			if (config->gateway && side_b) {
-				/* Jail side will be configured when container connects */
-			}
-
-			free(side_a);
-			free(side_b);
+		/*
+		 * The network's gateway address lives on the bridge itself, not
+		 * on a dangling epair. Per-container epairs are created and
+		 * attached later by network_connect(); creating one here left a
+		 * stranded interface (with a duplicated gateway IP) that
+		 * network_delete could not identify or reap — a leak on every
+		 * create/rm cycle. Assign the gateway to the bridge and stop.
+		 */
+		if (config->gateway) {
+			run_cmd(6, "ifconfig", bridge_name, config->gateway,
+			    "netmask", "255.255.255.0", "up");
 		}
 	}
 
