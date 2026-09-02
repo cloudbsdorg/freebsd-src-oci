@@ -22,13 +22,18 @@ ocifbsd_bin()
 	return 1
 }
 
-# Resolve a harness under usr.sbin/ocifbsd/tools relative to the test srcdir.
+# Resolve a harness script. Prefer the copy installed next to the tests (the
+# Makefile ships them via FILES, so an installed/objdir kyua run finds them in
+# srcdir); fall back to the in-tree usr.sbin/ocifbsd/tools location for a run
+# straight from the source tree.
 harness()
 {
 	local srcdir p
 	srcdir=$(atf_get_srcdir)
-	p="${srcdir}/../../../usr.sbin/ocifbsd/tools/$1"
-	[ -f "${p}" ] && { echo "${p}"; return 0; }
+	for p in "${srcdir}/$1" \
+	    "${srcdir}/../../../usr.sbin/ocifbsd/tools/$1"; do
+		[ -f "${p}" ] && { echo "${p}"; return 0; }
+	done
 	return 1
 }
 
