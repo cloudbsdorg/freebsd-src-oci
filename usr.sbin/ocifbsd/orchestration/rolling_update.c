@@ -92,13 +92,27 @@ save_rolling_update_state(struct rolling_update_info *info)
 {
 	FILE *fp;
 	char path[PATH_MAX];
-	
+	char dir[PATH_MAX];
+
+	/* Names become path components — reject traversal (see pod.c). */
+	if (!orch_name_is_valid(info->service) ||
+	    !orch_name_is_valid(info->namespace))
+		return (-1);
+
 	snprintf(path, sizeof(path), "%s/rolling-updates/%s/%s.json",
 	    OCIFBSD_ORCH_VAR_DIR, info->namespace, info->service);
-	
-	if (mkdirp(path, 0755) != 0 && errno != EEXIST)
+
+	/*
+	 * mkdirp the PARENT directory only. mkdirp on the full path would
+	 * create the "<service>.json" node itself as a directory, after which
+	 * fopen(path,"w") fails and rolling-update state is never persisted
+	 * (the same bug pod.c/stack.c already fixed).
+	 */
+	snprintf(dir, sizeof(dir), "%s/rolling-updates/%s",
+	    OCIFBSD_ORCH_VAR_DIR, info->namespace);
+	if (mkdirp(dir, 0755) != 0 && errno != EEXIST)
 		return (-1);
-	
+
 	fp = fopen(path, "w");
 	if (fp == NULL)
 		return (-1);

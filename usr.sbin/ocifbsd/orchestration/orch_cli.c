@@ -111,11 +111,16 @@ cmd_pod_create(int argc, char **argv)
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+	if (!orch_name_is_valid(name) || !orch_name_is_valid(namespace)) {
+		fprintf(stderr, "Error: invalid name/namespace (allowed: "
+		    "[A-Za-z0-9._-], no '/' or '..')\n");
+		return (1);
+	}
+
 	memset(&spec, 0, sizeof(spec));
 	strlcpy(spec.name, name, sizeof(spec.name));
 	strlcpy(spec.namespace, namespace, sizeof(spec.namespace));
-	
+
 	struct pod *pod = pod_create(&spec);
 	if (pod == NULL) {
 		fprintf(stderr, "Error: Failed to create pod: %s\n", strerror(errno));
@@ -321,7 +326,22 @@ cmd_service_create(int argc, char **argv)
 		fprintf(stderr, "Error: --name and --image are required\n");
 		return (1);
 	}
-	
+	if (!orch_name_is_valid(name)) {
+		fprintf(stderr, "Error: invalid service name (allowed: "
+		    "[A-Za-z0-9._-], no '/' or '..')\n");
+		return (1);
+	}
+	/*
+	 * Bound the replica count: it drives calloc() and a fork/jail launch
+	 * loop, so an unbounded or negative value (atoi) is a resource-
+	 * exhaustion / calloc((size_t)-n) bomb.
+	 */
+	if (replicas < 0 || replicas > ORCH_MAX_REPLICAS) {
+		fprintf(stderr, "Error: --replicas must be 0..%d\n",
+		    ORCH_MAX_REPLICAS);
+		return (1);
+	}
+
 	memset(&spec, 0, sizeof(spec));
 	strlcpy(spec.name, name, sizeof(spec.name));
 	strlcpy(spec.image, image, sizeof(spec.image));
@@ -581,7 +601,12 @@ cmd_stack_create(int argc, char **argv)
 		fprintf(stderr, "Error: --name is required\n");
 		return (1);
 	}
-	
+	if (!orch_name_is_valid(name)) {
+		fprintf(stderr, "Error: invalid stack name (allowed: "
+		    "[A-Za-z0-9._-], no '/' or '..')\n");
+		return (1);
+	}
+
 	/* Stack creation from file would parse the stack spec here */
 	struct stack_spec spec;
 	memset(&spec, 0, sizeof(spec));

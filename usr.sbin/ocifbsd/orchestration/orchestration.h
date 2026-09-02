@@ -519,4 +519,18 @@ int	orch_load_state(void);
 
 /* Old event callbacks removed - use new orch_event_* functions */
 
+/*
+ * Validate a pod/service/stack name or namespace before it is used as a path
+ * component under the root-owned state dir (rejects '/', "..", NUL, leading
+ * '.'/'-'). Defined in pod.c; used by the path builders and CLI handlers.
+ */
+bool	orch_name_is_valid(const char *s);
+
+/*
+ * Upper bound on service replicas. Replica counts drive calloc() and a
+ * fork/jail launch loop, so they must be clamped to avoid a resource-
+ * exhaustion bomb from an unbounded (or negative, via atoi) value.
+ */
+#define ORCH_MAX_REPLICAS	4096
+
 #endif /* _OCIFBSD_ORCHESTRATION_H */

@@ -97,11 +97,41 @@ orch_var_dir(void)
 /*
  * Get pod state file path
  */
+/*
+ * A pod/service/stack name or namespace becomes a path component under the
+ * root-owned state dir, so it MUST NOT contain '/', "..", NUL, or a leading
+ * '.'/'-'. Without this, `pod create --name ../../etc/cron.d/x` wrote — and
+ * `pod delete` unlinked — arbitrary files as root (path traversal). Mirrors
+ * ns_name_is_valid in namespace.c. Empty/NULL is invalid.
+ */
+bool
+orch_name_is_valid(const char *s)
+{
+	size_t i, len;
+
+	if (s == NULL)
+		return (false);
+	len = strlen(s);
+	if (len == 0 || len > 63)
+		return (false);
+	if (s[0] == '.' || s[0] == '-')
+		return (false);
+	for (i = 0; i < len; i++) {
+		char c = s[i];
+		if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		    (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+			return (false);
+	}
+	return (true);
+}
+
 static char *
 get_pod_state_path(const char *name, const char *namespace)
 {
 	char *path;
 
+	if (!orch_name_is_valid(name) || !orch_name_is_valid(namespace))
+		return (NULL);
 	asprintf(&path, "%s/pods/%s/%s.json",
 	    orch_var_dir(), namespace, name);
 	return (path);

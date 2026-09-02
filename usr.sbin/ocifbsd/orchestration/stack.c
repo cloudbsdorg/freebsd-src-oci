@@ -108,6 +108,8 @@ get_stack_state_path(const char *name, const char *namespace)
 {
 	char *path;
 
+	if (!orch_name_is_valid(name) || !orch_name_is_valid(namespace))
+		return (NULL);
 	asprintf(&path, "%s/stacks/%s/%s.json",
 	    orch_var_dir(), namespace, name);
 	return (path);
@@ -614,6 +616,9 @@ get_service_state_path(const char *name, const char *namespace)
 {
 	char *path;
 
+	if (!orch_name_is_valid(name) ||
+	    (namespace != NULL && !orch_name_is_valid(namespace)))
+		return (NULL);
 	asprintf(&path, "%s/services/%s/%s.json",
 	    orch_var_dir(), namespace ? namespace : "default", name);
 	return (path);
@@ -785,7 +790,12 @@ service_create(struct service_spec *spec)
 		errno = EINVAL;
 		return (NULL);
 	}
-	
+	if (!orch_name_is_valid(spec->name) ||
+	    spec->replicas < 0 || spec->replicas > ORCH_MAX_REPLICAS) {
+		errno = EINVAL;
+		return (NULL);
+	}
+
 	service = calloc(1, sizeof(struct service));
 	if (service == NULL)
 		return (NULL);
@@ -1190,7 +1200,11 @@ service_scale(struct service *service, int replicas)
 {
 	if (service == NULL)
 		return (-1);
-	
+	if (replicas < 0 || replicas > ORCH_MAX_REPLICAS) {
+		errno = EINVAL;
+		return (-1);
+	}
+
 	if (replicas > service->nreplicas) {
 		/* Scale up */
 		struct service_replica *new_replicas;

@@ -77,6 +77,37 @@ pod_lifecycle_persists_body()
 	atf_check -s exit:0 -o not-match:"^web " "${bin}" pod list
 }
 
+atf_test_case pod_rejects_path_traversal
+pod_rejects_path_traversal_head()
+{
+	atf_set "descr" "pod create/delete reject names/namespaces that escape the state dir"
+}
+pod_rejects_path_traversal_body()
+{
+	local bin
+
+	bin="$(atf_get_srcdir)/../../../usr.sbin/ocifbsd/ocifbsd"
+	if [ ! -x "${bin}" ]; then
+		atf_skip "ocifbsd binary not built at ${bin}"
+	fi
+	export OCIFBSD_ORCH_DIR="${PWD}/orch"
+	mkdir -p "${OCIFBSD_ORCH_DIR}"
+
+	# A traversal name must be rejected, and must NOT write a file outside
+	# the pods/ tree (the escape target would be ${PWD}/orch/pwned.json).
+	atf_check -s not-exit:0 -e ignore -o ignore \
+	    "${bin}" pod create --name "../../pwned"
+	if [ -f "${OCIFBSD_ORCH_DIR}/pwned.json" ]; then
+		atf_fail "traversal name escaped the pods dir (arbitrary file write)"
+	fi
+	# A traversal namespace likewise.
+	atf_check -s not-exit:0 -e ignore -o ignore \
+	    "${bin}" pod create --name web --namespace "../../.."
+	# A slash in the name is an injection vector, reject it.
+	atf_check -s not-exit:0 -e ignore -o ignore \
+	    "${bin}" pod create --name "a/b"
+}
+
 atf_test_case stack_lifecycle_persists
 stack_lifecycle_persists_head()
 {
@@ -618,6 +649,7 @@ atf_init_test_cases()
 	atf_add_test_case help_lists_commands
 	atf_add_test_case orch_commands_dispatch
 	atf_add_test_case pod_lifecycle_persists
+	atf_add_test_case pod_rejects_path_traversal
 	atf_add_test_case stack_lifecycle_persists
 	atf_add_test_case service_lifecycle_persists
 	atf_add_test_case service_scale_persists
