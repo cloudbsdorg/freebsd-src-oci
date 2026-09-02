@@ -246,6 +246,18 @@ ensure_directory(const char *path, mode_t mode)
 }
 
 /*
+ * Recursive mkdir(2) (mkdir -p). Provided as a program-global symbol so the
+ * bundled network archive (network.c / vnet.c, which declare `extern int
+ * mkdirp`) resolves against base ocifbsd rather than a per-module static copy;
+ * FreeBSD 16 libutil does not export mkdirp. Delegates to ensure_directory.
+ */
+int
+mkdirp(const char *path, mode_t mode)
+{
+	return (ensure_directory(path, mode));
+}
+
+/*
  * Safely write all data to a file descriptor.
  */
 int

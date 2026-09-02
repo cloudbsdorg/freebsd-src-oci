@@ -171,6 +171,21 @@ ${OCIFBSD_SECURITY_LIB}: .PHONY
 DPADD+=		${OCIFBSD_SECURITY_LIB}
 LDADD+=		${OCIFBSD_SECURITY_LIB}
 
+#
+# Network module (epair/bridge/VNET plumbing). Linked so the container
+# lifecycle can wire VNET connectivity (vnet_wire_jail) and destroy epairs.
+# netcfg.c is compiled directly into the binary (SRCS), so only the other
+# members (network.o etc.) are pulled from this archive — no duplicate.
+#
+OCIFBSD_NETWORK_OBJDIR!=	cd ${.CURDIR}/network && ${MAKE} -V .OBJDIR
+OCIFBSD_NETWORK_LIB=	${OCIFBSD_NETWORK_OBJDIR}/libocifbsd_network.a
+
+${OCIFBSD_NETWORK_LIB}: .PHONY
+	@cd ${.CURDIR}/network && ${MAKE} all
+
+DPADD+=		${OCIFBSD_NETWORK_LIB}
+LDADD+=		${OCIFBSD_NETWORK_LIB}
+
 # Enable test suite
 HAS_TESTS=
 SUBDIR.${MK_TESTS}+=	tests
@@ -190,8 +205,8 @@ SUBDIR.${MK_TESTS}+=	tests
 # them when generating the .o -> .c dependency rules.
 .PATH: ${.CURDIR}/src
 
-# Ensure the image and security libraries exist before linking the PROG
-beforebuild: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB}
+# Ensure the bundled libraries exist before linking the PROG
+beforebuild: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB} ${OCIFBSD_NETWORK_LIB}
 
 # Disable the default /usr/obj objdir. The ocifbsd build is a standalone
 # checkout (not in /usr/src), so we put .o files in the current directory.
@@ -923,5 +938,5 @@ banner:
 # updated library code. Depending PROG_FULL on the archives forces the relink.
 # (A clean build always links correctly; this only matters for incremental
 # rebuilds after touching a bundled library.)
-${PROG_FULL}: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB}
+${PROG_FULL}: ${OCIFBSD_IMAGE_LIB} ${OCIFBSD_SECURITY_LIB} ${OCIFBSD_NETWORK_LIB}
 .endif

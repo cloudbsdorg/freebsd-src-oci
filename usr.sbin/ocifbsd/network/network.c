@@ -903,6 +903,82 @@ network_list(struct network_config ***networks, int *nnetworks)
 }
 
 /*
+ * Wire a VNET jail's connectivity: create an epair, move its 'b' side into the
+ * jail (identified by jid), configure the container's IPv4 address and optional
+ * default gateway inside the jail, and, when a bridge is given, attach the host
+ * 'a' side to it. The host-side interface name is returned in *out_side_a
+ * (caller frees) so the caller can persist it and destroy the epair on delete
+ * — the kernel does NOT reclaim the host side when the jail is removed.
+ *
+ * Returns 0 on success. On any failure the epair is torn down before returning
+ * so a failed start leaves no dangling interface. ip4cidr may be NULL (no
+ * address configured); gw4 and bridge may be NULL.
+ */
+int
+vnet_wire_jail(int jid, const char *ip4cidr, const char *gw4,
+    const char *bridge, char **out_side_a)
+{
+	char *side_a = NULL, *side_b = NULL;
+	char jidstr[16];
+
+	if (out_side_a != NULL)
+		*out_side_a = NULL;
+
+	if (epair_create("ocifbsd", &side_a, &side_b) != 0)
+		return (-1);
+
+	snprintf(jidstr, sizeof(jidstr), "%d", jid);
+
+	/*
+	 * Bring the host side up and move the peer into the jail's vnet. Moving
+	 * the interface is the essential step and is done entirely from the
+	 * host; if it fails, tear the epair down and report failure.
+	 */
+	(void)run_cmd(3, "ifconfig", side_a, "up");
+	if (run_cmd(4, "ifconfig", side_b, "vnet", jidstr) != 0)
+		goto fail;
+
+	/*
+	 * The remaining steps run tools INSIDE the jail (jexec), which requires
+	 * ifconfig/route in the container's rootfs. A minimal OCI image may not
+	 * ship them, so these are best-effort: on failure the interface still
+	 * exists in the jail for the container (or the operator) to configure,
+	 * and we keep it rather than failing the whole start.
+	 */
+	(void)run_cmd(5, "jexec", jidstr, "ifconfig", "lo0", "up");
+	if (ip4cidr != NULL && ip4cidr[0] != '\0') {
+		if (run_cmd(7, "jexec", jidstr, "ifconfig", side_b, "inet",
+		    ip4cidr, "up") != 0)
+			fprintf(stderr, "warning: could not set %s in jail %s "
+			    "(no ifconfig in the container?); interface is "
+			    "present but unconfigured\n", ip4cidr, jidstr);
+	}
+	if (gw4 != NULL && gw4[0] != '\0')
+		(void)run_cmd(6, "jexec", jidstr, "route", "add", "default",
+		    gw4);
+
+	/* Optional bridge attach on the host side for external reachability. */
+	if (bridge != NULL && bridge[0] != '\0') {
+		(void)bridge_create(bridge);
+		(void)bridge_add_interface(bridge, side_a);
+	}
+
+	free(side_b);
+	if (out_side_a != NULL)
+		*out_side_a = side_a;
+	else
+		free(side_a);
+	return (0);
+
+fail:
+	/* Destroying either side removes the pair (and any bridge membership). */
+	(void)epair_delete(side_a);
+	free(side_a);
+	free(side_b);
+	return (-1);
+}
+
+/*
  * VNET management
  */
 int

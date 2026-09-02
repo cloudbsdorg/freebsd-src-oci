@@ -273,6 +273,8 @@ char   *generate_container_id(void);
 char   *canonical_name(const char *name);
 char   *resolve_bundle_path(const char *bundle);
 int	ensure_directory(const char *path, mode_t mode);
+/* Recursive mkdir (mkdir -p); program-global so the network archive resolves. */
+int	mkdirp(const char *path, mode_t mode);
 int	safe_write(int fd, const void *buf, size_t n);
 char   *read_file(const char *path, size_t *len);
 int	write_file(const char *path, const void *data, size_t len);

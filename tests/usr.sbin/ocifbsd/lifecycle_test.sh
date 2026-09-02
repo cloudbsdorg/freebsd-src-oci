@@ -409,6 +409,74 @@ rctl_limits_applied_and_cleaned_cleanup()
 	done
 }
 
+atf_test_case vnet_epair_wired_and_cleaned cleanup
+vnet_epair_wired_and_cleaned_head()
+{
+	atf_set "descr" "a freebsd.vnet container gets an epair moved into its " \
+	    "jail with the configured IP, and the host epair is destroyed on " \
+	    "delete (no leak)"
+	atf_set "require.user" "root"
+}
+vnet_epair_wired_and_cleaned_body()
+{
+	local bin bundle rootfs cid name jname before after
+
+	bin=$(ocifbsd_bin) || atf_skip "ocifbsd binary not found"
+	[ -x /rescue/sleep ] || atf_skip "/rescue/sleep not available"
+	[ -x /rescue/ifconfig ] || atf_skip "/rescue/ifconfig not available"
+
+	before=$(ifconfig -l | tr ' ' '\n' | grep -c '^epair')
+
+	bundle=$(pwd)/vnetbundle
+	rootfs=${bundle}/rootfs
+	mkdir -p "${rootfs}/bin" "${rootfs}/sbin"
+	cp /rescue/sleep "${rootfs}/bin/sleep"; chmod 755 "${rootfs}/bin/sleep"
+	# A minimal image ships ifconfig so the runtime can set the address.
+	cp /rescue/ifconfig "${rootfs}/sbin/ifconfig"
+	chmod 755 "${rootfs}/sbin/ifconfig"
+	cat > "${bundle}/config.json" <<EOF
+{
+  "ociVersion": "1.0.2",
+  "process": { "user": { "uid": 0, "gid": 0 },
+    "args": [ "/bin/sleep", "120" ], "cwd": "/" },
+  "root": { "path": "rootfs", "readonly": false },
+  "freebsd": { "vnet": true, "ip4": [ "192.0.2.20/24" ] }
+}
+EOF
+	name="vnetlife$$"
+	atf_check -s exit:0 -e ignore -o save:c.out \
+	    "${bin}" create --name "${name}" "${bundle}"
+	cid=$(tr -d ' \t\r\n' < c.out)
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" start "${cid}"
+
+	jname=$(jls -q name | grep '^ocifbsd-' | head -1)
+	# The jail must have an epair interface, carrying the configured IP.
+	atf_check -s exit:0 -o match:"epair" \
+	    sh -c "jexec ${jname} ifconfig -l"
+	atf_check -s exit:0 -o match:"192.0.2.20" \
+	    sh -c "jexec ${jname} ifconfig"
+
+	atf_check -s exit:0 -e ignore -o ignore "${bin}" delete --force "${cid}"
+
+	# The host-side epair must be gone: no net increase over the baseline.
+	after=$(ifconfig -l | tr ' ' '\n' | grep -c '^epair')
+	if [ "${after}" -gt "${before}" ]; then
+		atf_fail "epair leaked: before=${before} after=${after}"
+	fi
+}
+vnet_epair_wired_and_cleaned_cleanup()
+{
+	local j e
+	for j in $(jls -q name 2>/dev/null | grep '^ocifbsd-'); do
+		jail -r "${j}" 2>/dev/null || true
+	done
+	# Destroy any ocifbsd-created epairs left by a failed run.
+	for e in $(ifconfig -l | tr ' ' '\n' | grep '^epair'); do
+		ifconfig "${e}" destroy 2>/dev/null || true
+	done
+	rm -f /var/run/ocifbsd/*.epair 2>/dev/null || true
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case create_start_kill_delete
@@ -417,4 +485,5 @@ atf_init_test_cases()
 	atf_add_test_case rmi_refuses_in_use
 	atf_add_test_case readonly_nosuid_root
 	atf_add_test_case rctl_limits_applied_and_cleaned
+	atf_add_test_case vnet_epair_wired_and_cleaned
 }

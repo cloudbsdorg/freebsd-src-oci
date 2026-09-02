@@ -180,6 +180,8 @@ bool	 epair_exists(const char *epair);
  * VNET management for jails
  */
 int	 vnet_create_jail(const char *jail_name, struct vnet_config *config);
+int	 vnet_wire_jail(int jid, const char *ip4cidr, const char *gw4,
+	     const char *bridge, char **out_side_a);
 int	 vnet_delete_jail(const char *jail_name);
 int	 vnet_attach_interface(const char *jail_name, const char *iface);
 int	 vnet_detach_interface(const char *jail_name, const char *iface);

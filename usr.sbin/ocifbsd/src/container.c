@@ -54,6 +54,7 @@
 
 #include "ocifbsd.h"
 #include "network/netcfg.h"
+#include "network/network.h"
 #include "security/rctl.h"
 
 /* setproctitle(3) is in <libutil.h> on FreeBSD but the declaration is
@@ -385,6 +386,94 @@ static void
 container_jail_name(const struct ocifbsd_container *c, char *buf, size_t len)
 {
 	snprintf(buf, len, "ocifbsd-%.12s", c->id != NULL ? c->id : "");
+}
+
+/*
+ * Path of the sidecar that records the host-side epair name for a VNET
+ * container, so container_delete can destroy it (the kernel does not reclaim
+ * the host side when the jail is removed). Lives next to the other per-id
+ * state under OCIFBSD_STATE_DIR.
+ */
+static int
+container_epair_sidecar(const struct ocifbsd_container *c, char *buf,
+    size_t len)
+{
+	if (c == NULL || c->id == NULL)
+		return (-1);
+	if ((size_t)snprintf(buf, len, "%s/%s.epair", OCIFBSD_STATE_DIR,
+	    c->id) >= len)
+		return (-1);
+	return (0);
+}
+
+/*
+ * Set up VNET connectivity for a container: when the bundle requests
+ * freebsd.vnet, create an epair, move its peer into the jail, and configure
+ * the container's first IPv4 address and default gateway inside the jail. The
+ * host-side interface name is persisted so it can be destroyed on delete.
+ * Best-effort: a non-VNET container is a no-op, and a setup failure warns
+ * rather than aborting the start.
+ */
+static void
+setup_container_network(const struct ocifbsd_container *c)
+{
+	const struct oci_freebsd *fb;
+	const char *ip = NULL, *gw = NULL;
+	char *side_a = NULL;
+	char path[PATH_MAX];
+	FILE *f;
+
+	if (c == NULL || c->spec == NULL || c->spec->freebsd == NULL)
+		return;
+	fb = c->spec->freebsd;
+	if (!fb->vnet)
+		return;
+	if (fb->n_ip4 > 0)
+		ip = fb->ip4[0];
+	if (fb->n_default_gateway4 > 0)
+		gw = fb->default_gateway4[0];
+
+	if (vnet_wire_jail(c->jid, ip, gw, NULL, &side_a) != 0) {
+		fprintf(stderr, "warning: VNET setup failed for %s; the "
+		    "container has an isolated network stack\n", c->id);
+		return;
+	}
+
+	if (container_epair_sidecar(c, path, sizeof(path)) == 0) {
+		f = fopen(path, "w");
+		if (f != NULL) {
+			fprintf(f, "%s\n", side_a);
+			fclose(f);
+		}
+	}
+	free(side_a);
+}
+
+/*
+ * Tear down VNET connectivity: destroy the host-side epair recorded at start.
+ * Destroying either side removes the pair (and any bridge membership). A
+ * missing sidecar (non-VNET container, or one started before this was wired)
+ * is a no-op.
+ */
+static void
+teardown_container_network(const struct ocifbsd_container *c)
+{
+	char path[PATH_MAX];
+	char line[64];
+	FILE *f;
+
+	if (container_epair_sidecar(c, path, sizeof(path)) != 0)
+		return;
+	f = fopen(path, "r");
+	if (f == NULL)
+		return;
+	if (fgets(line, sizeof(line), f) != NULL) {
+		line[strcspn(line, " \t\r\n")] = '\0';
+		if (line[0] != '\0')
+			(void)epair_delete(line);
+	}
+	fclose(f);
+	(void)unlink(path);
 }
 
 /*
@@ -1136,6 +1225,12 @@ container_start(struct ocifbsd_container *c)
 	apply_resource_limits(c);
 
 	/*
+	 * Establish VNET connectivity (epair into the jail + address) for
+	 * bundles that request it, before the init process attaches.
+	 */
+	setup_container_network(c);
+
+	/*
 	 * Host-side mounts into rootfs before the init process attaches.
 	 * Failures of individual mounts are warned; only ENOMEM from
 	 * tracking aborts start.
@@ -1605,6 +1700,13 @@ container_delete(struct ocifbsd_container *c)
 		container_jail_name(c, jname, sizeof(jname));
 		(void)rctl_remove_rules(jname);
 	}
+
+	/*
+	 * Destroy the host-side epair for a VNET container. The jail removal
+	 * above reclaimed the in-jail peer, but the host side survives and would
+	 * otherwise leak (eventually exhausting interface slots).
+	 */
+	teardown_container_network(c);
 
 	/*
 	 * Tear down the read-only/nosuid root overlay, if any, now that the jail
