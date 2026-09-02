@@ -65,6 +65,28 @@
 #define CNI_BIN_DIR	"/opt/cni/bin"
 
 /*
+ * The CNI config and plugin directories default to the standard locations but
+ * can be overridden via OCIFBSD_CNI_CONF_DIR / OCIFBSD_CNI_BIN_DIR — the same
+ * open-default-plus-override pattern as OCIFBSD_DATA_DIR, which also lets the
+ * test suite point at temporary directories instead of /etc and /opt.
+ */
+static const char *
+cni_conf_dir(void)
+{
+	const char *e = getenv("OCIFBSD_CNI_CONF_DIR");
+
+	return (e != NULL && e[0] != '\0') ? e : CNI_CONF_DIR;
+}
+
+static const char *
+cni_bin_dir(void)
+{
+	const char *e = getenv("OCIFBSD_CNI_BIN_DIR");
+
+	return (e != NULL && e[0] != '\0') ? e : CNI_BIN_DIR;
+}
+
+/*
  * CNI result structure
  */
 struct cni_result {
@@ -161,7 +183,7 @@ cni_find_config(const char *network_name, struct cni_config **config)
 	char path[PATH_MAX];
 	int ret = -1;
 
-	dir = opendir(CNI_CONF_DIR);
+	dir = opendir(cni_conf_dir());
 	if (dir == NULL)
 		return (-1);
 
@@ -169,7 +191,7 @@ cni_find_config(const char *network_name, struct cni_config **config)
 		if (ent->d_type != DT_REG)
 			continue;
 
-		snprintf(path, sizeof(path), "%s/%s", CNI_CONF_DIR, ent->d_name);
+		snprintf(path, sizeof(path), "%s/%s", cni_conf_dir(), ent->d_name);
 
 		struct cni_config *cfg;
 		if (cni_parse_config(path, &cfg) == 0) {
@@ -204,14 +226,14 @@ cni_find_config(const char *network_name, struct cni_config **config)
  */
 static int
 cni_call_plugin(const char *plugin, int argc, const char **argv,
-    char **output)
+    char **env, int nenv, const char *stdin_json, char **output)
 {
 	pid_t pid;
 	int status;
 	int pipefd[2];
 	char *cmd;
 
-	if (asprintf(&cmd, "%s/%s", CNI_BIN_DIR, plugin) == -1)
+	if (asprintf(&cmd, "%s/%s", cni_bin_dir(), plugin) == -1)
 		return (-1);
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pipefd) != 0)
@@ -227,8 +249,25 @@ cni_call_plugin(const char *plugin, int argc, const char **argv,
 	if (pid == 0) {
 		/* Child */
 		close(pipefd[0]);
+		/*
+		 * The plugin reads its network config from stdin and writes its
+		 * result to stdout; wire both to our socketpair end (it is
+		 * full-duplex). Previously only stdin was redirected and the
+		 * result was lost to the inherited stdout.
+		 */
 		dup2(pipefd[1], STDIN_FILENO);
+		dup2(pipefd[1], STDOUT_FILENO);
 		close(pipefd[1]);
+
+		/*
+		 * Export the CNI_* variables the plugin requires. putenv keeps
+		 * the "K=V" string; env[] outlives this pre-exec window.
+		 * Previously the env was built by the caller and never passed
+		 * here, so plugins ran with no CNI_COMMAND and could not work.
+		 */
+		for (int i = 0; i < nenv; i++)
+			if (env != NULL && env[i] != NULL)
+				putenv(env[i]);
 
 		/* Build argument list */
 		char **args = calloc(argc + 2, sizeof(char *));
@@ -241,8 +280,24 @@ cni_call_plugin(const char *plugin, int argc, const char **argv,
 		_exit(127);
 	}
 
-	/* Parent */
+	/* Parent — pipefd[0] is our end of the socketpair. */
 	close(pipefd[1]);
+
+	/*
+	 * Send the network configuration to the plugin's stdin, then signal
+	 * EOF (SHUT_WR) so it stops reading and produces its result.
+	 */
+	if (stdin_json != NULL) {
+		size_t off = 0, len = strlen(stdin_json);
+		while (off < len) {
+			ssize_t w = write(pipefd[0], stdin_json + off,
+			    len - off);
+			if (w <= 0)
+				break;
+			off += (size_t)w;
+		}
+	}
+	shutdown(pipefd[0], SHUT_WR);
 
 	/* Read output */
 	char buf[4096];
@@ -286,17 +341,18 @@ cni_call_plugin(const char *plugin, int argc, const char **argv,
  * Build CNI environment for plugin
  */
 static int
-cni_build_env(const char *container_id, const char *network_ns,
-    const char *interface_name, char ***env, int *nenv)
+cni_build_env(const char *command, const char *container_id,
+    const char *network_ns, const char *interface_name, char ***env,
+    int *nenv)
 {
 	char **e = NULL;
 	int n = 0;
 
-	/* CNI_COMMAND */
+	/* CNI_COMMAND (ADD | DEL | CHECK | VERSION) */
 	void *_new_c1 = realloc(e, (n + 1) * sizeof(char *));
 	if (_new_c1 == NULL) goto cni_alloc_fail;
 	e = _new_c1;
-	asprintf(&e[n++], "CNI_COMMAND=ADD");
+	asprintf(&e[n++], "CNI_COMMAND=%s", command);
 
 	/* CNI_CONTAINERID */
 	void *_new_c2 = realloc(e, (n + 1) * sizeof(char *));
@@ -320,7 +376,7 @@ cni_build_env(const char *container_id, const char *network_ns,
 	void *_new_c5 = realloc(e, (n + 1) * sizeof(char *));
 	if (_new_c5 == NULL) goto cni_alloc_fail;
 	e = _new_c5;
-	asprintf(&e[n++], "CNI_PATH=%s", CNI_BIN_DIR);
+	asprintf(&e[n++], "CNI_PATH=%s", cni_bin_dir());
 
 	*env = e;
 	*nenv = n;
@@ -353,12 +409,21 @@ cni_add(const char *network_name, const char *container_id,
 	char **env;
 	int nenv;
 	char *netns = "/var/run/netns/default";
+	char *netconf = NULL;
 
-	cni_build_env(container_id, netns, interface_name, &env, &nenv);
+	cni_build_env("ADD", container_id, netns, interface_name, &env, &nenv);
+
+	/* Minimal netconf on the plugin's stdin (cniVersion/name/type). */
+	if (asprintf(&netconf,
+	    "{\"cniVersion\":\"0.4.0\",\"name\":\"%s\",\"type\":\"%s\"}",
+	    config->network_name ? config->network_name : network_name,
+	    config->type ? config->type : "") == -1)
+		netconf = NULL;
 
 	/* Call plugin */
 	char *output = NULL;
-	ret = cni_call_plugin(config->type, 0, NULL, &output);
+	ret = cni_call_plugin(config->type, 0, NULL, env, nenv, netconf,
+	    &output);
 
 	/* Parse and return result */
 	if (ret == 0 && result_json && output) {
@@ -368,6 +433,7 @@ cni_add(const char *network_name, const char *container_id,
 	}
 
 	/* Clean up */
+	free(netconf);
 	for (int i = 0; i < nenv; i++)
 		free(env[i]);
 	free(env);
@@ -394,19 +460,25 @@ cni_del(const char *network_name, const char *container_id,
 		return (-1);
 	}
 
-	/* Build environment */
+	/* Build the full DEL environment (not just CNI_COMMAND). */
 	char **env;
 	int nenv;
+	char *netns = "/var/run/netns/default";
+	char *netconf = NULL;
 
-	/* Set DEL command */
-	env = calloc(1, sizeof(char *));
-	asprintf(&env[0], "CNI_COMMAND=DEL");
-	nenv = 1;
+	cni_build_env("DEL", container_id, netns, interface_name, &env, &nenv);
+
+	if (asprintf(&netconf,
+	    "{\"cniVersion\":\"0.4.0\",\"name\":\"%s\",\"type\":\"%s\"}",
+	    config->network_name ? config->network_name : network_name,
+	    config->type ? config->type : "") == -1)
+		netconf = NULL;
 
 	/* Call plugin */
-	ret = cni_call_plugin(config->type, 0, NULL, NULL);
+	ret = cni_call_plugin(config->type, 0, NULL, env, nenv, netconf, NULL);
 
 	/* Clean up */
+	free(netconf);
 	for (int i = 0; i < nenv; i++)
 		free(env[i]);
 	free(env);
@@ -430,13 +502,22 @@ cni_check(const char *network_name)
 		return (-1);
 	}
 
-	/* Set CHECK command */
+	/* Build the full CHECK environment. */
 	char **env;
-	env = calloc(1, sizeof(char *));
-	asprintf(&env[0], "CNI_COMMAND=CHECK");
-	int nenv = 1;
+	int nenv;
+	char *netconf = NULL;
 
-	ret = cni_call_plugin(config->type, 0, NULL, NULL);
+	cni_build_env("CHECK", "", "/var/run/netns/default", "eth0", &env,
+	    &nenv);
+
+	if (asprintf(&netconf,
+	    "{\"cniVersion\":\"0.4.0\",\"name\":\"%s\",\"type\":\"%s\"}",
+	    config->network_name ? config->network_name : network_name,
+	    config->type ? config->type : "") == -1)
+		netconf = NULL;
+
+	ret = cni_call_plugin(config->type, 0, NULL, env, nenv, netconf, NULL);
+	free(netconf);
 
 	for (int i = 0; i < nenv; i++)
 		free(env[i]);
@@ -454,5 +535,13 @@ cni_check(const char *network_name)
 static int
 cni_version(const char *plugin, char **version_json)
 {
-	return (cni_call_plugin(plugin, 0, NULL, version_json));
+	char *env[1];
+	int ret;
+
+	/* VERSION only needs CNI_COMMAND; no netconf on stdin. */
+	if (asprintf(&env[0], "CNI_COMMAND=VERSION") == -1)
+		return (-1);
+	ret = cni_call_plugin(plugin, 0, NULL, env, 1, NULL, version_json);
+	free(env[0]);
+	return (ret);
 }
