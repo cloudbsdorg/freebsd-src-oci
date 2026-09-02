@@ -2,7 +2,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2026 REVYTECH, Inc.
- * Copyright (c) 2026 REVYTECH, Inc.
  *
  * Pure OCI/Docker whiteout name helpers (no filesystem).
  */

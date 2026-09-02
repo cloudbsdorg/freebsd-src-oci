@@ -1,6 +1,5 @@
 /*-
  * Copyright (c) 2026 REVYTECH, Inc.
- * Copyright (c) 2026 REVYTECH, Inc.
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * This software was developed by REVYTECH, Inc.
