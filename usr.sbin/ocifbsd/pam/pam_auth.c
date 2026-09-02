@@ -462,6 +462,67 @@ user_in_group(const char *username, const char *groupname)
 }
 
 /*
+ * PAM conversation that answers every password prompt with a fixed password.
+ * Used by pam_auth_password() to drive the system PAM stack non-interactively.
+ */
+struct pam_pw_appdata {
+	const char *password;
+};
+
+static int
+pam_pw_conv(int nmsg, const struct pam_message **msg,
+    struct pam_response **resp, void *appdata_ptr)
+{
+	struct pam_pw_appdata *ad = appdata_ptr;
+	struct pam_response *r;
+	int i;
+
+	if (nmsg <= 0 || nmsg > PAM_MAX_NUM_MSG || msg == NULL)
+		return (PAM_CONV_ERR);
+	r = calloc((size_t)nmsg, sizeof(*r));
+	if (r == NULL)
+		return (PAM_BUF_ERR);
+	for (i = 0; i < nmsg; i++) {
+		if (msg[i]->msg_style == PAM_PROMPT_ECHO_OFF ||
+		    msg[i]->msg_style == PAM_PROMPT_ECHO_ON)
+			r[i].resp = strdup(ad->password != NULL ?
+			    ad->password : "");
+	}
+	*resp = r;
+	return (PAM_SUCCESS);
+}
+
+/*
+ * Verify a username/password against the system PAM stack (service "ocifbsd",
+ * falling back to PAM's "other"). Previously this was declared and called but
+ * never defined, so pam_ocifbsd.so.1 carried an unresolved symbol and the whole
+ * interactive-auth path failed. Returns PAM_SUCCESS on success.
+ */
+int
+pam_auth_password(const char *username, const char *password)
+{
+	struct pam_pw_appdata ad;
+	struct pam_conv conv;
+	pam_handle_t *pamh = NULL;
+	int r;
+
+	if (username == NULL || password == NULL)
+		return (PAM_AUTH_ERR);
+	ad.password = password;
+	conv.conv = pam_pw_conv;
+	conv.appdata_ptr = &ad;
+
+	r = pam_start("ocifbsd", username, &conv, &pamh);
+	if (r != PAM_SUCCESS)
+		return (r);
+	r = pam_authenticate(pamh, 0);
+	if (r == PAM_SUCCESS)
+		r = pam_acct_mgmt(pamh, 0);
+	pam_end(pamh, r);
+	return (r);
+}
+
+/*
  * Authenticate user with PAM
  */
 int
@@ -526,7 +587,11 @@ pam_authenticate_user(struct pam_auth_request *req,
             } else {
                 result = PAM_AUTH_INVALID_PASS;
             }
-            pam_reset_rate_limit(req->client_addr ? req->client_addr : "localhost");
+            /*
+             * Do NOT reset the per-IP rate limiter on failure — that deleted
+             * the attacker's counter and made brute force from one address
+             * un-throttled. The limiter is reset only on success (below).
+             */
         } else {
             /* Success - reset failed count */
             user->failed_count = 0;
@@ -1030,10 +1095,18 @@ pam_verify_jwt(const char *jwt, char **username, uint32_t *perms, time_t *exp)
         return (-1);
     }
 
-    /* Decode payload */
-    if (base64_decode(payload, payload_dec, sizeof(payload_dec)) <= 0) {
-        free(token_copy);
-        return (-1);
+    /* Decode payload and NUL-terminate it: base64_decode returns a byte
+     * count and does NOT terminate, so the strstr() claim scans below would
+     * run past the decoded data into uninitialized stack (OOB read / info
+     * leak). Leave room for the terminator. */
+    {
+        int plen = base64_decode(payload, payload_dec,
+            sizeof(payload_dec) - 1);
+        if (plen <= 0) {
+            free(token_copy);
+            return (-1);
+        }
+        payload_dec[plen] = '\0';
     }
 
     /* Parse claims */

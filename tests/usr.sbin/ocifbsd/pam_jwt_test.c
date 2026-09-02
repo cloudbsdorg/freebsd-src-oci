@@ -18,20 +18,10 @@
 static void set_secret(void) { setenv("OCIFBSD_JWT_SECRET", "unit-test-secret", 1); }
 
 /*
- * pam_auth.c calls pam_auth_password() (the system/password backend), which is
- * resolved by the host binary when the PAM module is dlopen'd. It is only used
- * on the password path — never by the JWT verification under test — so a stub
- * satisfies the link.
+ * pam_auth_password() is now defined in pam_auth.c (it delegates to the system
+ * PAM stack). It is only used on the interactive-password path, never by the
+ * JWT verification under test, so no stub is needed here.
  */
-int pam_auth_password(const char *username, const char *password);
-int
-pam_auth_password(const char *username, const char *password)
-{
-	(void)username;
-	(void)password;
-	return (-1);
-}
-
 #include "pam/pam_auth.c"
 
 /* Build a token: header.payload.sig, sig = base64(HMAC(secret, payload_b64)). */
