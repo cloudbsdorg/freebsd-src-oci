@@ -1,0 +1,6 @@
+# ocifbsd restart policy — primary node (fb16-1): shared stores + web
+# <name>      <image>                 <ip4cidr>       <policy>
+redis         local/redis:7           10.88.0.10/24   always
+mariadb       local/mariadb:latest    10.88.0.11/24   always
+wordpress     local/wordpress:latest  10.88.0.12/24   always
+nginx         local/nginx:latest      10.88.0.13/24   always
