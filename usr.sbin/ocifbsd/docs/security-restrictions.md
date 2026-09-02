@@ -127,11 +127,14 @@ mismatched keys cannot exchange messages, so the whole cluster must use one key.
 | Restriction | Field | FreeBSD status |
 |-------------|-------|----------------|
 | Resource limits | `process.rlimits` | Enforced (`setrlimit`) |
-| Jail-wide limits | `freebsd.rctl_rules` | Enforced (`rctl`, needs RACCT) |
-| Masked paths | `linux.maskedPaths` | Enforced (empty overlay) |
-| Network isolation | `freebsd.vnet` | Enforced (VNET) |
+| Jail-wide limits (OCI) | `linux.resources` | Enforced (`rctl`, needs `kern.racct.enable=1`; else warns) |
+| Jail-wide limits (native) | `freebsd.rctl_rules` | Enforced (`rctl`, needs RACCT) |
+| MAC label | `freebsd.macLabel` | Enforced (`mac_set_proc` on init, needs a loaded labeling policy; else warns) |
+| Network isolation | `freebsd.vnet` | Enforced (VNET: epair moved into the jail, IP configured, torn down on delete) |
+| External reachability | `freebsd.bridge` | Enforced (host epair added to the named `if_bridge(4)`) |
 | No new privileges | `process.noNewPrivileges` | Enforced (nosuid nullfs root) |
 | Read-only root | `root.readonly` | Enforced (read-only nullfs root) |
-| Read-only sub-paths | `linux.readonlyPaths` | Parsed (per-path overlay pending) |
+| Read-only sub-paths | `linux.readonlyPaths` | Parsed only — warns as unenforced (per-path overlay pending) |
+| Masked paths | `linux.maskedPaths` | Parsed only — warns as unenforced |
 
 Leave a field out and that restriction is simply off — the default is open.
