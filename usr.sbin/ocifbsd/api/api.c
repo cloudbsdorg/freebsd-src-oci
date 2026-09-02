@@ -135,15 +135,17 @@ api_shutdown(void)
     pthread_mutex_lock(&api_lock);
     
     if (server != NULL) {
+        /* Destroy the mutex BEFORE freeing the struct it lives in — the
+         * original order freed server and then dereferenced it (use-after-
+         * free / NULL deref). */
+        pthread_mutex_destroy(&server->lock);
         if (server->workers != NULL) {
             free(server->workers);
         }
         free(server);
         server = NULL;
     }
-    
-    pthread_mutex_destroy(&server->lock);
-    
+
     __sync_fetch_and_add(&api_initialized, 0);
     pthread_mutex_unlock(&api_lock);
     
@@ -699,7 +701,7 @@ api_auth_middleware(struct api_request *req, struct api_response *resp)
      * setting req->user on success.
      */
     (void)token;
-    resp->status = 401;
+    resp->status_code = 401;
     return (-1);
 }
 
