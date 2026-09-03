@@ -955,18 +955,45 @@ container_unmount_all(struct ocifbsd_container *c)
 static int
 setup_process_env(struct ocifbsd_container *c)
 {
+	extern char **environ;
+	static const char defpath[] =
+	    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 	struct oci_runtime_spec *spec = c->spec;
-	char **env;
-	int i;
+	char **src = (spec != NULL) ? spec->process.env : NULL;
+	char **envp;
+	int n = 0, i, k = 0;
+	bool have_path = false;
 
-	if (spec == NULL || spec->process.env == NULL)
-		return (0);
-
-	env = spec->process.env;
-	for (i = 0; env[i] != NULL; i++) {
-		putenv(env[i]);
+	/*
+	 * Replace the inherited environment ENTIRELY rather than overlaying the
+	 * spec on top of it. The old putenv()-onto-environ approach leaked the
+	 * ocifbsd invoker's whole environment (registry credentials, API tokens,
+	 * proxy vars) into the container, readable by anything running inside it;
+	 * OCI requires the process env to be exactly process.env. We run in the
+	 * forked child just before exec, so building a fresh environ is safe.
+	 * A default PATH is supplied when the spec omits one so that execvp of a
+	 * bare program name still resolves.
+	 */
+	if (src != NULL) {
+		for (i = 0; src[i] != NULL; i++) {
+			n++;
+			if (strncmp(src[i], "PATH=", 5) == 0)
+				have_path = true;
+		}
 	}
 
+	envp = calloc((size_t)n + 2, sizeof(char *));	/* +default PATH, +NULL */
+	if (envp == NULL)
+		return (-1);
+	if (src != NULL) {
+		for (i = 0; src[i] != NULL; i++)
+			envp[k++] = src[i];
+	}
+	if (!have_path)
+		envp[k++] = __DECONST(char *, defpath);
+	envp[k] = NULL;
+
+	environ = envp;
 	return (0);
 }
 
