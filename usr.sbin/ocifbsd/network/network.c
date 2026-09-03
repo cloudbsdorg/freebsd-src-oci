@@ -644,7 +644,16 @@ epair_exists(const char *epair)
 /*
  * IP address management
  */
-static uint32_t ipam_allocated = 0;
+/*
+ * Allocation bitmap indexed by an address's offset within its range. The old
+ * code overloaded a single uint32_t as BOTH the next-address cursor AND a
+ * 32-bit bitmask keyed by (addr % 32), so allocations aliased every 32
+ * addresses and 1 << 31 was undefined behaviour. This is a correct in-process
+ * allocator (unsigned shifts, one bit per address); persisting the bitmap in
+ * the network state across CLI invocations remains a follow-up.
+ */
+#define IPAM_MAX_BITS	65536
+static uint8_t ipam_bitmap[IPAM_MAX_BITS / 8];
 
 int
 ipam_alloc(struct ipam_range *range, struct in_addr *addr)
@@ -657,20 +666,17 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 	start = ntohl(range->start.s_addr);
 	end = ntohl(range->end.s_addr);
 
-	/* Skip gateway (first address) */
-	if (ipam_allocated == 0)
-		ipam_allocated = start + 1;
+	/* Skip the gateway (first usable address in the range). */
+	for (current = start + 1; current <= end; current++) {
+		uint32_t idx = current - start;
 
-	/* Find next available address */
-	current = ipam_allocated;
-	while (current <= end) {
-		if ((ipam_allocated & (1 << (current % 32))) == 0) {
-			/* Not allocated, use it */
-			ipam_allocated |= (1 << (current % 32));
+		if (idx >= IPAM_MAX_BITS)
+			break;
+		if ((ipam_bitmap[idx / 8] & (1u << (idx % 8))) == 0) {
+			ipam_bitmap[idx / 8] |= (uint8_t)(1u << (idx % 8));
 			addr->s_addr = htonl(current);
 			return (0);
 		}
-		current++;
 	}
 
 	errno = ENOSPC;
@@ -678,15 +684,20 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 }
 
 int
-ipam_release(struct ipam_range *range __unused, struct in_addr *addr)
+ipam_release(struct ipam_range *range, struct in_addr *addr)
 {
-	uint32_t ip;
+	uint32_t start, ip, idx;
 
-	if (addr == NULL)
+	if (range == NULL || addr == NULL)
 		return (-1);
 
+	start = ntohl(range->start.s_addr);
 	ip = ntohl(addr->s_addr);
-	ipam_allocated &= ~(1 << (ip % 32));
+	if (ip < start)
+		return (-1);
+	idx = ip - start;
+	if (idx < IPAM_MAX_BITS)
+		ipam_bitmap[idx / 8] &= (uint8_t)~(1u << (idx % 8));
 
 	return (0);
 }
@@ -700,7 +711,17 @@ network_create(struct network_config *config)
 	char bridge_name[64];
 	int ret = -1;
 
-	if (config == NULL) {
+	if (config == NULL || config->name == NULL || config->id == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+	/*
+	 * config->id becomes a path component of the state file created as root;
+	 * reject anything that could escape the state dir (net_id_is_valid also
+	 * covers network_delete/get/stats). Without this, an id of "../../etc/x"
+	 * would write /etc/x.json as root.
+	 */
+	if (!net_id_is_valid(config->id)) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -743,17 +764,33 @@ network_create(struct network_config *config)
 
 	FILE *f = fopen(state_file, "w");
 	if (f) {
+		/*
+		 * Escape every string field: these values (name/driver/subnet/
+		 * gateway) are caller-supplied and were previously written raw, so
+		 * a '"' or newline could inject extra JSON keys (e.g. a second
+		 * "bridge") that network_delete would then act on as root.
+		 */
+		char e_name[256], e_id[256], e_driver[128];
+		char e_bridge[128], e_subnet[128], e_gateway[128];
+
+		ocifbsd_json_escape(config->name, e_name, sizeof(e_name));
+		ocifbsd_json_escape(config->id, e_id, sizeof(e_id));
+		ocifbsd_json_escape(config->driver ? config->driver : "bridge",
+		    e_driver, sizeof(e_driver));
+		ocifbsd_json_escape(bridge_name, e_bridge, sizeof(e_bridge));
+		ocifbsd_json_escape(config->subnet ? config->subnet : "",
+		    e_subnet, sizeof(e_subnet));
+		ocifbsd_json_escape(config->gateway ? config->gateway : "",
+		    e_gateway, sizeof(e_gateway));
+
 		fprintf(f, "{\n");
-		fprintf(f, "  \"name\": \"%s\",\n", config->name);
-		fprintf(f, "  \"id\": \"%s\",\n", config->id);
+		fprintf(f, "  \"name\": \"%s\",\n", e_name);
+		fprintf(f, "  \"id\": \"%s\",\n", e_id);
 		fprintf(f, "  \"type\": %d,\n", config->type);
-		fprintf(f, "  \"driver\": \"%s\",\n",
-		    config->driver ? config->driver : "bridge");
-		fprintf(f, "  \"bridge\": \"%s\",\n", bridge_name);
-		fprintf(f, "  \"subnet\": \"%s\",\n",
-		    config->subnet ? config->subnet : "");
-		fprintf(f, "  \"gateway\": \"%s\",\n",
-		    config->gateway ? config->gateway : "");
+		fprintf(f, "  \"driver\": \"%s\",\n", e_driver);
+		fprintf(f, "  \"bridge\": \"%s\",\n", e_bridge);
+		fprintf(f, "  \"subnet\": \"%s\",\n", e_subnet);
+		fprintf(f, "  \"gateway\": \"%s\",\n", e_gateway);
 		fprintf(f, "  \"internal\": %s,\n",
 		    config->internal ? "true" : "false");
 		fprintf(f, "  \"dns_servers\": []\n");
@@ -869,10 +906,22 @@ network_connect(const char *network_id, const char *container_id,
 	endpoint->id = uuid_str;
 	endpoint->network_id = strdup(network_id);
 	endpoint->container_id = strdup(container_id);
-	endpoint->interface_name = strdup("eth0");
+	endpoint->interface_name = NULL;
 
 	/* Create epair */
-	if (epair_create("ocifbsd", &side_a, &side_b) == 0) {
+	if (epair_create("ocifbsd", &side_a, &side_b) != 0) {
+		/*
+		 * Fail closed: the previous code returned 0 with interface_name
+		 * "eth0" (a device that does not exist), so the caller believed
+		 * the container was wired when it was not.
+		 */
+		free(endpoint->id);
+		free(endpoint->network_id);
+		free(endpoint->container_id);
+		free(endpoint);
+		return (-1);
+	}
+	{
 		/* Add host side to bridge */
 		bridge_add_interface(bridge_name, side_a);
 
@@ -916,8 +965,16 @@ network_disconnect(const char *network_id, const char *container_id)
 	 * should also remove the endpoint from the bridge and
 	 * destroy the epair interface.
 	 */
-	(void)network_id;	/* unused for now */
-	(void)container_id;	/* unused for now */
+	/*
+	 * Both ids are interpolated into a path unlinked as root; validate them
+	 * (network_connect validates network_id but this path was unguarded, so
+	 * a container_id of "../../../etc/cron.d/x" would unlink outside the
+	 * state dir). net_id_is_valid enforces a safe single component.
+	 */
+	if (!net_id_is_valid(network_id) || !net_id_is_valid(container_id)) {
+		errno = EINVAL;
+		return (-1);
+	}
 
 	snprintf(state_file, sizeof(state_file),
 	    "%s/endpoint_%s_%s.json",
@@ -1299,7 +1356,15 @@ nat_disable(const char *jail_name)
 		unlink("/etc/pf.conf.ocifbsd.tmp");
 	}
 
-	return (run_cmd(3, "pfctl", "-f", "/etc/pf.conf.ocifbsd"));
+	/*
+	 * Reload the MAIN ruleset, never the ocifbsd fragment. Loading
+	 * /etc/pf.conf.ocifbsd as the live ruleset (as this used to) replaced the
+	 * host's entire firewall policy with just the NAT snippet — dropping every
+	 * other rule and potentially exposing the host. (The enable/disable pair
+	 * should really use a pf anchor rather than editing files under /etc; that
+	 * rework is tracked separately.)
+	 */
+	return (run_cmd(3, "pfctl", "-f", "/etc/pf.conf"));
 }
 
 int
@@ -1505,6 +1570,16 @@ dns_set_resolver(const char *jail_name, char **servers, int nservers)
 	char resolv_conf[PATH_MAX];
 	FILE *f;
 	int i;
+
+	/*
+	 * jail_name is interpolated into a path that is mkdirp'd and written as
+	 * root; a value like "../../../../etc/ocifbsd" would create/write outside
+	 * the jails dir. Require a safe single component.
+	 */
+	if (!net_id_is_valid(jail_name)) {
+		errno = EINVAL;
+		return (-1);
+	}
 
 	snprintf(resolv_conf, sizeof(resolv_conf),
 	    "/var/run/ocifbsd/jails/%s/etc/resolv.conf", jail_name);
