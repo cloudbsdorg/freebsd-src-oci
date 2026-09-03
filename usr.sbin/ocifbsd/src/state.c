@@ -56,7 +56,7 @@ extern bool pid_in_jail(pid_t pid, int jid);
  * OCIFBSD_DATA_DIR for the image store), which is useful for tests and for
  * running an unprivileged, self-contained instance.
  */
-static const char *
+const char *
 state_base_dir(void)
 {
 	const char *e = getenv("OCIFBSD_STATE_DIR");

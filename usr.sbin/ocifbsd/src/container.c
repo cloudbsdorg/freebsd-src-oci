@@ -527,7 +527,7 @@ container_epair_sidecar(const struct ocifbsd_container *c, char *buf,
 {
 	if (c == NULL || c->id == NULL)
 		return (-1);
-	if ((size_t)snprintf(buf, len, "%s/%s.epair", OCIFBSD_STATE_DIR,
+	if ((size_t)snprintf(buf, len, "%s/%s.epair", state_base_dir(),
 	    c->id) >= len)
 		return (-1);
 	return (0);
@@ -1275,7 +1275,7 @@ establish_secure_rootfs(struct ocifbsd_container *c,
 	}
 
 	if ((size_t)snprintf(jailroot, sizeof(jailroot), "%s/%s.jailroot",
-	    OCIFBSD_STATE_DIR, c->id) >= sizeof(jailroot))
+	    state_base_dir(), c->id) >= sizeof(jailroot))
 		return (-1);
 	if (mkdir(jailroot, 0755) != 0 && errno != EEXIST) {
 		fprintf(stderr, "error: cannot create jail root %s: %s\n",
@@ -1464,7 +1464,7 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		char logbuf[PATH_MAX];
 
 		snprintf(logbuf, sizeof(logbuf), "%s/%s.log",
-		    OCIFBSD_STATE_DIR, c->id);
+		    state_base_dir(), c->id);
 		c->log_path = strdup(logbuf);
 	}
 
@@ -2184,7 +2184,7 @@ container_delete(struct ocifbsd_container *c)
 		char logbuf[PATH_MAX];
 
 		snprintf(logbuf, sizeof(logbuf), "%s/%s.log",
-		    OCIFBSD_STATE_DIR, c->id);
+		    state_base_dir(), c->id);
 		(void)unlink(logbuf);
 	}
 

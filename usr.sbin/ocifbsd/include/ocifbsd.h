@@ -251,6 +251,9 @@ bool	oci_path_is_safe(const char *path);
 
 /* State management */
 int	state_init(void);
+/* Base directory for all runtime state (honors $OCIFBSD_STATE_DIR); use this
+ * everywhere so state JSON, locks, epair sidecars, logs, and jailroots agree. */
+const char *state_base_dir(void);
 int	state_save(const struct ocifbsd_container *c);
 int	state_delete(const char *id);
 struct ocifbsd_container *state_load(const char *id);
