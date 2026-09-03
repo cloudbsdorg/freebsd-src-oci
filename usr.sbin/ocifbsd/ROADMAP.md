@@ -257,6 +257,47 @@ inspection. This is the client half of Phase 2.5.
 
 ---
 
+## Phase 10 — Capstone: rebuild on the new platform + retell the adventure
+
+The final proof. Once Phases 0–9 land, tear down and **reimplement both the
+single-node VM and the 3-node cluster from scratch using only the new platform**
+— the native orchestrator, the secure API, and the client tooling — with zero
+hand-SSH steps. This is the ultimate dogfood: if the platform can rebuild the
+sites that document it, from one manifest through the API, it is real.
+
+10.1 **Back up everything first** · S  — *non-negotiable, data-loss is unacceptable*
+   - Do: full logical dumps of both WordPress databases (single + cluster) and
+     the `wp-content` uploads, copied off-node and checksummed, **before**
+     touching any VM. (We lost the oci.cloudbsd.org home once by overwriting
+     without a backup — never again.)
+   - DoD: verified, restorable backups of all site data exist off-host.
+
+10.2 **Reimplement the deployments from the new tooling** · L
+   - Do: recreate the single VM and the cluster purely via
+     `ocifbsd apply -f …` against the secure API — networks, Galera, Redis
+     Cluster, web tier, proxy, all declared and reconciled, no manual bootstrap
+     or SSH plumbing. Fresh nodes, clean state.
+   - DoD: both deployments come up green from the manifest through the API alone.
+
+10.3 **Restore and verify the data** · M
+   - Do: load the backed-up databases + uploads into the rebuilt stacks; verify
+     post-for-post and page-for-page parity, session migration, and byte-for-byte
+     content correctness on both sites.
+   - DoD: the live sites are indistinguishable from before the rebuild; nothing lost.
+
+10.4 **Retell the adventure** · M
+   - Do: update the journey/blog with a fresh **adventure series** — a story for
+     **every major step** taken to build this new material: the lifecycle fix,
+     native orchestration, the secure control-plane API + RBAC, the state store,
+     the node agents, discovery/health, HA/CARP, secrets + mTLS, observability,
+     the tooling, and this from-scratch rebuild. Same warm, human voice as the
+     existing posts; grounded in real commits and real numbers. Publish to both
+     sites; keep the local-time + REVYTECH/Mark LaPointe footer.
+   - DoD: the sites carry a complete, engaging narrative of the whole journey —
+     the platform, rebuilt on itself, telling the story of how it got there.
+
+---
+
 ## Suggested execution order
 
 **Spine:** Phase 0 → 1 → 2 (build / lifecycle / native orchestration). Then the
@@ -282,3 +323,9 @@ Total scope is genuinely large (multiple XL/L items). It is best run as a series
 of focused, independently-shippable increments — each landing green tests, a
 live demo, a blog write-up, and an upstream merge — rather than one big-bang
 effort.
+
+**Phase 10 is the finale:** with the platform built, rebuild the single-node and
+cluster deployments from scratch through the new API + tooling (data backed up
+first, restored and verified after), then retell the whole journey as a fresh
+adventure series on the sites. The platform proving itself by rebuilding the very
+sites that document it — and narrating how it got there — is the closing chapter.
