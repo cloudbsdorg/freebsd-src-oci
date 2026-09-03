@@ -112,6 +112,21 @@ state_unlock(void)
 }
 
 /*
+ * A container id/name is used as a single path component of files created and
+ * opened as root under the state dir. resolve_cid() passes an unmatched CLI
+ * argument through verbatim, so reject anything that could escape the dir — a
+ * slash, or a lone "." / "..". Real ids are hex and resolved names are single
+ * components, so this rejects only hostile input.
+ */
+static bool
+state_id_is_safe(const char *id)
+{
+	return (id != NULL && id[0] != '\0' &&
+	    strchr(id, '/') == NULL &&
+	    strcmp(id, ".") != 0 && strcmp(id, "..") != 0);
+}
+
+/*
  * Get state file path for a container
  */
 static void
@@ -146,20 +161,7 @@ state_lock_container(const char *id)
 	char path[PATH_MAX];
 	int fd;
 
-	if (id == NULL || id[0] == '\0') {
-		errno = EINVAL;
-		return (-1);
-	}
-	/*
-	 * The id becomes a path component of the lock file, which is opened
-	 * O_CREAT (and chowned to the ocifbsd group) as root. resolve_cid()
-	 * passes an unmatched argument through verbatim, so a caller could hand
-	 * us "../../etc/cron.d/pwn" and have us create/chmod a file well outside
-	 * the state dir. A real container id or resolved name is a single
-	 * component; refuse anything containing a slash or a lone dot/dot-dot.
-	 */
-	if (strchr(id, '/') != NULL || strcmp(id, ".") == 0 ||
-	    strcmp(id, "..") == 0) {
+	if (!state_id_is_safe(id)) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -311,7 +313,13 @@ state_load(const char *id)
 	struct json_object *root;
 	struct ocifbsd_container *c;
 
-	if (id == NULL)
+	/*
+	 * Reject an unsafe id before it becomes a path opened as root: without
+	 * this, `ocifbsd inspect '../../etc/x'` would state_load + parse
+	 * attacker-controlled JSON from outside the state dir (the lifecycle
+	 * commands are protected by state_lock_container, but read paths are not).
+	 */
+	if (!state_id_is_safe(id))
 		return (NULL);
 
 	get_state_path(id, path, sizeof(path));
@@ -441,7 +449,7 @@ state_delete(const char *id)
 {
 	char path[PATH_MAX];
 
-	if (id == NULL) {
+	if (!state_id_is_safe(id)) {
 		errno = EINVAL;
 		return (-1);
 	}

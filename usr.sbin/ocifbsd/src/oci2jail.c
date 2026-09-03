@@ -467,23 +467,23 @@ oci_parse_config(const char *config_path)
 		spec->root.path = json_get_string(root_val, "path");
 		spec->root.readonly = json_get_bool(root_val, "readonly", false);
 	} else {
-		/* Default root to "rootfs" relative to bundle */
+		/*
+		 * Default the root to "<bundle>/rootfs", where <bundle> is the
+		 * directory containing config.json. Strip only the filename — the
+		 * previous code stripped a second path component and rebuilt from
+		 * just the last one, yielding e.g. "app/rootfs" for
+		 * "/bundles/app/config.json" and dropping the "/bundles" prefix.
+		 * Guard strdup so a NULL never reaches strrchr.
+		 */
 		char *dir = strdup(config_path);
-		char *p = strrchr(dir, '/');
-		if (p) {
-			*p = '\0';
-			/* Go up from config.json */
-			p = strrchr(dir, '/');
-			if (p) {
-				size_t len;
-				*p = '\0';
-				len = strlen(p + 1) + strlen("/rootfs") + 1;
-				spec->root.path = malloc(len);
-				if (spec->root.path != NULL)
-					snprintf(spec->root.path, len, "%s/rootfs", p + 1);
-			} else {
-				spec->root.path = strdup("rootfs");
-			}
+		char *p = (dir != NULL) ? strrchr(dir, '/') : NULL;
+		if (p != NULL) {
+			size_t len;
+			*p = '\0';			/* dir = bundle directory */
+			len = strlen(dir) + strlen("/rootfs") + 1;
+			spec->root.path = malloc(len);
+			if (spec->root.path != NULL)
+				snprintf(spec->root.path, len, "%s/rootfs", dir);
 		} else {
 			spec->root.path = strdup("rootfs");
 		}

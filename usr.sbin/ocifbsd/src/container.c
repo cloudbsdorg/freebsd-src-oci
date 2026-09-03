@@ -2203,17 +2203,35 @@ container_wait(struct ocifbsd_container *c)
 		return (-1);
 	}
 
-	/* Wait for init process to exit */
+	/*
+	 * Wait for init to exit. If this process is init's parent (started it in
+	 * this same invocation), waitpid reaps it and yields the real exit code.
+	 * But a container started by an earlier CLI process has had its init
+	 * reparented to init(8): waitpid then fails with ECHILD, and the old code
+	 * silently returned a stale exit_code while leaving the state RUNNING.
+	 * Fall back to polling jail membership (as container_stop does) so we
+	 * actually block until init is gone, then record the stopped state.
+	 */
 	if (waitpid(c->init_pid, &status, 0) > 0) {
 		if (WIFEXITED(status)) {
 			c->exit_code = WEXITSTATUS(status);
 		} else if (WIFSIGNALED(status)) {
 			c->exit_code = 128 + WTERMSIG(status);
 		}
-		c->state = OCIFBSD_STATE_STOPPED;
-		c->finished_at = time(NULL);
-		state_save(c);
+	} else if (errno == ECHILD) {
+		struct timespec ts = { 0, 200 * 1000 * 1000 }; /* 200ms */
+
+		while (pid_in_jail(c->init_pid, c->jid))
+			nanosleep(&ts, NULL);
+		/* exit code is unobservable for a non-child; leave it as recorded */
+	} else {
+		return (-1);
 	}
+
+	c->state = OCIFBSD_STATE_STOPPED;
+	c->finished_at = time(NULL);
+	c->init_pid = 0;
+	state_save(c);
 
 	return (c->exit_code);
 }
