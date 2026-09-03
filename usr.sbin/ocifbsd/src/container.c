@@ -76,6 +76,63 @@ extern int putenv(char *string);
  */
 extern bool pid_in_jail(pid_t pid, int jid);
 
+/*
+ * Container lifecycle as an explicit state machine.
+ *
+ * The precondition for each lifecycle operation used to be re-derived inline in
+ * every function ("if (c->state != CREATED) ..."), so the rules were smeared
+ * across the file and easy to let drift apart. Collect them in one transition
+ * table keyed by operation: each row is the set of states the operation may run
+ * from (a bitmask over the OCIFBSD_STATE_* enum) and the errno to report when it
+ * cannot. container_precondition() is the single gate every simple-precondition
+ * operation calls. Operations with non-reject semantics (kill/stop/delete treat
+ * some states as a no-op or delegate) keep their bespoke logic and are omitted
+ * here deliberately.
+ */
+enum container_op {
+	COP_START = 0,
+	COP_RECONFIGURE,
+	COP_PAUSE,
+	COP_RESUME,
+	COP_EXEC,
+	COP_COUNT
+};
+
+#define OCIFBSD_STATE_BIT(s)	(1u << (unsigned)(s))
+
+static const struct {
+	const char	*verb;
+	unsigned	 allowed;	/* bitmask of OCIFBSD_STATE_* */
+	int		 reject_errno;
+} container_lifecycle_rules[COP_COUNT] = {
+	[COP_START]	  = { "start",   OCIFBSD_STATE_BIT(OCIFBSD_STATE_CREATED), EINVAL },
+	/* reconfigure requires a process-less jail, so only the created state */
+	[COP_RECONFIGURE] = { "reconfigure", OCIFBSD_STATE_BIT(OCIFBSD_STATE_CREATED), EBUSY },
+	[COP_PAUSE]	  = { "pause",   OCIFBSD_STATE_BIT(OCIFBSD_STATE_RUNNING), EINVAL },
+	[COP_RESUME]	  = { "resume",  OCIFBSD_STATE_BIT(OCIFBSD_STATE_PAUSED),  EINVAL },
+	[COP_EXEC]	  = { "exec",    OCIFBSD_STATE_BIT(OCIFBSD_STATE_RUNNING), EINVAL },
+};
+
+/*
+ * Gate a lifecycle operation on the container's current state. Returns 0 if the
+ * transition is allowed, or -1 with errno set (the op's configured reject errno)
+ * otherwise. A NULL container is always EINVAL.
+ */
+static int
+container_precondition(const struct ocifbsd_container *c, enum container_op op)
+{
+	if (c == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+	if ((container_lifecycle_rules[op].allowed &
+	    OCIFBSD_STATE_BIT(c->state)) == 0) {
+		errno = container_lifecycle_rules[op].reject_errno;
+		return (-1);
+	}
+	return (0);
+}
+
 /* Global container registry */
 static struct ocifbsd_container **container_registry = NULL;
 static int container_registry_size = 0;
@@ -1097,14 +1154,8 @@ static int establish_secure_rootfs(struct ocifbsd_container *c,
 int
 container_reconfigure_network(struct ocifbsd_container *c)
 {
-	if (c == NULL) {
-		errno = EINVAL;
+	if (container_precondition(c, COP_RECONFIGURE) != 0)
 		return (-1);
-	}
-	if (c->state != OCIFBSD_STATE_CREATED) {
-		errno = EBUSY;
-		return (-1);
-	}
 	if (c->spec == NULL) {
 		if (c->config_path == NULL) {
 			errno = EINVAL;
@@ -1540,8 +1591,7 @@ container_start(struct ocifbsd_container *c)
 		return (-1);
 	}
 
-	if (c->state != OCIFBSD_STATE_CREATED) {
-		errno = EINVAL;
+	if (container_precondition(c, COP_START) != 0) {
 		fprintf(stderr, "error: container %s not in created state\n",
 		    c->id);
 		return (-1);
@@ -1936,7 +1986,8 @@ container_exec(struct ocifbsd_container *c, char **args, const char *cwd)
 		return (-1);
 	}
 
-	if (c->state != OCIFBSD_STATE_RUNNING || c->jid <= 0 || c->id == NULL) {
+	if (container_precondition(c, COP_EXEC) != 0 || c->jid <= 0 ||
+	    c->id == NULL) {
 		errno = EINVAL;
 		fprintf(stderr, "error: container %s is not running\n",
 		    c->id ? c->id : "(no-id)");
@@ -2201,10 +2252,8 @@ container_delete(struct ocifbsd_container *c)
 int
 container_pause(struct ocifbsd_container *c)
 {
-	if (c == NULL || c->state != OCIFBSD_STATE_RUNNING) {
-		errno = EINVAL;
+	if (container_precondition(c, COP_PAUSE) != 0)
 		return (-1);
-	}
 
 	/*
 	 * Stop the container init. Full process-tree walk (all PIDs in
@@ -2244,7 +2293,7 @@ container_pause(struct ocifbsd_container *c)
 int
 container_resume(struct ocifbsd_container *c)
 {
-	if (c == NULL || c->state != OCIFBSD_STATE_PAUSED) {
+	if (container_precondition(c, COP_RESUME) != 0) {
 		errno = EINVAL;
 		return (-1);
 	}
