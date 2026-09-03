@@ -249,12 +249,30 @@ rolling_update_progress(struct rolling_update_info *info)
 
 	target_spec = &info->new_spec;
 
+	/*
+	 * Bound the paused wait. rolling_update_progress runs synchronously from
+	 * rolling_update_init, so nothing in THIS process can clear info->paused
+	 * (a pause set elsewhere lives in another process's memory); the old
+	 * unbounded `while (paused) sleep(1)` was an infinite hang. Give up after
+	 * a cap rather than spin forever.
+	 */
+	const int max_paused_secs = 300;
+	int paused_secs = 0;
+
 	/* Process each replica */
 	while (info->current_replica < info->state.total_replicas) {
 		if (info->paused) {
+			if (paused_secs >= max_paused_secs) {
+				fprintf(stderr, "rolling update: still paused after "
+				    "%ds; aborting (cannot resume within this "
+				    "process)\n", paused_secs);
+				return (-1);
+			}
 			sleep(1);
+			paused_secs++;
 			continue;
 		}
+		paused_secs = 0;
 
 		/*
 		 * The current (old) pod is whatever this replica points at now
