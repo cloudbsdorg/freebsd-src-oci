@@ -62,7 +62,7 @@ add_action('wp_footer', function () {
 <div class="oci-attrib">
   <div>Last updated <span class="oci-updated" id="oci-updated" data-epoch="<?php echo (int) $epoch; ?>">&hellip;</span></div>
   <div>Content &amp; design are the property of <strong>REVYTECH,&nbsp;Inc.</strong> &mdash; authored by <strong>Mark&nbsp;LaPointe</strong> &lt;<a href="mailto:mark@revytechinc.com">mark@revytechinc.com</a>&gt;.</div>
-  <div style="margin-top:.35rem;color:#475569;">Served by <strong>ocifbsd</strong> &mdash; a FreeBSD-native OCI runtime (jails&nbsp;+&nbsp;VNET), fronted by the native ocifbsd L4 proxy.</div>
+  <div style="margin-top:.35rem;color:#475569;">Powered by <strong>CloudBSD</strong>.</div>
 </div>
 <script>
 (function(){

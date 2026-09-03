@@ -207,5 +207,44 @@ body.oci-pro-skin .wp-site-blocks > footer, body.oci-pro-skin footer.wp-block-te
   body.oci-pro-skin .wp-block-latest-posts.is-grid { grid-template-columns: 1fr !important; }
   .oci-ribbon { font-size: .72rem; }
 }
-body.oci-pro-skin .wp-block-navigation__responsive-container.is-menu-open { background: var(--bg) !important; z-index: 2147483647; }
-body.oci-pro-skin .wp-block-navigation__responsive-container.is-menu-open a { color: var(--text-body) !important; }
+/* ---- mobile hamburger: make the toggles clickable and the open overlay
+   sit above the sticky header/ribbon with a solid dark ground. The open/close
+   buttons MUST get an explicit high z-index + pointer-events or the sticky
+   header (and its backdrop-filter layer) swallows the tap and the menu never
+   opens. ---- */
+body.oci-pro-skin .wp-block-navigation__responsive-container-open,
+body.oci-pro-skin .wp-block-navigation__responsive-container-close {
+  position: relative; z-index: 2147483647 !important; pointer-events: auto !important;
+  color: var(--text) !important; background: transparent !important;
+}
+/* Force the open menu to be a real full-screen, centered dark modal with the
+   links stacked large — otherwise TT5 renders only the first link inline. */
+body.oci-pro-skin .wp-block-navigation__responsive-container.is-menu-open {
+  position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+  height: 100vh !important; height: 100dvh !important;
+  min-height: 100vh !important; min-height: 100dvh !important;
+  display: flex !important; flex-direction: column !important;
+  align-items: center !important; justify-content: center !important;
+  padding: 5rem 1.5rem 2rem !important;
+  background: rgba(15,23,42,.98) !important;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  z-index: 2147483647 !important; overflow-y: auto !important;
+}
+body.oci-pro-skin .is-menu-open .wp-block-navigation__responsive-container-content {
+  background: transparent !important; width: 100%;
+  display: flex !important; flex-direction: column !important; align-items: center !important;
+}
+body.oci-pro-skin .is-menu-open .wp-block-navigation__container,
+body.oci-pro-skin .is-menu-open .wp-block-page-list {
+  flex-direction: column !important; align-items: center !important; gap: 1.5rem !important;
+  width: 100%;
+}
+body.oci-pro-skin .is-menu-open a {
+  color: #fff !important; font-family: var(--font-head) !important;
+  font-size: 1.5rem !important; font-weight: 600 !important;
+}
+body.oci-pro-skin .is-menu-open a:hover { color: #93c5fd !important; }
+body.oci-pro-skin .is-menu-open .wp-block-navigation__responsive-container-close {
+  position: fixed !important; top: 1rem; right: 1rem;
+  z-index: 2147483647 !important; color: var(--text) !important; pointer-events: auto !important;
+}
