@@ -95,7 +95,15 @@ check "network set --vnet on applies to the created container" \
     '"$OCI" network set e2e-vnet --vnet on 2>&1 | grep -q "applied to jail"'
 "$OCI" start "$CID" >/dev/null 2>&1
 IFACES=$("$OCI" exec "$CID" /sbin/ifconfig -l 2>/dev/null)
-check "VNET container sees only its own lo0 (isolated stack)" '[ "$IFACES" = "lo0" ]'
+# A VNET jail has its OWN network stack: it sees loopback and its own epair,
+# but NOT the host's physical interfaces. (Asserting "only lo0" was wrong —
+# `--vnet on` wires an epair, so the jail legitimately shows "lo0 epairNb".)
+# Prove isolation directly: loopback is present and the host's first physical
+# interface is absent from the jail.
+HOSTPHYS=$(ifconfig -l | tr ' ' '\n' | grep -v '^lo' | head -1)
+check "VNET container has its own loopback" 'echo "$IFACES" | grep -qw lo0'
+check "VNET container cannot see the host physical NIC ($HOSTPHYS)" \
+    '[ -n "$HOSTPHYS" ] && ! echo "$IFACES" | grep -qw "$HOSTPHYS"'
 check "host, by contrast, has more than lo0" '[ "$(ifconfig -l | wc -w)" -gt 1 ]'
 "$OCI" delete --force "$CID" >/dev/null 2>&1
 

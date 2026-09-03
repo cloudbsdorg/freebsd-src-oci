@@ -131,6 +131,7 @@ usage(const char *cmd)
 		fprintf(stderr, "\nCommands:\n");
 		fprintf(stderr, "  create [--name N] [--image REF|bundle]  Create a container\n");
 		fprintf(stderr, "  start <container-id>              Start a created container\n");
+		fprintf(stderr, "  restart <container-id>           Restart a container (stop, rebuild, start)\n");
 		fprintf(stderr, "  kill <container-id> [signal]      Send signal to container\n");
 		fprintf(stderr, "  delete <container-id> [--force]   Delete a container\n");
 		fprintf(stderr, "  state <container-id>              Show container state\n");
@@ -793,6 +794,78 @@ cmd_start(int argc, char **argv)
 }
 
 static int
+cmd_restart(int argc, char **argv)
+{
+	struct ocifbsd_container *c;
+	const char *id;
+	int ret;
+	int lockfd;
+
+	static struct option longopts[] = {
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	int ch;
+	optreset = 1;
+	optind = 1;
+	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+		switch (ch) {
+		case 'h':
+			usage("restart <container-id>");
+			return (0);
+		default:
+			usage("restart");
+			return (1);
+		}
+	}
+
+	argc -= optind;
+	argv += optind;
+
+	if (argc < 1) {
+		fprintf(stderr, "error: container id required\n");
+		usage("restart");
+		return (1);
+	}
+
+	id = resolve_cid(argv[0]);
+
+	/* Serialize this lifecycle op against other actors on the container. */
+	lockfd = state_lock_container(id);
+	if (lockfd < 0) {
+		fprintf(stderr, "error: failed to lock container %s: %s\n",
+		    id, strerror(errno));
+		return (1);
+	}
+
+	c = container_get_by_id(id);
+	if (c == NULL) {
+		fprintf(stderr, "error: container not found: %s\n", id);
+		state_unlock_container(lockfd);
+		return (1);
+	}
+
+	if (verbose)
+		fprintf(stderr, "Restarting container: %s\n", id);
+
+	ret = container_restart(c);
+	if (ret != 0) {
+		fprintf(stderr, "error: failed to restart container: %s\n",
+		    strerror(errno));
+		container_free(c);
+		state_unlock_container(lockfd);
+		return (1);
+	}
+
+	printf("%s\n", c->id);
+
+	container_free(c);
+	state_unlock_container(lockfd);
+	return (0);
+}
+
+static int
 cmd_kill(int argc, char **argv)
 {
 	struct ocifbsd_container *c;
@@ -1084,20 +1157,30 @@ cmd_state(int argc, char **argv)
 	 * Pretty by default; --compact for one line.
 	 */
 	{
-		char buf[PATH_MAX + 256];
+		char ebundle[PATH_MAX * 6 + 1];
+		char buf[sizeof(ebundle) + 512];
 		const char *bundle = c->bundle_path ? c->bundle_path : "";
 		const char *status = ocifbsd_state_to_string(c->state);
+		char eid[128];
 
+		/*
+		 * Escape the untrusted values (the bundle path is caller-chosen)
+		 * before embedding them, so a '"' in a path cannot terminate the
+		 * string early and inject fields — as container_inspect already
+		 * does. status is a fixed enum string and needs no escaping.
+		 */
+		ocifbsd_json_escape(c->id, eid, sizeof(eid));
+		ocifbsd_json_escape(bundle, ebundle, sizeof(ebundle));
 		if (c->init_pid > 0) {
 			snprintf(buf, sizeof(buf),
 			    "{\"ociVersion\":\"1.0.2\",\"id\":\"%s\","
 			    "\"status\":\"%s\",\"pid\":%d,\"bundle\":\"%s\"}",
-			    c->id, status, (int)c->init_pid, bundle);
+			    eid, status, (int)c->init_pid, ebundle);
 		} else {
 			snprintf(buf, sizeof(buf),
 			    "{\"ociVersion\":\"1.0.2\",\"id\":\"%s\","
 			    "\"status\":\"%s\",\"bundle\":\"%s\"}",
-			    c->id, status, bundle);
+			    eid, status, ebundle);
 		}
 		emit_json(buf);
 	}
@@ -1660,7 +1743,13 @@ capture_rctl(const char *jailname, char *buf, size_t buflen)
 		dn = open("/dev/null", O_WRONLY);
 		if (dn >= 0)
 			dup2(dn, STDERR_FILENO);
-		execlp("rctl", "rctl", "-u", rule, (char *)NULL);
+		/*
+		 * Fixed path, not execlp: this runs as root, so resolving
+		 * "rctl" through $PATH would let an attacker-controlled PATH
+		 * substitute a trojan binary (the mount helpers use /sbin/mount
+		 * for the same reason).
+		 */
+		execl("/usr/bin/rctl", "rctl", "-u", rule, (char *)NULL);
 		_exit(127);
 	}
 	close(fds[1]);
@@ -3578,6 +3667,7 @@ cmd_orch(int argc, char **argv)
 static struct command commands[] = {
 	{ "create",	cmd_create,	"Create a container from OCI bundle" },
 	{ "start",	cmd_start,	"Start a created container" },
+	{ "restart",	cmd_restart,	"Restart a container (stop, rebuild jail, start)" },
 	{ "kill",	cmd_kill,	"Send signal to container" },
 	{ "delete",	cmd_delete,	"Delete a container" },
 	{ "state",	cmd_state,	"Show container state" },

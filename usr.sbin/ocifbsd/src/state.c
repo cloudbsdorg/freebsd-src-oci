@@ -150,6 +150,19 @@ state_lock_container(const char *id)
 		errno = EINVAL;
 		return (-1);
 	}
+	/*
+	 * The id becomes a path component of the lock file, which is opened
+	 * O_CREAT (and chowned to the ocifbsd group) as root. resolve_cid()
+	 * passes an unmatched argument through verbatim, so a caller could hand
+	 * us "../../etc/cron.d/pwn" and have us create/chmod a file well outside
+	 * the state dir. A real container id or resolved name is a single
+	 * component; refuse anything containing a slash or a lone dot/dot-dot.
+	 */
+	if (strchr(id, '/') != NULL || strcmp(id, ".") == 0 ||
+	    strcmp(id, "..") == 0) {
+		errno = EINVAL;
+		return (-1);
+	}
 	/* Ensure the state directory exists and is secured first. */
 	if (state_init() != 0)
 		return (-1);

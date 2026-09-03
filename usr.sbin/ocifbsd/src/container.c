@@ -104,18 +104,23 @@ container_register(struct ocifbsd_container *c)
 
 	/* Expand capacity if needed */
 	if (container_registry_size >= container_registry_capacity) {
-		container_registry_capacity = container_registry_capacity ?
+		int newcap = container_registry_capacity ?
 		    container_registry_capacity * 2 : 16;
 		void *_t = realloc(container_registry,
-		    container_registry_capacity * sizeof(*container_registry));
+		    newcap * sizeof(*container_registry));
 		if (_t == NULL) {
-			/* Keep the old registry intact on failure (realloc
-			 * into a temp) rather than losing the pointer. */
+			/*
+			 * Keep the old registry (pointer AND capacity) intact on
+			 * failure: publishing the doubled capacity before the
+			 * realloc actually grew the buffer would let the next
+			 * insert write past the still-old-sized array.
+			 */
 			pthread_mutex_unlock(&registry_lock);
 			errno = ENOMEM;
 			return (-1);
 		}
 		container_registry = _t;
+		container_registry_capacity = newcap;
 	}
 
 	container_registry[container_registry_size++] = c;
@@ -516,12 +521,22 @@ setup_container_network(const struct ocifbsd_container *c)
 		return;
 	}
 
-	if (container_epair_sidecar(c, path, sizeof(path)) == 0) {
+	f = NULL;
+	if (container_epair_sidecar(c, path, sizeof(path)) == 0)
 		f = fopen(path, "w");
-		if (f != NULL) {
-			fprintf(f, "%s\n", side_a);
-			fclose(f);
-		}
+	if (f != NULL) {
+		fprintf(f, "%s\n", side_a);
+		fclose(f);
+	} else if (side_a != NULL) {
+		/*
+		 * Without the persisted sidecar, teardown at delete time cannot
+		 * learn the host-side epair name, so the interface would leak
+		 * until reboot. Destroy it now rather than orphan it.
+		 */
+		fprintf(stderr, "warning: cannot record epair sidecar for %s; "
+		    "removing host interface %s to avoid a leak\n", c->id,
+		    side_a);
+		(void)epair_delete(side_a);
 	}
 	free(side_a);
 }
@@ -682,12 +697,18 @@ container_apply_mounts(struct ocifbsd_container *c)
 			continue;
 		}
 
-		if (m->destination[0] == '/')
-			snprintf(dest, sizeof(dest), "%s%s", c->rootfs,
-			    m->destination);
-		else
-			snprintf(dest, sizeof(dest), "%s/%s", c->rootfs,
-			    m->destination);
+		if ((size_t)snprintf(dest, sizeof(dest),
+		    m->destination[0] == '/' ? "%s%s" : "%s/%s",
+		    c->rootfs, m->destination) >= sizeof(dest)) {
+			/*
+			 * A truncated join can name a host path above the
+			 * container root (mount/umount then act on it as root);
+			 * refuse rather than operate on a shortened path.
+			 */
+			fprintf(stderr, "warning: skipping mount, path too long: "
+			    "%s%s\n", c->rootfs, m->destination);
+			continue;
+		}
 
 		if (stat(dest, &sb) != 0) {
 			if (ensure_directory(dest, 0755) != 0) {
@@ -828,14 +849,35 @@ container_unmount_all(struct ocifbsd_container *c)
 			fstype = oci_mount_type_to_fbsd(m->type);
 			if (fstype == NULL)
 				continue;
-			if (m->destination[0] == '/')
-				snprintf(dest, sizeof(dest), "%s%s", c->rootfs,
-				    m->destination);
-			else
-				snprintf(dest, sizeof(dest), "%s/%s", c->rootfs,
-				    m->destination);
+			/*
+			 * This spec was reloaded from config.json without going
+			 * back through oci_validate_spec, so re-check it here: a
+			 * '..' destination or a truncated join would otherwise
+			 * force-unmount a host path (up to and including / or
+			 * /usr) as root. Mirror the guards in the apply path.
+			 */
+			if (!oci_path_is_safe(m->destination))
+				continue;
+			if ((size_t)snprintf(dest, sizeof(dest),
+			    m->destination[0] == '/' ? "%s%s" : "%s/%s",
+			    c->rootfs, m->destination) >= sizeof(dest))
+				continue;
 			umount_path(dest);
 		}
+	}
+
+	/*
+	 * The default devfs at <rootfs>/dev is mounted at start but is not part
+	 * of the spec, so a delete running in a fresh process (n_applied_mounts
+	 * == 0) never sees it in the loops above. Tear it down explicitly so it
+	 * does not leak and keep the image rootfs busy (blocking rmi).
+	 */
+	if (c->rootfs != NULL) {
+		char devp[PATH_MAX];
+
+		if ((size_t)snprintf(devp, sizeof(devp), "%s/dev", c->rootfs) <
+		    sizeof(devp))
+			umount_path(devp);
 	}
 
 	return (0);
@@ -947,6 +989,10 @@ create_jail_from_spec(struct ocifbsd_container *c,
 	return (0);
 }
 
+/* Defined below; the rebuild path re-establishes the secure rootfs overlay. */
+static int establish_secure_rootfs(struct ocifbsd_container *c,
+    struct oci_runtime_spec *spec);
+
 /*
  * Reapply a container's network configuration by rebuilding its jail from
  * the current spec + persisted netcfg. Only permitted while the container is
@@ -996,6 +1042,22 @@ container_reconfigure_network(struct ocifbsd_container *c)
 			return (-1);
 	}
 	c->jid = -1;
+	/*
+	 * Re-establish the read-only / nosuid nullfs overlay before rebuilding,
+	 * exactly as container_create does. The freshly parsed spec->root.path
+	 * points at the writable image rootfs, so without this a restart would
+	 * silently rebuild a readonly/noNewPrivileges container as writable and
+	 * apply mounts to the stale overlay. establish_secure_rootfs is a no-op
+	 * for ordinary containers and idempotent for secured ones.
+	 */
+	if (establish_secure_rootfs(c, c->spec) != 0) {
+		int saved = errno;
+
+		c->state = OCIFBSD_STATE_STOPPED;
+		state_save(c);
+		errno = saved;
+		return (-1);
+	}
 	if (create_jail_from_spec(c, c->spec) != 0) {
 		/*
 		 * The old jail is gone and the new one could not be built.
@@ -1029,6 +1091,56 @@ container_reconfigure_network(struct ocifbsd_container *c)
 }
 
 /*
+ * Restart a container end to end: stop it if it is running or paused, then
+ * rebuild its jail from the persisted spec + `ocifbsd network set` config and
+ * start it again. Because the container keeps its id, the netcfg overlay
+ * (stored as networks/<id>.json) is preserved across the restart — unlike a
+ * delete+recreate, which mints a new id and loses it. Valid from any state
+ * (running, paused, stopped, or created). Returns 0 on success, -1 with errno
+ * set otherwise.
+ */
+int
+container_restart(struct ocifbsd_container *c)
+{
+	if (c == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+
+	/*
+	 * Lift a pause first: a SIGSTOP'd init will not act on container_stop's
+	 * SIGTERM until it is continued, and container_kill refuses non-running
+	 * states outright, so restarting a paused container would otherwise fail
+	 * without rebuilding. SIGCONT it and mark it running before stopping.
+	 */
+	if (c->state == OCIFBSD_STATE_PAUSED ||
+	    c->state == OCIFBSD_STATE_PAUSED_HIGH) {
+		if (c->init_pid > 0)
+			(void)kill(c->init_pid, SIGCONT);
+		c->state = OCIFBSD_STATE_RUNNING;
+	}
+
+	/* Quiesce a live container; container_stop leaves it stopped. */
+	if (c->state == OCIFBSD_STATE_RUNNING) {
+		if (container_stop(c, 10) != 0)
+			return (-1);
+	}
+
+	/*
+	 * Rebuild the (now process-less, and after a stop, torn-down) jail via
+	 * container_reconfigure_network: it recreates the jail from the spec
+	 * with the persisted netcfg overlaid, and tolerates an already-missing
+	 * jail (jail_getid < 0 -> nothing to remove). It requires the created
+	 * state, so mark the container created before delegating.
+	 */
+	c->state = OCIFBSD_STATE_CREATED;
+	if (container_reconfigure_network(c) != 0)
+		return (-1);
+
+	return (container_start(c));
+}
+
+/*
  * Establish the container root read-only and/or nosuid when the bundle asks
  * for it (root.readonly / process.noNewPrivileges). FreeBSD nullfs cannot mount
  * a path over itself, so the flags are applied by nullfs-mounting the bundle
@@ -1053,6 +1165,7 @@ establish_secure_rootfs(struct ocifbsd_container *c,
 	char *argv[8];
 	int argc = 0;
 	char *dup;
+	char *dup2;
 
 	if (spec == NULL || c == NULL || c->id == NULL)
 		return (0);
@@ -1076,6 +1189,12 @@ establish_secure_rootfs(struct ocifbsd_container *c,
 		    jailroot, strerror(errno));
 		return (-1);
 	}
+	/*
+	 * Clear any overlay left by a previous create/restart so a rebuild does
+	 * not stack a second nullfs mount on the same point. umount_path ignores
+	 * the not-mounted case, so this is a harmless no-op on first create.
+	 */
+	umount_path(jailroot);
 
 	/* mount -t nullfs -o <opts> <original rootfs> <jailroot> */
 	argv[argc++] = __DECONST(char *, "/sbin/mount");
@@ -1093,17 +1212,28 @@ establish_secure_rootfs(struct ocifbsd_container *c,
 		return (-1);
 	}
 
-	/* Repoint the jail root and the container rootfs at the flagged view. */
+	/*
+	 * Repoint both the jail root (spec->root.path) and the container rootfs
+	 * (c->rootfs) at the flagged nullfs view. Allocate both copies up front:
+	 * if either strdup fails, tear the mount back down and fail, rather than
+	 * (a) leaking the live nullfs mount or (b) leaving spec->root.path and
+	 * c->rootfs pointing at different directories — a divergence that would
+	 * later let container_delete umount/rmdir the original image rootfs.
+	 */
 	dup = strdup(jailroot);
-	if (dup == NULL)
+	dup2 = strdup(jailroot);
+	if (dup == NULL || dup2 == NULL) {
+		free(dup);
+		free(dup2);
+		umount_path(jailroot);
+		(void)rmdir(jailroot);
+		errno = ENOMEM;
 		return (-1);
+	}
 	free(spec->root.path);
 	spec->root.path = dup;
-	dup = strdup(jailroot);
-	if (dup != NULL) {
-		free(c->rootfs);
-		c->rootfs = dup;
-	}
+	free(c->rootfs);
+	c->rootfs = dup2;
 	return (0);
 }
 
@@ -1157,8 +1287,17 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		char abspath[PATH_MAX];
 		char *resolved;
 
-		snprintf(abspath, sizeof(abspath), "%s/%s", bundle_path,
-		    spec->root.path);
+		if ((size_t)snprintf(abspath, sizeof(abspath), "%s/%s",
+		    bundle_path, spec->root.path) >= sizeof(abspath)) {
+			/*
+			 * A truncated join could resolve to a different existing
+			 * directory and jail the wrong root as root; refuse it,
+			 * mirroring the config.json length check above.
+			 */
+			oci_free_spec(spec);
+			errno = ENAMETOOLONG;
+			return (-1);
+		}
 		resolved = realpath(abspath, NULL);
 		if (resolved == NULL) {
 			/* keep joined path even if rootfs not yet fully present */
@@ -1270,8 +1409,25 @@ container_create(struct ocifbsd_container **cp, const char *bundle_path,
 		    strerror(errno));
 	}
 
-	/* Save state */
-	state_save(c);
+	/*
+	 * Persist the container. If this fails the jail already exists but no
+	 * state file references it, so a later CLI could neither start nor
+	 * delete it (an unreapable jail plus any nullfs/devfs overlay). Roll the
+	 * creation back — tear down the jail, mounts, and network — and fail,
+	 * the same contract container_reconfigure_network already honours.
+	 */
+	if (state_save(c) != 0) {
+		fprintf(stderr, "error: failed to persist container state: %s\n",
+		    strerror(errno));
+		if (c->jid > 0) {
+			(void)jail_remove(c->jid);
+			c->jid = 0;
+		}
+		(void)container_unmount_all(c);
+		teardown_container_network(c);
+		container_free(c);
+		return (-1);
+	}
 
 	*cp = c;
 	return (0);
@@ -1493,25 +1649,29 @@ container_start(struct ocifbsd_container *c)
 		}
 
 		/*
-		 * Drop to the configured process.user gid/uid. Must set the
-		 * group (and clear supplementary groups) before dropping the
-		 * uid, since setgid(2)/setgroups(2) require privilege. Without
-		 * this the entrypoint would run as root regardless of the
-		 * bundle's "user" spec — an isolation/privilege defect.
+		 * Drop to the configured process.user gid/uid. Whenever we drop
+		 * privilege at all — a non-root uid OR a non-root gid — clear
+		 * root's supplementary groups and set the primary group before
+		 * dropping the uid, in that order (setgid(2)/setgroups(2) need
+		 * privilege). gid 0 is treated as an explicit "wheel primary",
+		 * not "unset": a spec of {uid:1000} (gid defaulting to 0) must
+		 * still have wheel/operator cleared from the supplementary set,
+		 * or the init would keep them after setuid — a privilege hole
+		 * against group-readable host paths. All three calls fail closed.
 		 */
-		if (c->spec->process.gid != 0) {
-			if (setgroups(1, &c->spec->process.gid) != 0)
-				fprintf(stderr,
-				    "warning: setgroups failed: %s\n",
-				    strerror(errno));
-			if (setgid(c->spec->process.gid) != 0) {
-				fprintf(stderr, "error: setgid(%u) failed: %s\n",
-				    (unsigned)c->spec->process.gid,
+		if (c->spec->process.uid != 0 || c->spec->process.gid != 0) {
+			gid_t gid = c->spec->process.gid;
+
+			if (setgroups(1, &gid) != 0) {
+				fprintf(stderr, "error: setgroups failed: %s\n",
 				    strerror(errno));
 				_exit(126);
 			}
-		}
-		if (c->spec->process.uid != 0) {
+			if (setgid(gid) != 0) {
+				fprintf(stderr, "error: setgid(%u) failed: %s\n",
+				    (unsigned)gid, strerror(errno));
+				_exit(126);
+			}
 			if (setuid(c->spec->process.uid) != 0) {
 				fprintf(stderr, "error: setuid(%u) failed: %s\n",
 				    (unsigned)c->spec->process.uid,
@@ -1550,9 +1710,14 @@ container_start(struct ocifbsd_container *c)
 		struct timespec ts = { 0, 100 * 1000 * 1000 }; /* 100ms */
 		nanosleep(&ts, NULL);
 	}
-	if (waitpid(pid, &status, WNOHANG) == 0) {
-		/* Process is still running */
-	} else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+	/*
+	 * Only a return of exactly `pid` means the init was reaped and `status`
+	 * is valid. A return of 0 means it is still running; a return of -1
+	 * (EINTR/ECHILD) leaves `status` uninitialized — do not read it and do
+	 * not tear down a jail whose init may well still be executing.
+	 */
+	if (waitpid(pid, &status, WNOHANG) == pid &&
+	    (WIFEXITED(status) || WIFSIGNALED(status))) {
 		/*
 		 * The init process exited within the startup window. Drop the
 		 * host-side mounts and remove the jail so a failed start does
@@ -1678,11 +1843,30 @@ container_exec(struct ocifbsd_container *c, char **args, const char *cwd)
 		return (-1);
 	}
 
-	if (c->state != OCIFBSD_STATE_RUNNING || c->jid <= 0) {
+	if (c->state != OCIFBSD_STATE_RUNNING || c->jid <= 0 || c->id == NULL) {
 		errno = EINVAL;
 		fprintf(stderr, "error: container %s is not running\n",
 		    c->id ? c->id : "(no-id)");
 		return (-1);
+	}
+
+	/*
+	 * Guard against jid reuse before attaching: the state may still say
+	 * RUNNING with jid N after the original jail was removed and an
+	 * unrelated jail reused N, in which case jail_attach would exec the
+	 * caller's command as root in the wrong jail. Require the ocifbsd-<id>
+	 * name to still resolve to our recorded jid, as container_start does.
+	 */
+	{
+		char jname[64];
+
+		snprintf(jname, sizeof(jname), "ocifbsd-%.12s", c->id);
+		if (jail_getid(jname) != c->jid) {
+			errno = ESRCH;
+			fprintf(stderr, "error: container %s jail is gone or was "
+			    "recycled; refusing to attach\n", c->id);
+			return (-1);
+		}
 	}
 
 	/* Reload the spec so the exec inherits the container environment. */
@@ -1754,19 +1938,34 @@ container_stop(struct ocifbsd_container *c, int timeout_sec)
 		return (0);
 	}
 
+	/*
+	 * Gate every signal on jail membership rather than kill(pid, 0): once
+	 * init exits, its PID can be recycled by an unrelated host process, and
+	 * a bare kill(pid, 0)/kill(pid, SIGKILL) would then report and then
+	 * kill that stranger as root. If the PID is already gone from the jail,
+	 * the container has stopped and there is nothing to signal.
+	 */
+	if (!pid_in_jail(c->init_pid, c->jid)) {
+		c->state = OCIFBSD_STATE_STOPPED;
+		c->finished_at = time(NULL);
+		c->init_pid = 0;
+		state_save(c);
+		return (0);
+	}
+
 	if (kill(c->init_pid, SIGTERM) != 0 && errno != ESRCH)
 		return (-1);
 
 	timeout_ms = (timeout_sec > 0 ? timeout_sec : 10) * 1000;
 	for (waited_ms = 0; waited_ms < timeout_ms; waited_ms += 100) {
-		if (kill(c->init_pid, 0) != 0 && errno == ESRCH)
+		if (!pid_in_jail(c->init_pid, c->jid))
 			break;
 		/* Reap if we happen to be the parent (run/stop same process) */
 		(void)waitpid(c->init_pid, NULL, WNOHANG);
 		nanosleep(&tick, NULL);
 	}
 
-	if (kill(c->init_pid, 0) == 0) {
+	if (pid_in_jail(c->init_pid, c->jid)) {
 		(void)kill(c->init_pid, SIGKILL);
 		(void)waitpid(c->init_pid, NULL, WNOHANG);
 	}
@@ -1804,11 +2003,19 @@ container_delete(struct ocifbsd_container *c)
 	 */
 	was_started = (c->started_at != 0);
 
-	/* Stop container if running */
-	if (c->state == OCIFBSD_STATE_RUNNING) {
-		if (c->init_pid > 0) {
+	/* Stop container if running or paused */
+	if ((c->state == OCIFBSD_STATE_RUNNING ||
+	    c->state == OCIFBSD_STATE_PAUSED ||
+	    c->state == OCIFBSD_STATE_PAUSED_HIGH) && c->init_pid > 0) {
+		/*
+		 * Only signal the stored PID if it still belongs to this jail: a
+		 * recycled PID must not be SIGKILL'd as root. jail_remove below
+		 * tears down whatever is actually in the jail regardless, so this
+		 * signal is just a fast path, not the real teardown.
+		 */
+		if (pid_in_jail(c->init_pid, c->jid)) {
 			kill(c->init_pid, SIGKILL);
-			waitpid(c->init_pid, NULL, 0);
+			(void)waitpid(c->init_pid, NULL, WNOHANG);
 		}
 	}
 
@@ -1819,13 +2026,25 @@ container_delete(struct ocifbsd_container *c)
 	if (was_started)
 		hooks_run_poststop(c);
 
-	/* Remove jail */
-	if (c->jid > 0) {
-		ret = jail_remove(c->jid);
-		if (ret != 0) {
-			fprintf(stderr, "warning: failed to remove jail: %s\n",
-			    strerror(errno));
+	/*
+	 * Remove the jail, resolved by its ocifbsd-<id> name rather than the
+	 * stored jid: a jid can be recycled by an unrelated jail once ours is
+	 * gone, and removing it by number would destroy the wrong jail.
+	 */
+	if (c->id != NULL) {
+		char jname[64];
+		int real;
+
+		snprintf(jname, sizeof(jname), "ocifbsd-%.12s", c->id);
+		real = jail_getid(jname);
+		if (real >= 0) {
+			ret = jail_remove(real);
+			if (ret != 0)
+				fprintf(stderr,
+				    "warning: failed to remove jail: %s\n",
+				    strerror(errno));
 		}
+		c->jid = 0;
 	}
 
 	/*
@@ -1903,6 +2122,20 @@ container_pause(struct ocifbsd_container *c)
 		errno = ESRCH;
 		return (-1);
 	}
+	/*
+	 * Verify the stored PID still belongs to this jail before signaling.
+	 * After our first process exits, init is reparented and its PID can be
+	 * recycled by an unrelated host process; SIGSTOP'ing that as root would
+	 * freeze the wrong process. Treat a recycled/gone PID as exited.
+	 */
+	if (!pid_in_jail(c->init_pid, c->jid)) {
+		c->state = OCIFBSD_STATE_STOPPED;
+		c->finished_at = time(NULL);
+		c->init_pid = 0;
+		state_save(c);
+		errno = ESRCH;
+		return (-1);
+	}
 	if (kill(c->init_pid, SIGSTOP) != 0)
 		return (-1);
 
@@ -1923,7 +2156,20 @@ container_resume(struct ocifbsd_container *c)
 		return (-1);
 	}
 
+	/*
+	 * As in container_pause, only continue the PID if it still belongs to
+	 * this jail; a recycled PID must not receive SIGCONT. A PID that is gone
+	 * means the container died while paused — reconcile to stopped.
+	 */
 	if (c->init_pid > 0) {
+		if (!pid_in_jail(c->init_pid, c->jid)) {
+			c->state = OCIFBSD_STATE_STOPPED;
+			c->finished_at = time(NULL);
+			c->init_pid = 0;
+			state_save(c);
+			errno = ESRCH;
+			return (-1);
+		}
 		if (kill(c->init_pid, SIGCONT) != 0 && errno != ESRCH)
 			return (-1);
 	}

@@ -219,6 +219,7 @@ int	container_stop(struct ocifbsd_container *c, int timeout_sec);
 int	container_pause(struct ocifbsd_container *c);
 int	container_resume(struct ocifbsd_container *c);
 int	container_reconfigure_network(struct ocifbsd_container *c);
+int	container_restart(struct ocifbsd_container *c);
 int	container_wait(struct ocifbsd_container *c);
 int	container_inspect(struct ocifbsd_container *c, char **json_out);
 int	container_apply_mounts(struct ocifbsd_container *c);
