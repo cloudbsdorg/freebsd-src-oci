@@ -13,7 +13,8 @@ Legend — effort: S (≤1 day) · M (2–4 days) · L (1–2 weeks) · XL (mult
 ## Cross-cutting: Code quality & security review  *(gate on every phase & merge)*
 
 No item is **done** until it passes review at both the code and integration
-levels. This is a standing gate, not a phase.
+levels. This is a standing gate, not a phase — codified as the `review-gate`
+skill (`.claude/skills/review-gate/`); run it before every merge.
 
 **Code level (every change):**
 - Design + correctness to the project bar — Gang-of-Four patterns and
