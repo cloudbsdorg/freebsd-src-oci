@@ -715,49 +715,48 @@ cmd_create(int argc, char **argv)
 	return (0);
 }
 
+/*
+ * Template Method for single-container lifecycle subcommands. Every one of
+ * start/restart/pause/resume runs the identical fixed skeleton — parse the id,
+ * take the per-container cross-process lock, load the container, run the one
+ * command-specific operation, print the id, and release the container and lock
+ * on every exit path. Only that operation varies, supplied as `op` (a function
+ * with the shared `int (*)(struct ocifbsd_container *)` shape). Keeping the
+ * skeleton in one place removes ~110 lines of copy-paste and makes the "did we
+ * unlock on this error path?" question impossible to get wrong per command.
+ */
+typedef int (*container_lifecycle_op)(struct ocifbsd_container *c);
+
 static int
-cmd_start(int argc, char **argv)
+run_container_lifecycle_cmd(int argc, char **argv, const char *verb,
+	container_lifecycle_op op)
 {
 	struct ocifbsd_container *c;
 	const char *id;
-	int ret;
-	int lockfd;
-
-	/* Parse start-specific options */
+	int lockfd, ret, ch;
 	static struct option longopts[] = {
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
-	int ch;
 	optreset = 1;
 	optind = 1;
 	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
-		switch (ch) {
-		case 'h':
-			usage("start <container-id>");
-			return (0);
-		default:
-			usage("start");
-			return (1);
-		}
+		usage(verb);
+		return (ch == 'h' ? 0 : 1);
 	}
-
 	argc -= optind;
 	argv += optind;
 
 	if (argc < 1) {
 		fprintf(stderr, "error: container id required\n");
-		usage("start");
+		usage(verb);
 		return (1);
 	}
 
 	id = resolve_cid(argv[0]);
 
-	/*
-	 * Serialize this lifecycle op against other processes acting on the
-	 * same container. Fail closed if the lock cannot be taken.
-	 */
+	/* Serialize against other processes acting on the same container. */
 	lockfd = state_lock_container(id);
 	if (lockfd < 0) {
 		fprintf(stderr, "error: failed to lock container %s: %s\n",
@@ -765,7 +764,6 @@ cmd_start(int argc, char **argv)
 		return (1);
 	}
 
-	/* Get container */
 	c = container_get_by_id(id);
 	if (c == NULL) {
 		fprintf(stderr, "error: container not found: %s\n", id);
@@ -773,96 +771,36 @@ cmd_start(int argc, char **argv)
 		return (1);
 	}
 
-	/* Start container */
 	if (verbose)
-		fprintf(stderr, "Starting container: %s\n", id);
+		fprintf(stderr, "%s container: %s\n", verb, id);
 
-	ret = container_start(c);
+	ret = op(c);
 	if (ret != 0) {
-		fprintf(stderr, "error: failed to start container: %s\n",
-		    strerror(errno));
+		fprintf(stderr, "error: failed to %s container: %s\n",
+		    verb, strerror(errno));
 		container_free(c);
 		state_unlock_container(lockfd);
 		return (1);
 	}
 
 	printf("%s\n", c->id);
-
 	container_free(c);
 	state_unlock_container(lockfd);
 	return (0);
 }
 
 static int
+cmd_start(int argc, char **argv)
+{
+	return (run_container_lifecycle_cmd(argc, argv, "start",
+	    container_start));
+}
+
+static int
 cmd_restart(int argc, char **argv)
 {
-	struct ocifbsd_container *c;
-	const char *id;
-	int ret;
-	int lockfd;
-
-	static struct option longopts[] = {
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL, 0, NULL, 0 }
-	};
-
-	int ch;
-	optreset = 1;
-	optind = 1;
-	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
-		switch (ch) {
-		case 'h':
-			usage("restart <container-id>");
-			return (0);
-		default:
-			usage("restart");
-			return (1);
-		}
-	}
-
-	argc -= optind;
-	argv += optind;
-
-	if (argc < 1) {
-		fprintf(stderr, "error: container id required\n");
-		usage("restart");
-		return (1);
-	}
-
-	id = resolve_cid(argv[0]);
-
-	/* Serialize this lifecycle op against other actors on the container. */
-	lockfd = state_lock_container(id);
-	if (lockfd < 0) {
-		fprintf(stderr, "error: failed to lock container %s: %s\n",
-		    id, strerror(errno));
-		return (1);
-	}
-
-	c = container_get_by_id(id);
-	if (c == NULL) {
-		fprintf(stderr, "error: container not found: %s\n", id);
-		state_unlock_container(lockfd);
-		return (1);
-	}
-
-	if (verbose)
-		fprintf(stderr, "Restarting container: %s\n", id);
-
-	ret = container_restart(c);
-	if (ret != 0) {
-		fprintf(stderr, "error: failed to restart container: %s\n",
-		    strerror(errno));
-		container_free(c);
-		state_unlock_container(lockfd);
-		return (1);
-	}
-
-	printf("%s\n", c->id);
-
-	container_free(c);
-	state_unlock_container(lockfd);
-	return (0);
+	return (run_container_lifecycle_cmd(argc, argv, "restart",
+	    container_restart));
 }
 
 static int
@@ -2700,82 +2638,17 @@ cmd_stop(int argc, char **argv)
  * pause/resume — freeze/thaw the container init process.
  */
 static int
-cmd_pause_resume(int argc, char **argv, bool do_pause)
-{
-	struct ocifbsd_container *c;
-	const char *id;
-	const char *name = do_pause ? "pause" : "resume";
-	int ch, ret;
-	int lockfd;
-
-	static struct option longopts[] = {
-		{ "help",	no_argument,	NULL, 'h' },
-		{ NULL,		0,		NULL, 0 }
-	};
-
-	optreset = 1;
-	optind = 1;
-	while ((ch = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
-		switch (ch) {
-		case 'h':
-		default:
-			usage(do_pause ?
-			    "pause <container-id>" : "resume <container-id>");
-			return (ch == 'h' ? 0 : 1);
-		}
-	}
-	argc -= optind;
-	argv += optind;
-
-	if (argc < 1) {
-		fprintf(stderr, "error: container id required\n");
-		return (1);
-	}
-
-	id = resolve_cid(argv[0]);
-
-	lockfd = state_lock_container(id);
-	if (lockfd < 0) {
-		fprintf(stderr, "error: failed to lock container %s: %s\n",
-		    id, strerror(errno));
-		return (1);
-	}
-
-	c = container_get_by_id(id);
-	if (c == NULL) {
-		fprintf(stderr, "error: container not found: %s\n", id);
-		state_unlock_container(lockfd);
-		return (1);
-	}
-
-	if (verbose)
-		fprintf(stderr, "%s container: %s\n", name, id);
-
-	ret = do_pause ? container_pause(c) : container_resume(c);
-	if (ret != 0) {
-		fprintf(stderr, "error: failed to %s container: %s\n",
-		    name, strerror(errno));
-		container_free(c);
-		state_unlock_container(lockfd);
-		return (1);
-	}
-
-	printf("%s\n", c->id);
-	container_free(c);
-	state_unlock_container(lockfd);
-	return (0);
-}
-
-static int
 cmd_pause(int argc, char **argv)
 {
-	return (cmd_pause_resume(argc, argv, true));
+	return (run_container_lifecycle_cmd(argc, argv, "pause",
+	    container_pause));
 }
 
 static int
 cmd_resume(int argc, char **argv)
 {
-	return (cmd_pause_resume(argc, argv, false));
+	return (run_container_lifecycle_cmd(argc, argv, "resume",
+	    container_resume));
 }
 
 /*
