@@ -308,6 +308,52 @@ run_mount_cmd(char *const argv[])
 }
 
 /*
+ * Verify that a mount/umount target really resolves to a location inside the
+ * container rootfs, defeating symlink escapes. A pulled image can legitimately
+ * contain in-rootfs symlinks with absolute targets (e.g. rootfs/dev -> /etc);
+ * mount(8)/umount(8) follow them, so without this a crafted image could mount
+ * over — or force-unmount — an arbitrary HOST path as root.
+ *
+ * realpath() resolves every symlink in the path (leaf and parents); the result
+ * must be prefixed by the real rootfs. If the target does not exist yet (a
+ * mount point about to be created), fall back to resolving its parent so a
+ * symlinked parent is still caught. Returns true only when the resolved path is
+ * provably within the rootfs.
+ */
+static bool
+mount_target_within_rootfs(const char *rootfs, const char *target)
+{
+	char real_root[PATH_MAX];
+	char real_target[PATH_MAX];
+	size_t rl;
+
+	if (rootfs == NULL || target == NULL)
+		return (false);
+	if (realpath(rootfs, real_root) == NULL)
+		return (false);
+	rl = strlen(real_root);
+
+	if (realpath(target, real_target) == NULL) {
+		/* Not present yet: resolve the parent directory instead. */
+		char tmp[PATH_MAX];
+		char *slash;
+
+		if (strlcpy(tmp, target, sizeof(tmp)) >= sizeof(tmp))
+			return (false);
+		slash = strrchr(tmp, '/');
+		if (slash == NULL || slash == tmp)
+			return (false);
+		*slash = '\0';
+		if (realpath(tmp, real_target) == NULL)
+			return (false);
+	}
+
+	/* real_target must equal real_root or sit strictly beneath it. */
+	return (strncmp(real_target, real_root, rl) == 0 &&
+	    (real_target[rl] == '\0' || real_target[rl] == '/'));
+}
+
+/*
  * Map OCI mount type names to FreeBSD vfs types. Returns NULL to skip
  * Linux-only filesystems we do not implement.
  */
@@ -644,6 +690,11 @@ container_apply_mounts(struct ocifbsd_container *c)
 		if (!have_dev) {
 			snprintf(dest, sizeof(dest), "%s/dev", c->rootfs);
 			(void)ensure_directory(dest, 0755);
+			if (!mount_target_within_rootfs(c->rootfs, dest)) {
+				fprintf(stderr, "warning: refusing devfs mount: "
+				    "%s escapes the container rootfs\n", dest);
+				goto spec_mounts;
+			}
 			argv[argc++] = __DECONST(char *, "/sbin/mount");
 			argv[argc++] = __DECONST(char *, "-t");
 			argv[argc++] = __DECONST(char *, "devfs");
@@ -660,6 +711,7 @@ container_apply_mounts(struct ocifbsd_container *c)
 		}
 	}
 
+spec_mounts:
 	if (spec == NULL || spec->n_mounts <= 0 || spec->mounts == NULL)
 		return (0);
 
@@ -717,6 +769,17 @@ container_apply_mounts(struct ocifbsd_container *c)
 				    dest, strerror(errno));
 				continue;
 			}
+		}
+
+		/*
+		 * Symlink-escape guard: oci_path_is_safe rejects ".." components
+		 * but not symlinks planted in the image rootfs. Confirm the join
+		 * really resolves inside the rootfs before mounting over it.
+		 */
+		if (!mount_target_within_rootfs(c->rootfs, dest)) {
+			fprintf(stderr, "warning: skipping mount, destination "
+			    "escapes the container rootfs (symlink?): %s\n", dest);
+			continue;
 		}
 
 		/* Build -o options: readonly flag + any options string */
@@ -862,6 +925,9 @@ container_unmount_all(struct ocifbsd_container *c)
 			    m->destination[0] == '/' ? "%s%s" : "%s/%s",
 			    c->rootfs, m->destination) >= sizeof(dest))
 				continue;
+			/* Never force-unmount a path that resolves outside root. */
+			if (!mount_target_within_rootfs(c->rootfs, dest))
+				continue;
 			umount_path(dest);
 		}
 	}
@@ -876,7 +942,7 @@ container_unmount_all(struct ocifbsd_container *c)
 		char devp[PATH_MAX];
 
 		if ((size_t)snprintf(devp, sizeof(devp), "%s/dev", c->rootfs) <
-		    sizeof(devp))
+		    sizeof(devp) && mount_target_within_rootfs(c->rootfs, devp))
 			umount_path(devp);
 	}
 
