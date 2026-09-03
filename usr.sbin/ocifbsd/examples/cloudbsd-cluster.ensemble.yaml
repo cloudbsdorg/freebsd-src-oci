@@ -83,14 +83,17 @@ spec:
       upstream: wordpress         # fastcgi_pass to the local wordpress pod
 
   # --- Native ocifbsd L4 load balancer in front of the web replicas ---
+  # Backends are DISCOVERED from the service selector, not hard-coded: the
+  # deploy resolves every container matching `service` to its pod address on
+  # each node and wires those as the proxy backends. Scale the service and the
+  # proxy's backend set follows.
   proxy:
     node: fb16-1
     listen: 192.168.1.241:8080
     algo: round-robin
-    backends:
-      - 10.88.1.13:80
-      - 10.88.2.13:80
-      - 10.88.3.13:80
+    selector:
+      service: nginx        # discover all 'nginx' containers cluster-wide
+      port: 80
     workers: perCore
     circuitBreaker:
       threshold: 3

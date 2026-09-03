@@ -96,9 +96,32 @@ deploy_containers() {
   done
 }
 
+# --- 3. proxy with DISCOVERED backends -------------------------------------
+# The proxy's backends are not hard-coded: resolve the selector service to its
+# pod address on every node and wire those in. Scaling the service changes the
+# backend set on the next deploy.
+proxy_field() { awk -v f="$1:" '/^  proxy:/{p=1;next} p&&/^  [a-z]/{p=0} p&&$1==f{print $2;exit}' "$ENS"; }
+proxy_sel()   { awk -v f="$1:" '/^  proxy:/{p=1} p&&/^    selector:/{s=1;next} s&&$1==f{print $2;exit} p&&/^  [a-z]/&&!/proxy/{p=0}' "$ENS"; }
+
+deploy_proxy() {
+  pnode=$(proxy_field node); listen=$(proxy_field listen); algo=$(proxy_field algo)
+  svc=$(proxy_sel service);  port=$(proxy_sel port)
+  [ -z "$svc" ] || [ -z "$listen" ] && { log "no proxy selector; skipping proxy"; return 0; }
+  ihost=$(svc_field "$svc" ipHost)
+  backends=""
+  for nm in $(nodes_names); do
+    gw=$(node_field "$nm" podGateway); prefix=${gw%.*}
+    backends="$backends --backend $prefix.$ihost:$port"
+  done
+  paddr=$(node_field "$pnode" address)
+  log "proxy on $pnode: discovered backends for service '$svc':$backends"
+  on_node "$paddr" "pkill -f 'ocifbsd proxy' 2>/dev/null; sleep 1; daemon -r -o /var/log/ocifbsd-proxy.log -f /usr/sbin/ocifbsd proxy --listen $listen --algo ${algo:-round-robin}$backends"
+}
+
 log "deploying stack from $ENS"
 setup_fabric
 deploy_containers
+deploy_proxy
 log "fabric + containers reconciled. Galera/Redis cluster formation and proxy"
 log "are formed once by ocifbsd-stack-cluster-init (bootstrap ordering); the"
 log "supervisors keep every container running thereafter."
