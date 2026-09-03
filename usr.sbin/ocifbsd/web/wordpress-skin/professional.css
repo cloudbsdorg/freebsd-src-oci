@@ -1,0 +1,211 @@
+/*
+ * CloudBSD OCI — professional dark theme skin
+ * Copyright (c) 2026 REVYTECH, Inc. — Mark LaPointe <mark@revytechinc.com>
+ * Enterprise-dark CloudBSD/RevyTech brand overlay for the twentytwentyfive block
+ * theme AND the "Machine Room" dashboard: deep slate-navy canvas, Outfit headings
+ * + Inter body, brand blue #00529b with subtle cyan/blue glow accents, glass cards.
+ * Uses !important deliberately to override both TT5's light palette and the
+ * dashboard component's own inline red/white styles.
+ */
+
+:root {
+  --bg: #0f172a; --bg-2: #0b1120; --surface: #1e293b; --surface-2: #334155;
+  --border: #334155; --border-soft: rgba(255,255,255,.08);
+  --brand: #00529b; --brand-2: #1e3a8a;
+  --accent: #3b82f6; --accent-cyan: #22d3ee; --success: #34d399;
+  --text: #ffffff; --text-body: #cbd5e1; --text-muted: #94a3b8; --text-faint: #64748b;
+  --link: #60a5fa;
+  --font-head: "Outfit", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --container: 1200px; --radius: 16px; --radius-pill: 9999px;
+  --shadow: 0 12px 32px -8px rgba(0,0,0,.55);
+  --glow: 0 0 24px rgba(59,130,246,.16);
+}
+
+/* ---- dark canvas (force over TT5's light base) ---- */
+html, body.oci-pro-skin {
+  background: var(--bg) !important;
+  color: var(--text-body) !important;
+}
+body.oci-pro-skin {
+  background-image:
+    radial-gradient(60rem 40rem at 80% -10%, rgba(34,211,238,.07), transparent 60%),
+    radial-gradient(55rem 38rem at 6% 3%, rgba(59,130,246,.09), transparent 55%) !important;
+  background-attachment: fixed !important;
+  font-family: var(--font-body) !important; font-size: 17px; line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+body.oci-pro-skin .wp-site-blocks { background: transparent !important; overflow-x: hidden; }
+/* neutralise TT5's white "base" backgrounds; keep vivid intentional ones */
+body.oci-pro-skin .has-base-background-color { background-color: transparent !important; }
+body.oci-pro-skin main .wp-block-group.has-background.has-base-background-color { background: var(--surface) !important; }
+
+/* ---- typography ---- */
+body.oci-pro-skin h1, body.oci-pro-skin h2, body.oci-pro-skin h3, body.oci-pro-skin h4,
+body.oci-pro-skin .wp-block-heading, body.oci-pro-skin .wp-block-post-title,
+body.oci-pro-skin .wp-block-site-title, body.oci-pro-skin .oci-hero-title {
+  font-family: var(--font-head) !important; color: var(--text) !important;
+  letter-spacing: -0.025em !important; line-height: 1.15 !important; font-weight: 700 !important;
+  text-shadow: none !important;
+}
+body.oci-pro-skin p, body.oci-pro-skin li, body.oci-pro-skin dd, body.oci-pro-skin dt {
+  color: var(--text-body) !important;
+}
+body.oci-pro-skin .has-small-font-size, body.oci-pro-skin .wp-block-post-date { color: var(--text-muted) !important; }
+body.oci-pro-skin strong, body.oci-pro-skin b { color: #fff !important; }
+body.oci-pro-skin a { color: var(--link) !important; text-decoration: none !important; text-shadow: none !important; }
+body.oci-pro-skin a:hover { color: #93c5fd !important; }
+body.oci-pro-skin code, body.oci-pro-skin pre, body.oci-pro-skin kbd { font-family: var(--font-mono) !important; }
+body.oci-pro-skin code {
+  background: #0b1120 !important; color: #a5f3fc !important; border: 1px solid var(--border) !important;
+  padding: .12em .45em !important; border-radius: 6px !important;
+}
+body.oci-pro-skin pre { background: #0b1120 !important; border: 1px solid var(--border) !important; border-radius: 12px !important; padding: 1.1rem 1.25rem !important; overflow-x: auto; }
+body.oci-pro-skin ::selection { background: rgba(34,211,238,.28); color: #fff; }
+/* kill any leftover cyberpunk-style scanline overlay */
+body.oci-pro-skin::after { content: none !important; }
+
+/* ---- sticky glass header ---- */
+body.oci-pro-skin .wp-site-blocks > header,
+body.oci-pro-skin header.wp-block-template-part {
+  position: sticky; top: 0; z-index: 1000;
+  background: rgba(15,23,42,.85) !important;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(51,65,85,.6) !important;
+  box-shadow: 0 8px 24px -12px rgba(0,0,0,.6) !important;
+}
+body.oci-pro-skin .wp-block-site-title a { color: var(--text) !important; font-weight: 800 !important; text-transform: none !important; }
+body.oci-pro-skin .wp-block-navigation a { color: var(--text-body) !important; font-weight: 500 !important; text-transform: none !important; letter-spacing: 0 !important; }
+body.oci-pro-skin .wp-block-navigation a:hover, body.oci-pro-skin .current-menu-item > a { color: #fff !important; }
+
+/* ---- top ribbon: node badge + cross-site switcher ---- */
+.oci-ribbon {
+  display: flex; flex-wrap: wrap; gap: .6rem 1.2rem; align-items: center; justify-content: center;
+  font-family: var(--font-body); font-size: .8rem; padding: .5rem 1rem;
+  background: linear-gradient(90deg, rgba(0,82,155,.25), rgba(34,211,238,.12)) !important;
+  border-bottom: 1px solid rgba(51,65,85,.6); color: var(--text-body);
+}
+.oci-badge {
+  display: inline-flex; align-items: center; gap: .45rem; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase; font-size: .7rem;
+  padding: .3rem .8rem; border-radius: var(--radius-pill);
+  border: 1px solid rgba(34,211,238,.45); background: rgba(34,211,238,.08); color: #e0f2fe;
+}
+.oci-single .oci-badge { border-color: rgba(59,130,246,.55); background: rgba(59,130,246,.10); }
+.oci-dot { width:.5rem; height:.5rem; border-radius:50%; background:#34d399; box-shadow:0 0 8px #34d399; animation: ociPulse 2s infinite; }
+.oci-single .oci-dot { background:#3b82f6; box-shadow:0 0 8px #3b82f6; animation:none; }
+@keyframes ociPulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.oci-ribbon .oci-switch a { color:#7dd3fc !important; border-bottom:1px solid rgba(125,211,252,.4); }
+.oci-ribbon .oci-switch a:hover { color:#fff !important; }
+
+/* ---- hero (Machine Room banner) — override the inline red gradient ---- */
+body.oci-pro-skin .oci-hero {
+  background: linear-gradient(135deg, #0b1120 0%, #10233f 45%, var(--brand) 130%) !important;
+  border: 1px solid var(--border-soft) !important; border-radius: var(--radius) !important;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,.06) !important;
+}
+body.oci-pro-skin .oci-hero-title { color: #fff !important; }
+body.oci-pro-skin .oci-hero-desc { color: var(--text-body) !important; }
+body.oci-pro-skin .oci-hero-badge {
+  background: rgba(34,211,238,.12) !important; color: #a5f3fc !important;
+  border: 1px solid rgba(34,211,238,.4) !important; border-radius: var(--radius-pill) !important;
+  letter-spacing: .1em !important; text-transform: uppercase !important;
+}
+
+/* ---- buttons ---- */
+body.oci-pro-skin .wp-block-button__link, body.oci-pro-skin .oci-refresh-btn, body.oci-pro-skin .oci-retry-btn {
+  border-radius: var(--radius-pill) !important; font-family: var(--font-head) !important; font-weight: 600 !important;
+  text-transform: none !important; letter-spacing: 0 !important; transition: transform .15s, box-shadow .2s, background .2s;
+}
+body.oci-pro-skin .wp-block-button:not(.is-style-outline) .wp-block-button__link,
+body.oci-pro-skin .oci-refresh-btn {
+  background: var(--brand) !important; color: #fff !important; border: 1px solid transparent !important;
+  box-shadow: 0 8px 20px -6px rgba(0,82,155,.6) !important;
+}
+body.oci-pro-skin .wp-block-button:not(.is-style-outline) .wp-block-button__link:hover,
+body.oci-pro-skin .oci-refresh-btn:hover {
+  transform: translateY(-1px); box-shadow: 0 10px 26px -6px rgba(59,130,246,.6), var(--glow) !important;
+}
+body.oci-pro-skin .wp-block-button.is-style-outline .wp-block-button__link {
+  border-color: var(--border) !important; color: var(--text) !important; background: rgba(255,255,255,.02) !important;
+}
+
+/* ================================================================
+   Machine Room dashboard (.oci-*) — professional dark re-skin
+   (overrides the component's own inline red/white styles)
+   ================================================================ */
+body.oci-pro-skin .oci-card, body.oci-pro-skin .oci-table-card,
+body.oci-pro-skin .oci-status-bar, body.oci-pro-skin .oci-machine-room {
+  background: var(--surface) !important; border: 1px solid var(--border-soft) !important;
+  border-radius: var(--radius) !important; color: var(--text-body) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 22px -14px rgba(0,0,0,.7) !important;
+}
+body.oci-pro-skin .oci-machine-room { background: transparent !important; box-shadow: none !important; border: 0 !important; }
+body.oci-pro-skin .oci-card { transition: transform .18s, border-color .2s, box-shadow .2s; }
+body.oci-pro-skin .oci-card:hover { transform: translateY(-3px); border-color: rgba(59,130,246,.4) !important; box-shadow: var(--shadow), var(--glow) !important; }
+body.oci-pro-skin .oci-card-accent { background: linear-gradient(90deg, var(--brand), var(--accent-cyan)) !important; box-shadow: none !important; }
+body.oci-pro-skin .oci-card-val, body.oci-pro-skin .oci-mem-val { color: #fff !important; font-family: var(--font-head) !important; text-shadow: none !important; }
+body.oci-pro-skin .oci-card-val.highlight { color: var(--accent-cyan) !important; }
+body.oci-pro-skin .oci-card-lbl, body.oci-pro-skin .oci-card-sub { color: var(--text-muted) !important; letter-spacing: .06em; text-transform: uppercase; font-size: .72em; }
+body.oci-pro-skin .oci-card-icon { filter: none !important; }
+
+body.oci-pro-skin .oci-table { color: var(--text-body) !important; }
+body.oci-pro-skin .oci-table-header { background: transparent !important; border-bottom: 1px solid var(--border) !important; }
+body.oci-pro-skin .oci-table thead th { color: var(--accent-cyan) !important; text-transform: uppercase; letter-spacing: .06em; background: rgba(34,211,238,.05) !important; border-bottom: 1px solid var(--border) !important; }
+body.oci-pro-skin .oci-table td { border-bottom: 1px solid rgba(255,255,255,.06) !important; }
+body.oci-pro-skin .oci-table tbody tr:hover td { background: rgba(59,130,246,.06) !important; }
+body.oci-pro-skin .oci-cname, body.oci-pro-skin .oci-cname span, body.oci-pro-skin .oci-table-title { color: #fff !important; }
+body.oci-pro-skin .oci-cid-badge { background: rgba(96,165,250,.12) !important; color: #93c5fd !important; border: 1px solid rgba(96,165,250,.35) !important; border-radius: 6px; font-family: var(--font-mono) !important; }
+body.oci-pro-skin .oci-badge-num, body.oci-pro-skin .oci-table-count { background: rgba(59,130,246,.10) !important; color: #93c5fd !important; border: 1px solid var(--border) !important; }
+body.oci-pro-skin .oci-status-pill { background: rgba(52,211,153,.10) !important; color: var(--success) !important; border: 1px solid rgba(52,211,153,.4) !important; }
+body.oci-pro-skin .oci-status-dot, body.oci-pro-skin .oci-pulse-dot { background: var(--success) !important; box-shadow: 0 0 8px var(--success) !important; }
+body.oci-pro-skin .oci-meta-pill { background: rgba(34,211,238,.08) !important; color: #a5f3fc !important; border: 1px solid rgba(34,211,238,.3) !important; }
+body.oci-pro-skin .oci-status-live, body.oci-pro-skin #oci-sync-text { color: var(--text-body) !important; }
+body.oci-pro-skin .oci-footer { color: var(--text-muted) !important; border-top: 1px solid var(--border) !important; }
+body.oci-pro-skin dl dt { color: var(--accent-cyan) !important; text-shadow: none !important; }
+/* loading skeleton: dark shimmer, not white */
+body.oci-pro-skin .oci-skeleton {
+  background: linear-gradient(90deg, rgba(59,130,246,.06), rgba(59,130,246,.16), rgba(59,130,246,.06)) !important;
+  border-radius: 8px !important;
+}
+body.oci-pro-skin .oci-error-banner { background: linear-gradient(160deg,#2a0d12,#140507) !important; border: 1px solid rgba(255,80,80,.5) !important; color: #fecaca !important; border-radius: var(--radius) !important; }
+body.oci-pro-skin .oci-retry-btn { background: transparent !important; color: var(--link) !important; border: 1px solid var(--border) !important; }
+
+/* ---- journey posts (block latest-posts + classic posts) ---- */
+body.oci-pro-skin .wp-block-latest-posts.is-grid { gap: 1.5rem; }
+body.oci-pro-skin .wp-block-latest-posts.is-grid > li, body.oci-pro-skin .wp-block-post {
+  background: var(--surface) !important; border: 1px solid var(--border-soft) !important;
+  border-radius: var(--radius) !important; padding: 1.5rem !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 8px 22px -14px rgba(0,0,0,.7) !important;
+  transition: transform .18s, border-color .2s, box-shadow .2s; position: relative; overflow: hidden;
+}
+body.oci-pro-skin .wp-block-latest-posts.is-grid > li:hover, body.oci-pro-skin .wp-block-post:hover {
+  transform: translateY(-3px); border-color: rgba(59,130,246,.4) !important; box-shadow: var(--shadow), var(--glow) !important;
+}
+body.oci-pro-skin .wp-block-latest-posts__post-title, body.oci-pro-skin .wp-block-post-title a { color: #fff !important; font-family: var(--font-head) !important; }
+body.oci-pro-skin .wp-block-latest-posts__post-title:hover, body.oci-pro-skin .wp-block-post-title a:hover { color: #93c5fd !important; }
+body.oci-pro-skin .wp-block-latest-posts__post-date { color: var(--accent-cyan) !important; font-family: var(--font-mono) !important; font-size: .75rem; }
+body.oci-pro-skin .wp-block-latest-posts__post-excerpt { color: var(--text-muted) !important; }
+
+/* ---- tables (generic) ---- */
+body.oci-pro-skin table:not(.oci-table) th, body.oci-pro-skin table:not(.oci-table) td { border: 1px solid var(--border) !important; padding: .6rem .8rem; }
+body.oci-pro-skin table:not(.oci-table) th { background: var(--surface) !important; color: #fff !important; font-family: var(--font-head) !important; }
+
+/* ---- footer ---- */
+body.oci-pro-skin .wp-site-blocks > footer, body.oci-pro-skin footer.wp-block-template-part {
+  background: var(--bg-2) !important; border-top: 1px solid rgba(51,65,85,.6) !important; color: var(--text-muted) !important; margin-top: 3rem;
+}
+.oci-attrib { max-width: var(--container); margin: 0 auto; padding: 1.5rem 1.25rem 2rem; text-align: center; color: var(--text-faint); font-size: .82rem; font-family: var(--font-body); border-top: 1px solid rgba(51,65,85,.4); }
+.oci-attrib strong { color: var(--text-muted); }
+.oci-attrib a { color: var(--link) !important; }
+.oci-attrib .oci-updated { color: var(--accent-cyan); font-family: var(--font-mono); }
+
+/* ---- mobile ---- */
+@media (max-width: 782px) {
+  body.oci-pro-skin { font-size: 16px; }
+  body.oci-pro-skin .wp-block-latest-posts.is-grid { grid-template-columns: 1fr !important; }
+  .oci-ribbon { font-size: .72rem; }
+}
+body.oci-pro-skin .wp-block-navigation__responsive-container.is-menu-open { background: var(--bg) !important; z-index: 2147483647; }
+body.oci-pro-skin .wp-block-navigation__responsive-container.is-menu-open a { color: var(--text-body) !important; }
