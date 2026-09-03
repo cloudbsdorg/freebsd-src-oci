@@ -140,15 +140,32 @@ json_get_string_array(struct json_object *val, const char *key, int *nitems)
 	if (result == NULL)
 		return (NULL);
 
-	for (i = 0; i < len; i++) {
-		elem = json_object_array_get_idx(val, i);
-		if (json_object_get_type(elem) == json_type_string)
-			result[i] = strdup(json_object_get_string(elem));
-		else
-			result[i] = NULL;
+	/*
+	 * Compact: copy only string elements, skipping non-strings, so the
+	 * returned count matches the NULL terminator. The old code left NULL
+	 * holes mid-array while reporting *nitems = len — every NULL-terminated
+	 * consumer (exec argv, oci_free_spec) then stopped at the first hole,
+	 * truncating args and leaking the tail. On strdup OOM, fail cleanly.
+	 */
+	{
+		size_t out = 0;
+
+		for (i = 0; i < len; i++) {
+			elem = json_object_array_get_idx(val, i);
+			if (json_object_get_type(elem) != json_type_string)
+				continue;
+			result[out] = strdup(json_object_get_string(elem));
+			if (result[out] == NULL) {
+				while (out > 0)
+					free(result[--out]);
+				free(result);
+				return (NULL);
+			}
+			out++;
+		}
+		result[out] = NULL;
+		*nitems = (int)out;
 	}
-	result[len] = NULL;
-	*nitems = (int)len;
 
 	return (result);
 }
