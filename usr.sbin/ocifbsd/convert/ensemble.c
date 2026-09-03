@@ -134,9 +134,21 @@ yaml_get_field(const char *yaml, const char *field)
 	field_len = strlen(field);
 	snprintf(search, sizeof(search), "%s:", field);
 
-	p = strstr(yaml, search);
-	if (p == NULL)
-		return (NULL);
+	/*
+	 * Anchor the match to a token boundary: an unanchored strstr matches
+	 * "name:" inside "hostname:" (and "port:" inside "targetPort:"), so the
+	 * converter would extract the wrong value. Require the key to be preceded
+	 * by start-of-document, a newline, or whitespace.
+	 */
+	p = yaml;
+	for (;;) {
+		p = strstr(p, search);
+		if (p == NULL)
+			return (NULL);
+		if (p == yaml || p[-1] == '\n' || p[-1] == ' ' || p[-1] == '\t')
+			break;
+		p += 1;
+	}
 
 	p += field_len + 1;
 	while (isspace((unsigned char)*p))

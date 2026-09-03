@@ -204,8 +204,19 @@ ensemble_services_get_value(const char *service_block, const char *key)
 		}
 		result = malloc(p - start + 1);
 		if (result != NULL) {
+			size_t n;
+
 			memcpy(result, start, p - start);
 			result[p - start] = '\0';
+			/*
+			 * An inline [ ... ] array is collected across newlines, so a
+			 * crafted manifest value could smuggle embedded newlines into
+			 * the emitted config and inject new top-level keys (extra
+			 * services, privileged volume mounts). Neutralise them.
+			 */
+			for (n = 0; result[n] != '\0'; n++)
+				if (result[n] == '\n' || result[n] == '\r')
+					result[n] = ' ';
 		}
 		return (result);
 	}
