@@ -49,6 +49,9 @@ SRCS=	\
 	src/state.c \
 	src/hooks.c \
 	src/procutil.c \
+	src/fsutil.c \
+	src/rctl.c \
+	src/proxy.c \
 	src/utils.c \
 	src/jsonfmt.c \
 	network/netcfg.c

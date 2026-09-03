@@ -254,6 +254,16 @@ int	state_init(void);
 /* Base directory for all runtime state (honors $OCIFBSD_STATE_DIR); use this
  * everywhere so state JSON, locks, epair sidecars, logs, and jailroots agree. */
 const char *state_base_dir(void);
+
+/* Symlink-safe recursive remove (src/fsutil.c). Refuses "" and "/". */
+int	rm_rf(const char *path);
+
+/* RACCT resource-usage capture for `ocifbsd stats` (src/rctl.c). */
+int	capture_rctl(const char *jailname, char *buf, size_t buflen);
+uintmax_t rctl_field(const char *buf, const char *key);
+
+/* Native L4 load balancer / reverse proxy subcommand (src/proxy.c). */
+int	cmd_proxy(int argc, char **argv);
 int	state_save(const struct ocifbsd_container *c);
 int	state_delete(const char *id);
 struct ocifbsd_container *state_load(const char *id);
