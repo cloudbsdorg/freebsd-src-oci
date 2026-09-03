@@ -345,7 +345,6 @@ ensemble_services_convert_v2(const char *compose, char **output,
 {
 	char **services;
 	int count;
-	char *result = NULL;
 
 	services = ensemble_services_get_services(compose, &count);
 	if (services == NULL || count == 0) {
