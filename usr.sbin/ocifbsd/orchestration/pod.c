@@ -792,6 +792,14 @@ pod_get_status(struct pod *pod)
 {
 	if (pod == NULL)
 		return (NULL);
+	/*
+	 * A pod loaded from disk (pod_load_disk) has spec == NULL and no live
+	 * status array; dereferencing them here crashed the root CLI on
+	 * `pod logs`/status of a persisted pod. Return whatever status exists.
+	 */
+	if (pod->spec == NULL || pod->status == NULL ||
+	    pod->status->containers == NULL)
+		return (pod->status);
 
 	/* Refresh status from containers */
 	for (int i = 0; i < pod->spec->ncontainers; i++) {
@@ -850,12 +858,34 @@ pod_update(struct pod *pod, struct pod_spec *new_spec)
 	/* Stop current pod */
 	pod_stop(pod, SIGTERM);
 
-	/* Update spec */
-	free(pod->spec);
+	/*
+	 * Replace the spec. Free the OLD spec's owned containers array (the old
+	 * code leaked it) and deep-copy the NEW containers into our own array
+	 * (the old memcpy aliased new_spec->containers, so pod_free would later
+	 * double-free it with the caller). Mirrors pod_create's ownership.
+	 */
+	if (pod->spec != NULL) {
+		free(pod->spec->containers);
+		free(pod->spec);
+	}
 	pod->spec = calloc(1, sizeof(struct pod_spec));
 	if (pod->spec == NULL)
 		return (-1);
-	memcpy(pod->spec, new_spec, sizeof(struct pod_spec));
+	*pod->spec = *new_spec;			/* scalar fields */
+	pod->spec->containers = NULL;
+	pod->spec->ncontainers = 0;
+	if (new_spec->ncontainers > 0 && new_spec->containers != NULL) {
+		pod->spec->containers = calloc(new_spec->ncontainers,
+		    sizeof(struct container_spec));
+		if (pod->spec->containers == NULL) {
+			free(pod->spec);
+			pod->spec = NULL;
+			return (-1);
+		}
+		memcpy(pod->spec->containers, new_spec->containers,
+		    (size_t)new_spec->ncontainers * sizeof(struct container_spec));
+		pod->spec->ncontainers = new_spec->ncontainers;
+	}
 
 	/* Restart pod with new spec */
 	return (pod_start(pod));
@@ -871,6 +901,11 @@ pod_logs(struct pod *pod, const char *container, int tail, bool follow)
 
 	if (pod == NULL)
 		return (-1);
+	/* A disk-loaded pod has no spec/status arrays; do not deref them. */
+	if (pod->spec == NULL || pod->status == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
 
 	if (container == NULL) {
 		/* Return logs from first container */

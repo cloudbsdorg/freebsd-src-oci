@@ -286,7 +286,19 @@ stack_create(struct stack_spec *spec)
 
 	stack->status = status;
 
-	/* Create services for this stack */
+	/* Create services for this stack, tracking them so a mid-loop failure
+	 * can actually undo the ones already created (the old rollback was an
+	 * empty comment, orphaning services in the registry and on disk). */
+	struct service **created = NULL;
+	if (spec->nservices > 0) {
+		created = calloc((size_t)spec->nservices, sizeof(struct service *));
+		if (created == NULL) {
+			free(status);
+			free(stack->spec);
+			free(stack);
+			return (NULL);
+		}
+	}
 	for (i = 0; i < spec->nservices; i++) {
 		struct service_spec *svc_spec = &spec->services[i];
 		struct service *svc;
@@ -295,16 +307,18 @@ stack_create(struct stack_spec *spec)
 
 		svc = service_create(svc_spec);
 		if (svc == NULL) {
-			/* Rollback created services */
-			for (int j = 0; j < i; j++) {
-				/* Service would be freed here */
-			}
+			/* Roll back the services created so far. */
+			for (int j = 0; j < i; j++)
+				(void)service_delete(created[j]);
+			free(created);
 			free(status);
 			free(stack->spec);
 			free(stack);
 			return (NULL);
 		}
+		created[i] = svc;
 	}
+	free(created);
 
 	/* Add to registry */
 	pthread_mutex_lock(&stack_registry_lock);
@@ -1377,8 +1391,16 @@ service_get_status(struct service *service)
 		return (NULL);
 
 	for (int i = 0; i < service->nreplicas; i++) {
-		if (service->replicas[i].state == REPLICA_STATE_RUNNING)
+		if (service->replicas[i].state == REPLICA_STATE_RUNNING) {
 			running++;
+			/*
+			 * Until per-replica health is wired into replica state, a
+			 * RUNNING replica counts as ready. The old code left `ready`
+			 * at 0, so `service list` and rolling-update always reported
+			 * 0 ready replicas.
+			 */
+			ready++;
+		}
 	}
 
 	service->status->available_replicas = running;

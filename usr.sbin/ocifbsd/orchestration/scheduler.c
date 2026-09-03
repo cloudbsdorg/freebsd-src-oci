@@ -128,7 +128,7 @@ scheduler_init(void)
 	nodes[0]->ready = true;
 	nodes[0]->schedulable = true;
 	nodes[0]->last_heartbeat = time(NULL);
-	nodes[0]->memory_capacity = get_physmem() * 4096;  /* bytes */
+	nodes[0]->memory_capacity = get_physmem();  /* hw.physmem is bytes */
 	nodes[0]->cpu_capacity = sysconf(_SC_NPROCESSORS_ONLN) * 1000;  /* millicores */
 	nodes[0]->pods_capacity = 110;  /* default pods-per-node limit */
 
@@ -166,29 +166,37 @@ score_node(struct node_info *node, struct pod_spec *spec)
 	if (!node->ready || !node->schedulable)
 		return (0.0);
 
-	/* Check if node has enough resources */
+	/*
+	 * Check capacity with explicit underflow guards: memory_used can exceed
+	 * memory_capacity (over-reservation), and an unsigned "capacity - used"
+	 * would then wrap to a huge value and pass every fit check (fail-open).
+	 */
 	if (spec->resources.memory_limit > 0) {
-		uint64_t avail = node->memory_capacity - node->memory_used;
+		uint64_t avail = (node->memory_capacity > node->memory_used) ?
+		    node->memory_capacity - node->memory_used : 0;
 		if (avail < spec->resources.memory_limit)
 			return (0.0);
 	}
 
 	if (spec->resources.cpu_limit > 0) {
-		uint64_t avail = node->cpu_capacity - node->cpu_used;
+		uint64_t avail = (node->cpu_capacity > node->cpu_used) ?
+		    node->cpu_capacity - node->cpu_used : 0;
 		if (avail < (uint64_t)spec->resources.cpu_limit)
 			return (0.0);
 	}
 
 	/* Score based on available resources (bin-packing) */
 	if (node->memory_capacity > 0) {
-		double mem_avail_pct = (double)(node->memory_capacity - node->memory_used) /
-		    node->memory_capacity;
+		uint64_t mem_avail = (node->memory_capacity > node->memory_used) ?
+		    node->memory_capacity - node->memory_used : 0;
+		double mem_avail_pct = (double)mem_avail / node->memory_capacity;
 		score -= (1.0 - mem_avail_pct) * scoring_weights.memory_weight;
 	}
 
 	if (node->cpu_capacity > 0) {
-		double cpu_avail_pct = (double)(node->cpu_capacity - node->cpu_used) /
-		    node->cpu_capacity;
+		uint64_t cpu_avail = (node->cpu_capacity > node->cpu_used) ?
+		    node->cpu_capacity - node->cpu_used : 0;
+		double cpu_avail_pct = (double)cpu_avail / node->cpu_capacity;
 		score -= (1.0 - cpu_avail_pct) * scoring_weights.cpu_weight;
 	}
 
@@ -241,16 +249,20 @@ scheduler_select_node(struct pod_spec *spec)
 		}
 	}
 
-	pthread_mutex_unlock(&scheduler_lock);
-
 	if (best_node == NULL) {
+		pthread_mutex_unlock(&scheduler_lock);
 		strlcpy(reason, "No schedulable nodes available", sizeof(reason));
 		decision->score = 0;
 		decision->failed_reason = strdup(reason);
 		return (decision);
 	}
 
-	/* Build decision */
+	/*
+	 * Build the decision AND reserve the resources while still holding the
+	 * lock. The old code dropped the lock, then dereferenced best_node and
+	 * re-locked to reserve — a use-after-free window in which
+	 * scheduler_remove_node could free best_node.
+	 */
 	strlcpy(decision->node, best_node->name, sizeof(decision->node));
 	decision->score = best_score;
 	snprintf(reason, sizeof(reason),
@@ -264,13 +276,13 @@ scheduler_select_node(struct pod_spec *spec)
 	    best_node->pods_capacity);
 	strlcpy(decision->reason, reason, sizeof(decision->reason));
 
-	/* Update node resource usage (preliminary) */
-	pthread_mutex_lock(&scheduler_lock);
+	/* Preliminary resource reservation. */
 	if (spec->resources.memory_limit > 0)
 		best_node->memory_used += spec->resources.memory_limit;
 	if (spec->resources.cpu_limit > 0)
 		best_node->cpu_used += spec->resources.cpu_limit;
 	best_node->pods_running++;
+
 	pthread_mutex_unlock(&scheduler_lock);
 
 	return (decision);
@@ -354,11 +366,6 @@ scheduler_add_node(const char *node_name)
 {
 	struct node_info *node;
 
-	if (node_count >= MAX_NODES) {
-		errno = ENOMEM;
-		return (-1);
-	}
-
 	node = calloc(1, sizeof(struct node_info));
 	if (node == NULL)
 		return (-1);
@@ -375,7 +382,18 @@ scheduler_add_node(const char *node_name)
 	node->memory_capacity = (uint64_t)8 * 1024 * 1024 * 1024;	/* 8 GiB */
 	node->cpu_capacity = 8000;					/* 8 cores */
 
+	/*
+	 * Re-check the bound UNDER the lock: the old code tested node_count
+	 * before locking, so two concurrent adds at MAX_NODES-1 could both pass
+	 * and write nodes[MAX_NODES] — an out-of-bounds write in a root process.
+	 */
 	pthread_mutex_lock(&scheduler_lock);
+	if (node_count >= MAX_NODES) {
+		pthread_mutex_unlock(&scheduler_lock);
+		free(node);
+		errno = ENOMEM;
+		return (-1);
+	}
 	nodes[node_count++] = node;
 	pthread_mutex_unlock(&scheduler_lock);
 
