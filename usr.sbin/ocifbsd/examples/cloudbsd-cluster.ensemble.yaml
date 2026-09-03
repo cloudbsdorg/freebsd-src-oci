@@ -41,7 +41,11 @@ spec:
       replicas: 3
       placement: perNode          # exactly one per node, on the node's pod net
       ipHost: 11                  # 10.88.<node>.11
-      ports: [3306, 4567, 4568, 4444]
+      ports:
+        - 3306
+        - 4567
+        - 4568
+        - 4444
       galera:
         clusterName: oci_galera
         provider: /usr/local/lib/libgalera_smm.so
@@ -55,7 +59,9 @@ spec:
       replicas: 3
       placement: perNode
       ipHost: 10                  # 10.88.<node>.10
-      ports: [6379, 16379]
+      ports:
+        - 6379
+        - 16379
       redisCluster:
         masters: 3
         announceIpFromPod: true
@@ -79,7 +85,8 @@ spec:
       replicas: 3
       placement: perNode
       ipHost: 13                  # 10.88.<node>.13
-      ports: [80]
+      ports:
+        - 80
       upstream: wordpress         # fastcgi_pass to the local wordpress pod
 
   # --- Native ocifbsd L4 load balancer in front of the web replicas ---
