@@ -1,0 +1,97 @@
+# CloudBSD OCI cluster — Ensemble manifest
+#
+# Declarative description of the whole 3-node cluster: a routed pod network
+# per node, a synchronous MariaDB Galera cluster, a 3-master Redis Cluster,
+# the WordPress + Nginx web tier on every node, and the native ocifbsd L4
+# proxy in front. `ocifbsd stack up -f cloudbsd-cluster.ensemble.yaml`
+# deploys it across the nodes named below.
+#
+# This is the single file the cluster should have been born from.
+apiVersion: ocifbsd/v1
+kind: Stack
+metadata:
+  name: cloudbsd
+  namespace: default
+spec:
+  # The member nodes and the routed pod subnet each one owns. ocifbsd wires
+  # inter-node routes (no NAT between pods) so container IPs are directly
+  # reachable across nodes — which is what lets Galera and Redis Cluster form.
+  nodes:
+    - name: fb16-1
+      address: 192.168.1.241
+      podSubnet: 10.88.1.0/24
+      podGateway: 10.88.1.1
+    - name: fb16-2
+      address: 192.168.1.242
+      podSubnet: 10.88.2.0/24
+      podGateway: 10.88.2.1
+    - name: fb16-3
+      address: 192.168.1.243
+      podSubnet: 10.88.3.0/24
+      podGateway: 10.88.3.1
+  network:
+    bridge: ocifbsdpodnet
+    dns: 1.1.1.1
+
+  services:
+    # --- Synchronous data tier: MariaDB Galera, one instance per node ---
+    - kind: StatefulSet
+      name: mariadb
+      image: local/mariadb:latest
+      replicas: 3
+      placement: perNode          # exactly one per node, on the node's pod net
+      ipHost: 11                  # 10.88.<node>.11
+      ports: [3306, 4567, 4568, 4444]
+      galera:
+        clusterName: oci_galera
+        provider: /usr/local/lib/libgalera_smm.so
+        sstMethod: rsync
+        bootstrapNode: fb16-1     # bootstraps the primary component; peers SST/join
+
+    # --- Shared cache/session tier: 3-master Redis Cluster ---
+    - kind: StatefulSet
+      name: redis
+      image: local/redis:7
+      replicas: 3
+      placement: perNode
+      ipHost: 10                  # 10.88.<node>.10
+      ports: [6379, 16379]
+      redisCluster:
+        masters: 3
+        announceIpFromPod: true
+
+    # --- Stateless web tier: WordPress (PHP-FPM) on every node ---
+    - kind: Deployment
+      name: wordpress
+      image: local/wordpress:latest
+      replicas: 3
+      placement: perNode
+      ipHost: 12                  # 10.88.<node>.12
+      containerPort: 9000
+      env:
+        - DB_HOST=local           # each node talks to its local Galera node
+        - REDIS=cluster           # rediscluster session handler across seeds
+
+    # --- Stateless web tier: Nginx (web + FastCGI cache) on every node ---
+    - kind: Deployment
+      name: nginx
+      image: local/nginx:latest
+      replicas: 3
+      placement: perNode
+      ipHost: 13                  # 10.88.<node>.13
+      ports: [80]
+      upstream: wordpress         # fastcgi_pass to the local wordpress pod
+
+  # --- Native ocifbsd L4 load balancer in front of the web replicas ---
+  proxy:
+    node: fb16-1
+    listen: 192.168.1.241:8080
+    algo: round-robin
+    backends:
+      - 10.88.1.13:80
+      - 10.88.2.13:80
+      - 10.88.3.13:80
+    workers: perCore
+    circuitBreaker:
+      threshold: 3
+      cooldownSeconds: 10

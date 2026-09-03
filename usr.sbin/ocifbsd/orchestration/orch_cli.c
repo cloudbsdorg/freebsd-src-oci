@@ -32,6 +32,7 @@
 
 #include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -627,24 +628,54 @@ static int
 cmd_stack_up(int argc, char **argv)
 {
 	char *name = NULL;
+	char *file = NULL;
 
 	static struct option longopts[] = {
 		{ "name", required_argument, NULL, 'n' },
+		{ "file", required_argument, NULL, 'f' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	optind = 0;
 	int ch;
-	while ((ch = getopt_long(argc, argv, "n:", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "n:f:", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
 			name = optarg;
 			break;
+		case 'f':
+			file = optarg;
+			break;
 		}
 	}
 
+	/*
+	 * `stack up -f <ensemble>` deploys the cluster described by an Ensemble
+	 * manifest across its member nodes: routed pod networks, the
+	 * per-node StatefulSet/Deployment services, the Galera and Redis
+	 * clusters, and the proxy. The deploy engine reconciles the manifest
+	 * (idempotent) using the same primitives as the runtime.
+	 */
+	if (file != NULL) {
+		pid_t pid = fork();
+
+		if (pid == 0) {
+			execl("/usr/local/libexec/ocifbsd-stack-deploy",
+			    "ocifbsd-stack-deploy", file, (char *)NULL);
+			perror("exec ocifbsd-stack-deploy");
+			_exit(127);
+		} else if (pid > 0) {
+			int st = 0;
+
+			(void)waitpid(pid, &st, 0);
+			return (WIFEXITED(st) ? WEXITSTATUS(st) : 1);
+		}
+		perror("fork");
+		return (1);
+	}
+
 	if (name == NULL) {
-		fprintf(stderr, "Error: --name is required\n");
+		fprintf(stderr, "Error: --name or --file is required\n");
 		return (1);
 	}
 
