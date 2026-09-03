@@ -31,6 +31,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/jail.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
@@ -65,7 +66,7 @@
  * attacker-controlled SHELL probe strings until then.
  */
 static int
-run_health_command(const char *command, bool shell)
+run_health_command(const char *command, bool shell, int jid)
 {
 	pid_t pid;
 	int status;
@@ -73,29 +74,52 @@ run_health_command(const char *command, bool shell)
 	if (command == NULL || command[0] == '\0')
 		return (-1);
 
+	/*
+	 * Health-check commands come verbatim from the (untrusted) manifest and
+	 * this runs as root. Two hard rules close the arbitrary-root-exec sink:
+	 *   - SHELL probes are refused outright: a manifest-supplied shell string
+	 *     run through /bin/sh -c as root is a command-injection vector with no
+	 *     safe form. Use an EXEC probe with an absolute command instead.
+	 *   - EXEC probes run ONLY inside the target container's jail, never in
+	 *     the host context. Without a jail id to confine to, fail the probe
+	 *     closed rather than exec a manifest command as root on the host.
+	 */
+	if (shell) {
+		fprintf(stderr, "health: refusing SHELL probe (arbitrary root "
+		    "exec); use an EXEC probe with an absolute command\n");
+		return (-1);
+	}
+	if (jid <= 0) {
+		fprintf(stderr, "health: refusing EXEC probe with no jail to "
+		    "confine it to (would run as root on the host)\n");
+		return (-1);
+	}
+
 	pid = fork();
 	if (pid < 0)
 		return (-1);
 	if (pid == 0) {
-		if (shell) {
-			execl("/bin/sh", "sh", "-c", command, (char *)NULL);
-		} else {
-			/* Tokenize on whitespace into argv (exec-probe form). */
-			char *buf = strdup(command);
-			char *argv[64];
-			int argc = 0;
-			char *save = NULL, *tok;
+		char *buf, *argv[64], *save = NULL, *tok;
+		int argc = 0;
 
-			if (buf == NULL)
-				_exit(127);
-			for (tok = strtok_r(buf, " \t", &save);
-			    tok != NULL && argc < 63;
-			    tok = strtok_r(NULL, " \t", &save))
-				argv[argc++] = tok;
-			argv[argc] = NULL;
-			if (argc > 0)
-				execvp(argv[0], argv);
-		}
+		/* Enter the container first; everything below runs confined. */
+		if (jail_attach(jid) != 0)
+			_exit(127);
+		buf = strdup(command);
+		if (buf == NULL)
+			_exit(127);
+		for (tok = strtok_r(buf, " \t", &save);
+		    tok != NULL && argc < 63;
+		    tok = strtok_r(NULL, " \t", &save))
+			argv[argc++] = tok;
+		argv[argc] = NULL;
+		/*
+		 * Absolute path only, and execv (not execvp): never resolve the
+		 * program through $PATH, which an attacker could steer.
+		 */
+		if (argc == 0 || argv[0][0] != '/')
+			_exit(127);
+		execv(argv[0], argv);
 		_exit(127);
 	}
 	if (waitpid(pid, &status, 0) < 0)
@@ -111,6 +135,7 @@ struct health_check_state {
 	char			service_name[256];
 	char			namespace[128];
 	health_check_type_t	type;
+	int			jid;	/* jail to confine EXEC probes to; 0 = none */
 	time_t			next_check;
 	int			consecutive_failures;
 	int			consecutive_successes;
@@ -274,10 +299,10 @@ execute_health_check(struct health_check_state *state)
 
 	case HEALTH_CHECK_EXEC:
 		return run_health_command(state->check_data.exec.command,
-		    false);
+		    false, state->jid);
 	case HEALTH_CHECK_SHELL:
 		return run_health_command(state->check_data.exec.command,
-		    true);
+		    true, state->jid);
 
 	default:
 		return (-1);
@@ -547,7 +572,8 @@ health_check_run(struct service *service, const char *replica_name)
 			    hc->port, hc->path);
 			result = health_check_http(url, &(int){0});
 		} else if (hc->type == HEALTH_CHECK_EXEC) {
-			result = run_health_command(hc->command, false);
+			/* No jail context here -> fail closed (no host exec). */
+			result = run_health_command(hc->command, false, 0);
 		} else {
 			result = 0;  /* No check defined */
 		}
