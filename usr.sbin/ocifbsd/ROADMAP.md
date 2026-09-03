@@ -10,6 +10,44 @@ Legend — effort: S (≤1 day) · M (2–4 days) · L (1–2 weeks) · XL (mult
 
 ---
 
+## Cross-cutting: Code quality & security review  *(gate on every phase & merge)*
+
+No item is **done** until it passes review at both the code and integration
+levels. This is a standing gate, not a phase.
+
+**Code level (every change):**
+- Design + correctness to the project bar — Gang-of-Four patterns and
+  Knuth-grade rigor; small, legible, `style(9)`-clean C.
+- Independent second-opinion audit with the local **Grok** analyzer
+  (`grok-analyze` skill) — loop until the findings are resolved, not deferred.
+- `/code-review` for correctness/simplification/efficiency on the diff, and
+  `/security-review` for its security surface.
+- C memory-safety focus: no realloc-into-same-pointer leaks, no use-after-free,
+  all untrusted input bounded and escaped (the 22 prior review batches are the
+  standing baseline).
+
+**Integration level (every phase):**
+- End-to-end security review: authN/authZ boundaries, secrets never in plaintext
+  or logs, mTLS between components, network segmentation, least privilege, and
+  audit-log completeness.
+- Integration/E2E tests against the **real** cluster, not mocks: failover,
+  reboot recovery, RBAC denials, token expiry, node-agent authentication,
+  admission rejection.
+- Supply chain: dependency + image scanning; signed images verified on pull.
+
+**Dedicated pre-"production" passes:**
+- Threat model + adversarial audit of the control-plane API (Phase 2.5):
+  authz bypass, token forgery, admission bypass, injection, path traversal,
+  decompression/replica bombs.
+- Performance + resource-safety pass (the stress-test discipline: find the
+  breaking point, prove clean degradation, no corruption under overload).
+
+**Roadmap DoD:** every shipped increment carries a code review (Grok-audited,
+GoF + Knuth), a security review (code **and** integration), and green E2E, with
+findings fixed before merge.
+
+---
+
 ## Phase 0 — Clean build, CI, packaging  *(unblocks everything)*
 
 0.1 **Green -Werror build** · S
