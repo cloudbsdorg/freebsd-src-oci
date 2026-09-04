@@ -1070,6 +1070,30 @@ network_get(const char *network_id)
 	return (config);
 }
 
+/* Free a network_config returned by network_get()/network_list(). */
+void
+network_config_free(struct network_config *c)
+{
+	if (c == NULL)
+		return;
+	free(c->name);
+	free(c->id);
+	free(c->driver);
+	free(c->bridge);
+	free(c->mtu);
+	free(c->ipam_driver);
+	free(c->gateway);
+	free(c->subnet);
+	if (c->dns_servers != NULL) {
+		for (int i = 0; i < c->ndns; i++)
+			free(c->dns_servers[i]);
+		free(c->dns_servers);
+	}
+	free(c->options);
+	free(c->labels);
+	free(c);
+}
+
 int
 network_list(struct network_config ***networks, int *nnetworks)
 {
@@ -1705,6 +1729,7 @@ network_inspect(const char *network_id, char **json_output)
 	len = 4096;
 	json = malloc(len);
 	if (json == NULL) {
+		network_config_free(config);
 		return (-1);
 	}
 
@@ -1730,5 +1755,6 @@ network_inspect(const char *network_id, char **json_output)
 
 	*json_output = json;
 
+	network_config_free(config);
 	return (0);
 }

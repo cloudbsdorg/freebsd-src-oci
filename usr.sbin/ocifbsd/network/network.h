@@ -151,6 +151,7 @@ int	 network_connect(const char *network_id, const char *container_id,
 	     struct endpoint **ep);
 int	 network_disconnect(const char *network_id, const char *container_id);
 struct network_config *network_get(const char *network_id);
+void	network_config_free(struct network_config *c);
 int	 network_list(struct network_config ***networks, int *nnetworks);
 int	 network_inspect(const char *network_id, char **json_output);
 
