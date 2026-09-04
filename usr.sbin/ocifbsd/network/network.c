@@ -649,19 +649,68 @@ epair_exists(const char *epair)
  * IP address management
  */
 /*
- * Allocation bitmap indexed by an address's offset within its range. The old
- * code overloaded a single uint32_t as BOTH the next-address cursor AND a
- * 32-bit bitmask keyed by (addr % 32), so allocations aliased every 32
- * addresses and 1 << 31 was undefined behaviour. This is a correct in-process
- * allocator (unsigned shifts, one bit per address); persisting the bitmap in
- * the network state across CLI invocations remains a follow-up.
+ * Allocation bitmap indexed by an address's offset within its range (one bit
+ * per address, unsigned shifts — the old code overloaded one uint32_t as both
+ * the cursor AND a 32-bit mask keyed by addr%32, aliasing every 32 addresses
+ * with a 1<<31 UB). The bitmap is PERSISTED to one file per range under the
+ * network state dir, so allocations survive across ocifbsd invocations — each
+ * CLI process is short-lived, and an in-memory-only bitmap would hand out
+ * duplicate addresses to successive `network connect` calls. (A concurrent-
+ * allocation lock across the read-modify-write is a further refinement.)
  */
 #define IPAM_MAX_BITS	65536
-static uint8_t ipam_bitmap[IPAM_MAX_BITS / 8];
+#define IPAM_BYTES	(IPAM_MAX_BITS / 8)
+
+static void
+ipam_bitmap_path(uint32_t start, char *buf, size_t buflen)
+{
+	snprintf(buf, buflen, "%s/ipam-%08x.map",
+	    OCIFBSD_NETWORK_STATE_DIR, start);
+}
+
+static void
+ipam_load(uint32_t start, uint8_t *bitmap)
+{
+	char path[PATH_MAX];
+	FILE *f;
+
+	memset(bitmap, 0, IPAM_BYTES);
+	ipam_bitmap_path(start, path, sizeof(path));
+	f = fopen(path, "rb");
+	if (f != NULL) {
+		(void)fread(bitmap, 1, IPAM_BYTES, f);
+		fclose(f);
+	}
+}
+
+static int
+ipam_save(uint32_t start, const uint8_t *bitmap)
+{
+	char path[PATH_MAX], tmp[PATH_MAX];
+	FILE *f;
+
+	ipam_bitmap_path(start, path, sizeof(path));
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	f = fopen(tmp, "wb");
+	if (f == NULL)
+		return (-1);
+	if (fwrite(bitmap, 1, IPAM_BYTES, f) != IPAM_BYTES) {
+		fclose(f);
+		unlink(tmp);
+		return (-1);
+	}
+	fclose(f);
+	if (rename(tmp, path) != 0) {	/* atomic replace */
+		unlink(tmp);
+		return (-1);
+	}
+	return (0);
+}
 
 int
 ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 {
+	uint8_t bitmap[IPAM_BYTES];
 	uint32_t start, end, current;
 
 	if (range == NULL || addr == NULL)
@@ -669,6 +718,7 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 
 	start = ntohl(range->start.s_addr);
 	end = ntohl(range->end.s_addr);
+	ipam_load(start, bitmap);
 
 	/* Skip the gateway (first usable address in the range). */
 	for (current = start + 1; current <= end; current++) {
@@ -676,8 +726,10 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 
 		if (idx >= IPAM_MAX_BITS)
 			break;
-		if ((ipam_bitmap[idx / 8] & (1u << (idx % 8))) == 0) {
-			ipam_bitmap[idx / 8] |= (uint8_t)(1u << (idx % 8));
+		if ((bitmap[idx / 8] & (1u << (idx % 8))) == 0) {
+			bitmap[idx / 8] |= (uint8_t)(1u << (idx % 8));
+			if (ipam_save(start, bitmap) != 0)
+				return (-1);
 			addr->s_addr = htonl(current);
 			return (0);
 		}
@@ -690,6 +742,7 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 int
 ipam_release(struct ipam_range *range, struct in_addr *addr)
 {
+	uint8_t bitmap[IPAM_BYTES];
 	uint32_t start, ip, idx;
 
 	if (range == NULL || addr == NULL)
@@ -700,10 +753,11 @@ ipam_release(struct ipam_range *range, struct in_addr *addr)
 	if (ip < start)
 		return (-1);
 	idx = ip - start;
-	if (idx < IPAM_MAX_BITS)
-		ipam_bitmap[idx / 8] &= (uint8_t)~(1u << (idx % 8));
-
-	return (0);
+	if (idx >= IPAM_MAX_BITS)
+		return (0);
+	ipam_load(start, bitmap);
+	bitmap[idx / 8] &= (uint8_t)~(1u << (idx % 8));
+	return (ipam_save(start, bitmap));
 }
 
 /*
