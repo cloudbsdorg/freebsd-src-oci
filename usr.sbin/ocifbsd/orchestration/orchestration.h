@@ -417,7 +417,67 @@ struct orch_event **orch_event_list(const char *namespace, int *count);
 
 /*
  * Pod operations
+ *
+ * OWNERSHIP CONTRACT for pods, stacks and services
+ * ------------------------------------------------
+ * Each of these three object kinds lives in a process-wide registry that is
+ * the single owner of every live instance (an Identity Map: at most one
+ * in-memory object per name+namespace, so two lookups of the same object
+ * always return the same pointer and a mutation through one is visible
+ * through the other).
+ *
+ *   *_create()   Constructs the object and hands ownership to the registry.
+ *                Returns a BORROWED pointer to it.
+ *   *_get()      Returns a BORROWED pointer, whether the object was already
+ *                resident or had to be reconstructed from on-disk state (in
+ *                which case it is interned into the registry first).
+ *   *_list()     Returns an OWNED array of BORROWED element pointers. Free
+ *                the array with free(); never free the elements.
+ *   *_delete()   The ONLY release operation. It removes the object from the
+ *                registry, unlinks its state file, and frees it. The caller's
+ *                pointer -- and any other pointer to the same object -- is
+ *                dangling afterwards.
+ *   *_free()     Destructor used BY the registry (and by failed constructors).
+ *                A caller holding a borrowed pointer must not call it:
+ *                doing so frees an object the registry still references.
+ *
+ * Interior pointers returned by pod_get_status() and service_get_status() are
+ * likewise BORROWED and share the lifetime of the object they point into.
+ * rolling_update_get_status() is the exception: it returns an OWNED snapshot
+ * (free it with free()), because the record it describes can be recycled and
+ * a pointer into the table would then silently name a different service.
+ *
+ * The exceptions -- functions that DO return memory the caller must release --
+ * are scheduler_select_node() (free with scheduling_decision_free()),
+ * scheduler_list_nodes() and orch_event_list() (free each element, then the
+ * array), and service_get_replicas() (free the array only; the elements point
+ * into the service).
+ *
+ * Spec ownership (orchestration/spec.c). Each *_copy() deep-copies every
+ * owned pointer in the spec, and the matching *_release() frees exactly what
+ * the copy allocated -- they are strict duals, so release(copy(x)) neither
+ * leaks nor double-frees. *_release() frees the spec's CONTENTS, not the
+ * struct itself, because specs are commonly array elements. A copy returns 0
+ * on success, or -1 having released whatever it built and zeroed the
+ * destination, so a partially constructed spec is never handed back.
+ *
+ * Use these instead of assigning or memcpy'ing a spec: a shallow copy
+ * duplicates the pointers, leaving two structs referencing one set of strings
+ * with no owner.
  */
+int		container_spec_copy(struct container_spec *dst,
+		    const struct container_spec *src);
+void		container_spec_release(struct container_spec *s);
+int		pod_spec_copy(struct pod_spec *dst, const struct pod_spec *src);
+void		pod_spec_release(struct pod_spec *s);
+int		service_spec_copy(struct service_spec *dst,
+		    const struct service_spec *src);
+void		service_spec_release(struct service_spec *s);
+int		stack_spec_copy(struct stack_spec *dst,
+		    const struct stack_spec *src);
+void		stack_spec_release(struct stack_spec *s);
+void		scheduling_decision_free(struct scheduling_decision *d);
+
 struct pod	*pod_create(struct pod_spec *spec);
 int		pod_start(struct pod *pod);
 int		pod_stop(struct pod *pod, int sig);

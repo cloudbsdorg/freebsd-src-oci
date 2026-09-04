@@ -67,6 +67,122 @@ static int service_registry_count = 0;
 static pthread_mutex_t service_registry_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*
+ * Registry insertion and Identity Map interning, for stacks and for services.
+ *
+ * See the long comment on pod_registry_intern() in pod.c: stack_get()/
+ * stack_list()/service_get()/service_list() had the same ambiguous contract,
+ * returning a borrowed registry pointer on a hit and a freshly allocated
+ * object on an on-disk fallback. Every caller in the tree resolved that
+ * ambiguity the same way -- by never freeing -- so every disk-backed lookup
+ * leaked a whole stack or service, and repeated lookups of one on-disk name
+ * produced several independent objects whose mutations did not agree.
+ *
+ * Interning the loaded object into the registry makes the contract uniform:
+ * these functions ALWAYS return borrowed pointers, and the object lives until
+ * the matching *_delete(). Insertion commits the new capacity only after the
+ * growth succeeds -- the open-coded versions raised the recorded size before
+ * calling ocifbsd_realloc_grow(), so a failed growth left capacity claiming
+ * space the array did not have and the next insert wrote out of bounds.
+ */
+static int
+stack_registry_insert_locked(struct stack *stack)
+{
+	int newsize;
+
+	if (stack_registry_count >= stack_registry_size) {
+		newsize = stack_registry_size ? stack_registry_size * 2 : 16;
+		if (ocifbsd_realloc_grow((void **)&stack_registry,
+		    newsize * sizeof(struct stack *)) != 0)
+			return (-1);
+		stack_registry_size = newsize;
+	}
+	stack_registry[stack_registry_count++] = stack;
+	return (0);
+}
+
+static struct stack *
+stack_registry_intern(struct stack *stack)
+{
+	struct stack *existing = NULL;
+	int i;
+
+	if (stack == NULL)
+		return (NULL);
+
+	pthread_mutex_lock(&stack_registry_lock);
+	/* Re-check under the lock; another thread may have interned it. */
+	for (i = 0; i < stack_registry_count; i++) {
+		if (strcmp(stack_registry[i]->name, stack->name) == 0 &&
+		    strcmp(stack_registry[i]->namespace,
+		    stack->namespace) == 0) {
+			existing = stack_registry[i];
+			break;
+		}
+	}
+	if (existing != NULL) {
+		pthread_mutex_unlock(&stack_registry_lock);
+		stack_free(stack);
+		return (existing);
+	}
+	if (stack_registry_insert_locked(stack) != 0) {
+		pthread_mutex_unlock(&stack_registry_lock);
+		stack_free(stack);
+		return (NULL);
+	}
+	pthread_mutex_unlock(&stack_registry_lock);
+	return (stack);
+}
+
+static int
+service_registry_insert_locked(struct service *service)
+{
+	int newsize;
+
+	if (service_registry_count >= service_registry_size) {
+		newsize = service_registry_size ?
+		    service_registry_size * 2 : 16;
+		if (ocifbsd_realloc_grow((void **)&service_registry,
+		    newsize * sizeof(struct service *)) != 0)
+			return (-1);
+		service_registry_size = newsize;
+	}
+	service_registry[service_registry_count++] = service;
+	return (0);
+}
+
+static struct service *
+service_registry_intern(struct service *service)
+{
+	struct service *existing = NULL;
+	int i;
+
+	if (service == NULL)
+		return (NULL);
+
+	pthread_mutex_lock(&service_registry_lock);
+	for (i = 0; i < service_registry_count; i++) {
+		if (strcmp(service_registry[i]->name, service->name) == 0 &&
+		    strcmp(service_registry[i]->namespace,
+		    service->namespace) == 0) {
+			existing = service_registry[i];
+			break;
+		}
+	}
+	if (existing != NULL) {
+		pthread_mutex_unlock(&service_registry_lock);
+		service_free(service);
+		return (existing);
+	}
+	if (service_registry_insert_locked(service) != 0) {
+		pthread_mutex_unlock(&service_registry_lock);
+		service_free(service);
+		return (NULL);
+	}
+	pthread_mutex_unlock(&service_registry_lock);
+	return (service);
+}
+
+/*
  * Generate a unique stack name
  */
 static void
@@ -171,7 +287,28 @@ save_stack_state(struct stack *stack)
 		fprintf(fp, "  \"state\": \"%s\"\n", stack->status->state);
 	fprintf(fp, "}\n");
 
-	fclose(fp);
+	/*
+	 * Publish only a COMPLETE file: a short write (ENOSPC, quota) left
+	 * ferror set while the rename went ahead anyway, atomically replacing
+	 * good state with truncated JSON that a later process would parse as
+	 * a smaller, wrong object.
+	 */
+	{
+		int werr = ferror(fp);
+
+		/*
+		 * Always close, THEN judge: short-circuiting on ferror would
+		 * skip fclose and leak the stream.
+		 */
+		if (fclose(fp) != 0)
+			werr = 1;
+		if (werr != 0) {
+			unlink(tmppath);
+			free(tmppath);
+			free(path);
+			return (-1);
+		}
+	}
 	if (rename(tmppath, path) != 0) {
 		unlink(tmppath);
 		free(tmppath);
@@ -268,11 +405,22 @@ stack_create(struct stack_spec *spec)
 		free(stack);
 		return (NULL);
 	}
-	memcpy(stack->spec, spec, sizeof(struct stack_spec));
+	/*
+	 * Deep-copy the spec. The block copy this replaces aliased every
+	 * char * in the stack_spec AND the entire services array, so the
+	 * stack and its caller shared one set of strings that neither freed
+	 * (stack_free did not touch spec->services at all).
+	 */
+	if (stack_spec_copy(stack->spec, spec) != 0) {
+		free(stack->spec);
+		free(stack);
+		return (NULL);
+	}
 
 	/* Initialize status */
 	status = calloc(1, sizeof(struct stack_status));
 	if (status == NULL) {
+		stack_spec_release(stack->spec);
 		free(stack->spec);
 		free(stack);
 		return (NULL);
@@ -294,6 +442,7 @@ stack_create(struct stack_spec *spec)
 		created = calloc((size_t)spec->nservices, sizeof(struct service *));
 		if (created == NULL) {
 			free(status);
+			stack_spec_release(stack->spec);
 			free(stack->spec);
 			free(stack);
 			return (NULL);
@@ -312,29 +461,51 @@ stack_create(struct stack_spec *spec)
 				(void)service_delete(created[j]);
 			free(created);
 			free(status);
+			stack_spec_release(stack->spec);
 			free(stack->spec);
 			free(stack);
 			return (NULL);
 		}
 		created[i] = svc;
 	}
-	free(created);
-
-	/* Add to registry */
+	/*
+	 * Add to registry. Keep `created` alive until this succeeds: if the
+	 * insert fails, the services already created are live in the service
+	 * registry and on disk, and abandoning them would leave orphans with
+	 * no parent stack that a retry would then duplicate.
+	 */
 	pthread_mutex_lock(&stack_registry_lock);
-	if (stack_registry_count >= stack_registry_size) {
-		stack_registry_size = stack_registry_size ?
-		    stack_registry_size * 2 : 16;
-		if (ocifbsd_realloc_grow((void **)&stack_registry, stack_registry_size * sizeof(struct stack *)) != 0) {
+	for (i = 0; i < stack_registry_count; i++) {
+		if (strcmp(stack_registry[i]->name, stack->name) == 0 &&
+		    strcmp(stack_registry[i]->namespace,
+		    stack->namespace) == 0) {
 			pthread_mutex_unlock(&stack_registry_lock);
+			for (int j = 0; j < spec->nservices; j++)
+				if (created != NULL && created[j] != NULL)
+					(void)service_delete(created[j]);
+			free(created);
 			free(status);
+			stack_spec_release(stack->spec);
 			free(stack->spec);
 			free(stack);
+			errno = EEXIST;
 			return (NULL);
 		}
 	}
-	stack_registry[stack_registry_count++] = stack;
+	if (stack_registry_insert_locked(stack) != 0) {
+		pthread_mutex_unlock(&stack_registry_lock);
+		for (i = 0; i < spec->nservices; i++)
+			if (created != NULL && created[i] != NULL)
+				(void)service_delete(created[i]);
+		free(created);
+		free(status);
+		stack_spec_release(stack->spec);
+		free(stack->spec);
+		free(stack);
+		return (NULL);
+	}
 	pthread_mutex_unlock(&stack_registry_lock);
+	free(created);
 
 	/* Save initial state */
 	save_stack_state(stack);
@@ -505,7 +676,7 @@ stack_get(const char *name, const char *namespace)
 		struct stack *disk = stack_load_disk(name, ns);
 
 		if (disk != NULL)
-			return (disk);
+			return (stack_registry_intern(disk));
 	}
 
 	errno = ENOENT;
@@ -576,13 +747,15 @@ stack_list(const char *namespace, int *count)
 				ls = stack_load_disk(sname, ns);
 				if (ls == NULL)
 					continue;
+				/* Registry adopts it; array elements are borrows. */
+				ls = stack_registry_intern(ls);
+				if (ls == NULL)
+					continue;
 				if (n >= alloc) {
 					struct stack **grown = realloc(result,
 					    alloc * 2 * sizeof(struct stack *));
-					if (grown == NULL) {
-						stack_free(ls);
+					if (grown == NULL)
 						break;
-					}
 					result = grown;
 					alloc *= 2;
 				}
@@ -605,7 +778,10 @@ stack_free(struct stack *stack)
 	if (stack == NULL)
 		return;
 
-	free(stack->spec);
+	if (stack->spec != NULL) {
+		stack_spec_release(stack->spec);
+		free(stack->spec);
+	}
 	free(stack->status);
 	free(stack->state_file);
 	free(stack);
@@ -620,15 +796,32 @@ stack_update(struct stack *stack, struct stack_spec *new_spec)
 	if (stack == NULL || new_spec == NULL)
 		return (-1);
 
-	/* Stop current stack */
-	stack_stop(stack);
+	/*
+	 * Build the replacement spec BEFORE tearing anything down. Releasing
+	 * the live spec first meant an allocation failure left the stack
+	 * stopped with spec == NULL -- unusable and unrecoverable. Prepare,
+	 * then stop, then swap.
+	 */
+	{
+		struct stack_spec *newspec;
 
-	/* Update spec */
-	free(stack->spec);
-	stack->spec = calloc(1, sizeof(struct stack_spec));
-	if (stack->spec == NULL)
-		return (-1);
-	memcpy(stack->spec, new_spec, sizeof(struct stack_spec));
+		newspec = calloc(1, sizeof(struct stack_spec));
+		if (newspec == NULL)
+			return (-1);
+		if (stack_spec_copy(newspec, new_spec) != 0) {
+			free(newspec);
+			return (-1);
+		}
+
+		/* Stop current stack */
+		stack_stop(stack);
+
+		if (stack->spec != NULL) {
+			stack_spec_release(stack->spec);
+			free(stack->spec);
+		}
+		stack->spec = newspec;
+	}
 
 	stack->status->updated = time(NULL);
 	save_stack_state(stack);
@@ -718,7 +911,28 @@ save_service_state(struct service *service)
 	}
 	fprintf(fp, "}\n");
 
-	fclose(fp);
+	/*
+	 * Publish only a COMPLETE file: a short write (ENOSPC, quota) left
+	 * ferror set while the rename went ahead anyway, atomically replacing
+	 * good state with truncated JSON that a later process would parse as
+	 * a smaller, wrong object.
+	 */
+	{
+		int werr = ferror(fp);
+
+		/*
+		 * Always close, THEN judge: short-circuiting on ferror would
+		 * skip fclose and leak the stream.
+		 */
+		if (fclose(fp) != 0)
+			werr = 1;
+		if (werr != 0) {
+			unlink(tmppath);
+			free(tmppath);
+			free(path);
+			return (-1);
+		}
+	}
 	if (rename(tmppath, path) != 0) {
 		unlink(tmppath);
 		free(tmppath);
@@ -862,11 +1076,17 @@ service_create(struct service_spec *spec)
 		free(service);
 		return (NULL);
 	}
-	memcpy(service->spec, spec, sizeof(struct service_spec));
+	/* Deep-copy: see stack_create above. */
+	if (service_spec_copy(service->spec, spec) != 0) {
+		free(service->spec);
+		free(service);
+		return (NULL);
+	}
 
 	/* Initialize status */
 	status = calloc(1, sizeof(struct service_status));
 	if (status == NULL) {
+		service_spec_release(service->spec);
 		free(service->spec);
 		free(service);
 		return (NULL);
@@ -885,6 +1105,7 @@ service_create(struct service_spec *spec)
 	service->replicas = calloc(spec->replicas, sizeof(struct service_replica));
 	if (service->replicas == NULL) {
 		free(status);
+		service_spec_release(service->spec);
 		free(service->spec);
 		free(service);
 		return (NULL);
@@ -902,19 +1123,29 @@ service_create(struct service_spec *spec)
 
 	/* Add to registry */
 	pthread_mutex_lock(&service_registry_lock);
-	if (service_registry_count >= service_registry_size) {
-		service_registry_size = service_registry_size ?
-		    service_registry_size * 2 : 16;
-		if (ocifbsd_realloc_grow((void **)&service_registry, service_registry_size * sizeof(struct service *)) != 0) {
+	for (int k = 0; k < service_registry_count; k++) {
+		if (strcmp(service_registry[k]->name, service->name) == 0 &&
+		    strcmp(service_registry[k]->namespace,
+		    service->namespace) == 0) {
 			pthread_mutex_unlock(&service_registry_lock);
 			free(service->replicas);
 			free(status);
+			service_spec_release(service->spec);
 			free(service->spec);
 			free(service);
+			errno = EEXIST;
 			return (NULL);
 		}
 	}
-	service_registry[service_registry_count++] = service;
+	if (service_registry_insert_locked(service) != 0) {
+		pthread_mutex_unlock(&service_registry_lock);
+		free(service->replicas);
+		free(status);
+		service_spec_release(service->spec);
+		free(service->spec);
+		free(service);
+		return (NULL);
+	}
 	pthread_mutex_unlock(&service_registry_lock);
 
 	/* Persist so a later CLI process can list/scale/delete it. */
@@ -966,7 +1197,20 @@ service_launch_replica(struct service *service, int i)
 		    sizeof(spec.containers[0].image));
 
 	decision = scheduler_select_node(&spec);
-	if (decision == NULL) {
+	/*
+	 * A decision is also returned when NOTHING could be scheduled: then
+	 * ->node is empty and ->failed_reason says why. Checking only for
+	 * NULL accepted that failure and launched the replica onto an empty
+	 * node name. Treat a decision carrying a failed_reason as the failure
+	 * it is, and release it with the destructor so failed_reason -- the
+	 * one heap field -- stops leaking.
+	 */
+	if (decision == NULL || decision->failed_reason != NULL) {
+		if (decision != NULL)
+			fprintf(stderr,
+			    "error: cannot schedule replica %d of %s: %s\n",
+			    i, service->name, decision->failed_reason);
+		scheduling_decision_free(decision);
 		free(spec.containers);
 		service->replicas[i].state = REPLICA_STATE_FAILED;
 		return (-1);
@@ -975,7 +1219,7 @@ service_launch_replica(struct service *service, int i)
 	    sizeof(service->replicas[i].node));
 	strlcpy(service->replicas[i].pod_name, pod_name,
 	    sizeof(service->replicas[i].pod_name));
-	free(decision);
+	scheduling_decision_free(decision);
 
 	pod = pod_create(&spec);
 	if (pod == NULL) {
@@ -1131,7 +1375,7 @@ service_get(const char *name, const char *namespace)
 		struct service *disk = service_load_disk(name, ns);
 
 		if (disk != NULL)
-			return (disk);
+			return (service_registry_intern(disk));
 	}
 
 	errno = ENOENT;
@@ -1202,13 +1446,15 @@ service_list(const char *namespace, int *count)
 				ls = service_load_disk(svcname, ns);
 				if (ls == NULL)
 					continue;
+				/* Registry adopts it; array elements are borrows. */
+				ls = service_registry_intern(ls);
+				if (ls == NULL)
+					continue;
 				if (n >= alloc) {
 					struct service **grown = realloc(result,
 					    alloc * 2 * sizeof(struct service *));
-					if (grown == NULL) {
-						service_free(ls);
+					if (grown == NULL)
 						break;
-					}
 					result = grown;
 					alloc *= 2;
 				}
@@ -1231,7 +1477,10 @@ service_free(struct service *service)
 	if (service == NULL)
 		return;
 
-	free(service->spec);
+	if (service->spec != NULL) {
+		service_spec_release(service->spec);
+		free(service->spec);
+	}
 	free(service->status);
 	free(service->replicas);
 	free(service->state_file);
@@ -1346,12 +1595,16 @@ service_rollback(struct service *service)
 
 	/* Rollback rolling update */
 	struct rolling_update_state *state;
+	int ret;
 
 	state = rolling_update_get_status(service->name, service->namespace);
 	if (state == NULL)
 		return (-1);
 
-	return (rolling_update_rollback(state));
+	/* The status is an owned snapshot; the rollback re-looks-up by name. */
+	ret = rolling_update_rollback(state);
+	free(state);
+	return (ret);
 }
 
 /*

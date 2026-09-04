@@ -79,6 +79,7 @@ struct rolling_update_info {
  * Global state
  */
 static struct rolling_update_info *rolling_updates[MAX_ROLLING_UPDATES];
+
 static int rolling_update_count = 0;
 static pthread_mutex_t rolling_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -141,58 +142,148 @@ int
 rolling_update_init(struct service *service, struct service_spec *new_spec)
 {
 	struct rolling_update_info *info;
+	int reuse;
 
 	if (service == NULL || new_spec == NULL)
 		return (-1);
 
 	pthread_mutex_lock(&rolling_lock);
 
-	/* Find existing update for this service */
+	/*
+	 * Reject only an update that is still RUNNING. The check used to match
+	 * on name alone, so a completed -- or merely failed -- record made
+	 * every later update of that service fail EALREADY for the life of the
+	 * process, with 255 slots free. A finished record for this service is
+	 * not a conflict; it is the slot we should reuse, which also keeps one
+	 * service from ever owning two records.
+	 */
+	reuse = -1;
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
-		if (rolling_updates[i] != NULL &&
-		    strcmp(rolling_updates[i]->service, service->name) == 0 &&
-		    strcmp(rolling_updates[i]->namespace, service->namespace) == 0) {
-			/* Update already in progress */
+		if (rolling_updates[i] == NULL ||
+		    strcmp(rolling_updates[i]->service, service->name) != 0 ||
+		    strcmp(rolling_updates[i]->namespace,
+		    service->namespace) != 0)
+			continue;
+		if (rolling_updates[i]->active) {
 			pthread_mutex_unlock(&rolling_lock);
 			errno = EALREADY;
 			return (-1);
 		}
+		reuse = i;
+		break;
 	}
 
-	/* Find empty slot */
+	/*
+	 * Claim a slot. A finished update's record is deliberately RETAINED so
+	 * rolling_update_get_status() can still report on it (it hands out an
+	 * interior pointer into this record), which is why nothing is freed at
+	 * completion. Retaining forever, though, meant the table filled with
+	 * dead records and every later update failed -- and each record's three
+	 * service_spec copies leaked with it.
+	 *
+	 * So: prefer a free slot, and if there is none, reclaim the OLDEST
+	 * COMPLETED record. Only when every slot holds an update still running
+	 * is this a genuine "too many concurrent updates" failure.
+	 */
 	info = NULL;
-	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
-		if (rolling_updates[i] == NULL) {
+	{
+		int slot = -1, oldest = reuse;
+		time_t oldest_time = 0;
+
+		if (reuse >= 0)
+			goto reclaim;
+		for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
+			if (rolling_updates[i] == NULL) {
+				slot = i;
+				break;
+			}
+			if (rolling_updates[i]->active)
+				continue;
+			if (oldest < 0 ||
+			    rolling_updates[i]->state.completed < oldest_time) {
+				oldest = i;
+				oldest_time = rolling_updates[i]->state.completed;
+			}
+		}
+reclaim:
+		if (slot >= 0) {
 			info = calloc(1, sizeof(struct rolling_update_info));
 			if (info == NULL) {
 				pthread_mutex_unlock(&rolling_lock);
 				return (-1);
 			}
-			rolling_updates[i] = info;
+			rolling_updates[slot] = info;
 			rolling_update_count++;
-			break;
+			pthread_mutex_init(&info->lock, NULL);
+		} else if (oldest >= 0) {
+			/*
+			 * Reuse the oldest completed record IN PLACE rather
+			 * than freeing it. rolling_update_get_status() hands
+			 * out an interior pointer to ->state, so freeing a
+			 * reclaimed record would turn any status pointer taken
+			 * earlier into a dangling one. Recycling the same
+			 * allocation keeps every such pointer aimed at valid,
+			 * pointer-free memory: a stale reader sees the new
+			 * update's status instead of the old one's, which is
+			 * wrong data but never undefined behaviour.
+			 *
+			 * The spec copies ARE released here -- they are the
+			 * part that actually grows -- and re-established
+			 * below.
+			 */
+			info = rolling_updates[oldest];
+			service_spec_release(&info->previous_spec);
+			service_spec_release(&info->old_spec);
+			service_spec_release(&info->new_spec);
+			{
+				pthread_mutex_t keep = info->lock;
+
+				memset(info, 0, sizeof(*info));
+				info->lock = keep;
+			}
+		} else {
+			pthread_mutex_unlock(&rolling_lock);
+			errno = EBUSY;	/* all slots are live updates */
+			return (-1);
 		}
 	}
-
-	if (info == NULL) {
-		pthread_mutex_unlock(&rolling_lock);
-		errno = ENOMEM;
-		return (-1);
-	}
-
-	pthread_mutex_init(&info->lock, NULL);
 
 	/* Initialize rolling update info */
 	strlcpy(info->service, service->name, sizeof(info->service));
 	strlcpy(info->namespace, service->namespace, sizeof(info->namespace));
 
-	/* Save current spec for rollback */
+	/*
+	 * Take PRIVATE deep copies of all three specs. The block copies these
+	 * replace aliased the caller's and the service's string pointers, so
+	 * the record outlived the memory it pointed at -- new_spec in
+	 * particular is routinely a caller stack local, and its failure_policy
+	 * was read later, from a dead frame, when a batch failed.
+	 */
 	info->has_previous = true;
-	memcpy(&info->previous_spec, service->spec, sizeof(struct service_spec));
-
-	/* Copy specs */
-	memcpy(&info->old_spec, service->spec, sizeof(struct service_spec));
-	memcpy(&info->new_spec, new_spec, sizeof(struct service_spec));
+	if (service_spec_copy(&info->previous_spec, service->spec) != 0 ||
+	    service_spec_copy(&info->old_spec, service->spec) != 0 ||
+	    service_spec_copy(&info->new_spec, new_spec) != 0) {
+		/*
+		 * Release whatever copies succeeded but LEAVE the record in
+		 * the table: a status pointer may already point into it, and
+		 * the slot is reusable as an inactive record.
+		 */
+		service_spec_release(&info->previous_spec);
+		service_spec_release(&info->old_spec);
+		service_spec_release(&info->new_spec);
+		info->active = false;
+		/*
+		 * Clear the identity so this dead record cannot be mistaken
+		 * for an update of this service, and so it sorts first for
+		 * reuse (completed == 0 makes it the oldest).
+		 */
+		info->service[0] = '\0';
+		info->namespace[0] = '\0';
+		info->state.completed = 0;
+		pthread_mutex_unlock(&rolling_lock);
+		errno = ENOMEM;
+		return (-1);
+	}
 
 	/* Initialize state */
 	info->state.total_replicas = service->nreplicas;
@@ -517,15 +608,34 @@ rolling_update_rollback(struct rolling_update_state *state)
 struct rolling_update_state *
 rolling_update_get_status(const char *service_name, const char *namespace)
 {
+	struct rolling_update_state *copy;
+
 	pthread_mutex_lock(&rolling_lock);
 
 	for (int i = 0; i < MAX_ROLLING_UPDATES; i++) {
 		if (rolling_updates[i] != NULL &&
 		    strcmp(rolling_updates[i]->service, service_name) == 0 &&
 		    strcmp(rolling_updates[i]->namespace, namespace) == 0) {
-			struct rolling_update_state *state = &rolling_updates[i]->state;
+			/*
+			 * Return an OWNED snapshot, not a pointer into the
+			 * table. An interior pointer stayed valid only as long
+			 * as the slot was not recycled -- and because the
+			 * mutators re-look-up by state->service, a pointer
+			 * held across a recycle would silently name a
+			 * DIFFERENT service and pause or roll back that one
+			 * instead. Copying is cheap (the struct owns no
+			 * pointers) and makes the hazard impossible rather
+			 * than unlikely.
+			 */
+			copy = malloc(sizeof(*copy));
+			if (copy == NULL) {
+				pthread_mutex_unlock(&rolling_lock);
+				errno = ENOMEM;
+				return (NULL);
+			}
+			*copy = rolling_updates[i]->state;
 			pthread_mutex_unlock(&rolling_lock);
-			return (state);
+			return (copy);
 		}
 	}
 

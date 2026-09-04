@@ -59,6 +59,90 @@ static int pod_registry_count = 0;
 static pthread_mutex_t pod_registry_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*
+ * Append to the registry, growing it if needed. Caller holds the registry
+ * lock. Returns 0 on success, -1 on allocation failure with the registry
+ * left untouched.
+ *
+ * The size is committed ONLY after the growth succeeds. The open-coded
+ * version this replaces doubled pod_registry_size before calling
+ * ocifbsd_realloc_grow(), so a failed growth left the recorded capacity
+ * larger than the actual array -- and the next insert, seeing count <
+ * size, skipped the growth entirely and wrote past the end of the
+ * allocation.
+ */
+static int
+pod_registry_insert_locked(struct pod *pod)
+{
+	int newsize;
+
+	if (pod_registry_count >= pod_registry_size) {
+		newsize = pod_registry_size ? pod_registry_size * 2 : 16;
+		if (ocifbsd_realloc_grow((void **)&pod_registry,
+		    newsize * sizeof(struct pod *)) != 0)
+			return (-1);
+		pod_registry_size = newsize;
+	}
+	pod_registry[pod_registry_count++] = pod;
+	return (0);
+}
+
+/*
+ * Identity Map: adopt a pod just reconstructed from disk into the registry,
+ * and return the one canonical in-memory object for that identity.
+ *
+ * pod_get()/pod_list() used to return the disk-loaded object directly. That
+ * made their return value ambiguous -- borrowed when the pod was already in
+ * the registry, owned when it came off disk -- so no caller could be correct:
+ * freeing crashed on registry pods, not freeing leaked disk pods, and every
+ * call site in the tree chose the leak. Worse, two lookups of the same
+ * on-disk pod produced two independent objects, so a mutation through one was
+ * invisible through the other.
+ *
+ * Interning fixes both: after this call the registry owns the pod, every
+ * lookup of that name returns the same pointer, and the contract is uniform
+ * -- pod_get()/pod_list() ALWAYS return borrowed pointers that the caller
+ * must never free. The pod is released by pod_delete().
+ *
+ * Returns the canonical pod (which may be a pre-existing entry, in which case
+ * the argument is freed), or NULL on allocation failure (argument freed).
+ */
+static struct pod *
+pod_registry_intern(struct pod *pod)
+{
+	struct pod *existing = NULL;
+	int i;
+
+	if (pod == NULL)
+		return (NULL);
+
+	pthread_mutex_lock(&pod_registry_lock);
+	/*
+	 * Re-check under the lock: another thread may have interned this same
+	 * identity between our registry miss and now. Returning the winner
+	 * preserves the one-object-per-identity invariant.
+	 */
+	for (i = 0; i < pod_registry_count; i++) {
+		if (strcmp(pod_registry[i]->name, pod->name) == 0 &&
+		    strcmp(pod_registry[i]->namespace, pod->namespace) == 0) {
+			existing = pod_registry[i];
+			break;
+		}
+	}
+	if (existing != NULL) {
+		pthread_mutex_unlock(&pod_registry_lock);
+		pod_free(pod);
+		return (existing);
+	}
+	if (pod_registry_insert_locked(pod) != 0) {
+		pthread_mutex_unlock(&pod_registry_lock);
+		pod_free(pod);
+		return (NULL);
+	}
+	pthread_mutex_unlock(&pod_registry_lock);
+	return (pod);
+}
+
+/*
  * Generate a unique pod UID
  */
 static void
@@ -76,9 +160,16 @@ generate_pod_uid(char *uid, size_t len)
 	SHA256_Update(&ctx, &tid, sizeof(pthread_t));
 	SHA256_Final(hash, &ctx);
 
+	/*
+	 * Widen BEFORE shifting: hash[0] promotes to int, so hash[0] << 24
+	 * overflows a signed 32-bit int whenever the top bit is set (half the
+	 * time) -- undefined behaviour in the middle of a uniqueness routine.
+	 */
 	snprintf(uid, len, "pod-%08x%08x",
-	    (uint32_t)(hash[0] << 24 | hash[1] << 16 | hash[2] << 8 | hash[3]),
-	    (uint32_t)(hash[4] << 24 | hash[5] << 16 | hash[6] << 8 | hash[7]));
+	    ((uint32_t)hash[0] << 24) | ((uint32_t)hash[1] << 16) |
+	    ((uint32_t)hash[2] << 8) | (uint32_t)hash[3],
+	    ((uint32_t)hash[4] << 24) | ((uint32_t)hash[5] << 16) |
+	    ((uint32_t)hash[6] << 8) | (uint32_t)hash[7]);
 }
 
 /*
@@ -213,7 +304,27 @@ save_pod_state(struct pod *pod)
 	}
 	fprintf(fp, "}\n");
 
-	fclose(fp);
+	/*
+	 * Only publish a COMPLETE file. A short write (ENOSPC, quota) left
+	 * ferror set, yet the rename went ahead and atomically replaced good
+	 * state with truncated JSON -- which a later process would parse as a
+	 * pod with fewer container ids, silently leaking the jails those ids
+	 * named. Check the stream before committing, and treat a failing
+	 * fclose (where buffered data is actually flushed) the same way.
+	 */
+	if (ferror(fp) != 0) {
+		fclose(fp);
+		unlink(tmppath);
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
+	if (fclose(fp) != 0) {
+		unlink(tmppath);
+		free(tmppath);
+		free(path);
+		return (-1);
+	}
 	if (rename(tmppath, path) != 0) {
 		unlink(tmppath);
 		free(tmppath);
@@ -323,11 +434,20 @@ pod_load_disk(const char *name, const char *namespace)
 	/* Restore the backing containers so pod_delete can tear them down. */
 	if (ncids > 0) {
 		status->containers = calloc(ncids, sizeof(*status->containers));
-		if (status->containers != NULL) {
-			memcpy(status->containers, cids,
-			    ncids * sizeof(*status->containers));
-			status->ncontainers = ncids;
+		/*
+		 * Returning a pod with its container ids dropped would be
+		 * worse than returning nothing: pod_delete would find no ids,
+		 * skip the teardown, unlink the state file, and strand the
+		 * jails with no remaining record of them. Fail the load.
+		 */
+		if (status->containers == NULL) {
+			free(status);
+			free(pod);
+			return (NULL);
 		}
+		memcpy(status->containers, cids,
+		    ncids * sizeof(*status->containers));
+		status->ncontainers = ncids;
 	}
 	pod->status = status;
 	return (pod);
@@ -359,36 +479,42 @@ pod_create(struct pod_spec *spec)
 	    spec->namespace[0] ? spec->namespace : "default",
 	    sizeof(pod->namespace));
 
+	/*
+	 * A count without an array (or a negative one) would be indexed below
+	 * and in pod_start; reject it rather than dereference it as root.
+	 */
+	if (spec->ncontainers < 0 ||
+	    (spec->ncontainers > 0 && spec->containers == NULL)) {
+		free(pod);
+		errno = EINVAL;
+		return (NULL);
+	}
+
 	/* Copy spec */
 	pod->spec = calloc(1, sizeof(struct pod_spec));
 	if (pod->spec == NULL) {
 		free(pod);
 		return (NULL);
 	}
-	memcpy(pod->spec, spec, sizeof(struct pod_spec));
 	/*
-	 * The shallow struct copy above aliases the caller's containers
-	 * array. Deep-copy it so the pod owns its own buffer and the caller
-	 * remains free to release (or reuse) its spec.containers.
+	 * Deep-copy the whole spec, not just its containers array. The old
+	 * code block-copied the pod_spec and then deep-copied only
+	 * ->containers, so every char * in the pod_spec AND in each
+	 * container_spec (env[], volumes[], user, group, ...) stayed aliased
+	 * to the caller's storage with no owner on either side. pod_spec_copy
+	 * gives the pod its own strings; pod_spec_release in pod_free is its
+	 * exact dual.
 	 */
-	if (spec->ncontainers > 0 && spec->containers != NULL) {
-		pod->spec->containers = calloc(spec->ncontainers,
-		    sizeof(struct container_spec));
-		if (pod->spec->containers == NULL) {
-			free(pod->spec);
-			free(pod);
-			return (NULL);
-		}
-		memcpy(pod->spec->containers, spec->containers,
-		    spec->ncontainers * sizeof(struct container_spec));
-	} else {
-		pod->spec->containers = NULL;
-		pod->spec->ncontainers = 0;
+	if (pod_spec_copy(pod->spec, spec) != 0) {
+		free(pod->spec);
+		free(pod);
+		return (NULL);
 	}
 
 	/* Initialize status */
 	status = calloc(1, sizeof(struct pod_status));
 	if (status == NULL) {
+		pod_spec_release(pod->spec);
 		free(pod->spec);
 		free(pod);
 		return (NULL);
@@ -407,6 +533,7 @@ pod_create(struct pod_spec *spec)
 		    sizeof(struct container_status));
 		if (status->containers == NULL) {
 			free(status);
+			pod_spec_release(pod->spec);
 			free(pod->spec);
 			free(pod);
 			return (NULL);
@@ -424,21 +551,37 @@ pod_create(struct pod_spec *spec)
 
 	pod->status = status;
 
-	/* Add to registry */
+	/*
+	 * Add to registry, refusing a name+namespace that is already resident.
+	 * Two live pods sharing an identity share one state file: the second
+	 * save overwrites the first's container ids, and deleting either
+	 * unlinks the record the other needs to tear its jails down. The
+	 * Identity Map the lookups rely on has to be enforced at construction
+	 * too, not only when interning from disk.
+	 */
 	pthread_mutex_lock(&pod_registry_lock);
-	if (pod_registry_count >= pod_registry_size) {
-		pod_registry_size = pod_registry_size ?
-		    pod_registry_size * 2 : 16;
-		if (ocifbsd_realloc_grow((void **)&pod_registry, pod_registry_size * sizeof(struct pod *)) != 0) {
+	for (i = 0; i < pod_registry_count; i++) {
+		if (strcmp(pod_registry[i]->name, pod->name) == 0 &&
+		    strcmp(pod_registry[i]->namespace, pod->namespace) == 0) {
 			pthread_mutex_unlock(&pod_registry_lock);
 			free(status->containers);
 			free(status);
+			pod_spec_release(pod->spec);
 			free(pod->spec);
 			free(pod);
+			errno = EEXIST;
 			return (NULL);
 		}
 	}
-	pod_registry[pod_registry_count++] = pod;
+	if (pod_registry_insert_locked(pod) != 0) {
+		pthread_mutex_unlock(&pod_registry_lock);
+		free(status->containers);
+		free(status);
+		pod_spec_release(pod->spec);
+		free(pod->spec);
+		free(pod);
+		return (NULL);
+	}
 	pthread_mutex_unlock(&pod_registry_lock);
 
 	/* Save initial state */
@@ -459,9 +602,29 @@ pod_start(struct pod *pod)
 {
 	int i;
 	int ret = 0;
+	bool failed = false;
 
 	if (pod == NULL)
 		return (-1);
+
+	/*
+	 * A pod reconstructed from disk carries status but no spec (the state
+	 * file records lifecycle data, not the full spec). Starting one would
+	 * dereference a NULL spec, and a spec with more containers than the
+	 * status array would write past its end -- both as root. Refuse
+	 * instead of corrupting memory.
+	 */
+	if (pod->spec == NULL || pod->status == NULL) {
+		errno = EINVAL;
+		return (-1);
+	}
+	if (pod->spec->ncontainers > 0 &&
+	    (pod->spec->containers == NULL ||
+	    pod->status->containers == NULL ||
+	    pod->status->ncontainers < pod->spec->ncontainers)) {
+		errno = EINVAL;
+		return (-1);
+	}
 
 	if (pod->status->state == POD_STATE_RUNNING)
 		return (0);
@@ -478,7 +641,7 @@ pod_start(struct pod *pod)
 		if (ret != 0) {
 			pod->status->containers[i].state = REPLICA_STATE_FAILED;
 			pod->status->containers[i].exit_code = ret;
-			ret = -1;
+			failed = true;
 			continue;
 		}
 
@@ -486,7 +649,16 @@ pod_start(struct pod *pod)
 		if (ret != 0) {
 			pod->status->containers[i].state = REPLICA_STATE_FAILED;
 			pod->status->containers[i].exit_code = ret;
-			ret = -1;
+			failed = true;
+			/*
+			 * The container was created but never started. Record
+			 * its id anyway so pod_delete can tear the jail down;
+			 * dropping the id here stranded a root jail that
+			 * nothing afterwards knew how to remove.
+			 */
+			strlcpy(pod->status->containers[i].container_id,
+			    container_id,
+			    sizeof(pod->status->containers[i].container_id));
 		} else {
 			pod->status->containers[i].state = REPLICA_STATE_RUNNING;
 			strlcpy(pod->status->containers[i].container_id,
@@ -496,6 +668,13 @@ pod_start(struct pod *pod)
 
 		free(container_id);
 	}
+
+	/*
+	 * `failed` is sticky. `ret` alone was overwritten on every iteration,
+	 * so a pod whose first container failed and whose second succeeded
+	 * reported success and was marked RUNNING with a FAILED container in it.
+	 */
+	ret = failed ? -1 : 0;
 
 	/* Update pod status */
 	if (ret == 0) {
@@ -660,7 +839,7 @@ pod_get(const char *name, const char *namespace)
 		struct pod *disk = pod_load_disk(name, namespace);
 
 		if (disk != NULL)
-			return (disk);
+			return (pod_registry_intern(disk));
 	}
 
 	errno = ENOENT;
@@ -686,6 +865,17 @@ pod_list(const char *namespace, int *count)
 	int i;
 
 	*count = 0;
+
+	/*
+	 * The namespace is interpolated into a directory path that is opened
+	 * as root below. The CLI does not validate it, so `pod list -N
+	 * ../../..` walked out of the state directory. Same check the state
+	 * path builder applies.
+	 */
+	if (!orch_name_is_valid(ns)) {
+		errno = EINVAL;
+		return (NULL);
+	}
 	result = calloc(alloc, sizeof(struct pod *));
 	if (result == NULL)
 		return (NULL);
@@ -743,13 +933,20 @@ pod_list(const char *namespace, int *count)
 				lp = pod_load_disk(pname, ns);
 				if (lp == NULL)
 					continue;
+				/*
+				 * Intern before publishing, so every element of
+				 * the returned array is a borrow owned by the
+				 * registry -- the same lifetime rule as a
+				 * registry hit. The caller frees the ARRAY only.
+				 */
+				lp = pod_registry_intern(lp);
+				if (lp == NULL)
+					continue;
 				if (n >= alloc) {
 					struct pod **grown = realloc(result,
 					    alloc * 2 * sizeof(struct pod *));
-					if (grown == NULL) {
-						pod_free(lp);
+					if (grown == NULL)
 						break;
-					}
 					result = grown;
 					alloc *= 2;
 				}
@@ -773,7 +970,7 @@ pod_free(struct pod *pod)
 		return;
 
 	if (pod->spec != NULL) {
-		free(pod->spec->containers);
+		pod_spec_release(pod->spec);
 		free(pod->spec);
 	}
 	if (pod->status != NULL) {
@@ -807,10 +1004,19 @@ pod_get_status(struct pod *pod)
 		if (cid == NULL || cid[0] == '\0')
 			continue;
 
-		/* Query container state from ocifbsd */
-		container_state_t state;
-		int exit_code;
-		ocifbsd_get_container_state(cid, &state, &exit_code);
+		/*
+		 * Query container state from ocifbsd. On failure the callee
+		 * leaves *state and *exit_code untouched, so the switch below
+		 * used to read uninitialized stack -- a value that happened to
+		 * match CONTAINER_STATE_STOPPED would record a garbage exit
+		 * code as fact. Initialize, and skip the update on error
+		 * rather than inventing a transition.
+		 */
+		container_state_t state = CONTAINER_STATE_UNKNOWN;
+		int exit_code = 0;
+
+		if (ocifbsd_get_container_state(cid, &state, &exit_code) != 0)
+			continue;
 
 		switch (state) {
 		case CONTAINER_STATE_RUNNING:
@@ -852,39 +1058,79 @@ pod_get_status(struct pod *pod)
 int
 pod_update(struct pod *pod, struct pod_spec *new_spec)
 {
+	struct pod_spec *newspec;
+	struct container_status *newstatus = NULL;
+	int i;
+
 	if (pod == NULL || new_spec == NULL)
 		return (-1);
 
-	/* Stop current pod */
+	/*
+	 * Build the replacement spec and the matching status array COMPLETELY
+	 * before touching the pod. The old order tore the pod down first, so
+	 * any allocation failure left it stopped with spec == NULL -- an
+	 * object no later call could use or repair. Prepare, then swap.
+	 *
+	 * The status array must be rebuilt too: it is indexed by container
+	 * position in pod_start, so growing the container count while reusing
+	 * the old, shorter array wrote past its end.
+	 */
+	newspec = calloc(1, sizeof(struct pod_spec));
+	if (newspec == NULL)
+		return (-1);
+	if (pod_spec_copy(newspec, new_spec) != 0) {
+		free(newspec);
+		return (-1);
+	}
+	if (newspec->ncontainers > 0) {
+		newstatus = calloc((size_t)newspec->ncontainers,
+		    sizeof(*newstatus));
+		if (newstatus == NULL) {
+			pod_spec_release(newspec);
+			free(newspec);
+			return (-1);
+		}
+		for (i = 0; i < newspec->ncontainers; i++) {
+			strlcpy(newstatus[i].name, newspec->containers[i].name,
+			    sizeof(newstatus[i].name));
+			strlcpy(newstatus[i].image,
+			    newspec->containers[i].image,
+			    sizeof(newstatus[i].image));
+			newstatus[i].state = REPLICA_STATE_PENDING;
+		}
+	}
+
+	/* Stop the running pod only once the replacement is ready. */
 	pod_stop(pod, SIGTERM);
 
 	/*
-	 * Replace the spec. Free the OLD spec's owned containers array (the old
-	 * code leaked it) and deep-copy the NEW containers into our own array
-	 * (the old memcpy aliased new_spec->containers, so pod_free would later
-	 * double-free it with the caller). Mirrors pod_create's ownership.
+	 * Destroy the OLD containers before their ids are discarded. The
+	 * status array is the only record of them, so replacing it without
+	 * this leaves the previous jails running as root with nothing left
+	 * that names them -- pod_start then creates a second set alongside.
 	 */
+	if (pod->status != NULL && pod->status->containers != NULL) {
+		for (i = 0; i < pod->status->ncontainers; i++) {
+			const char *cid =
+			    pod->status->containers[i].container_id;
+
+			if (cid[0] != '\0')
+				(void)ocifbsd_delete_container(cid, true);
+		}
+	}
+
 	if (pod->spec != NULL) {
-		free(pod->spec->containers);
+		pod_spec_release(pod->spec);
 		free(pod->spec);
 	}
-	pod->spec = calloc(1, sizeof(struct pod_spec));
-	if (pod->spec == NULL)
-		return (-1);
-	*pod->spec = *new_spec;			/* scalar fields */
-	pod->spec->containers = NULL;
-	pod->spec->ncontainers = 0;
-	if (new_spec->ncontainers > 0 && new_spec->containers != NULL) {
-		pod->spec->containers = calloc(new_spec->ncontainers,
-		    sizeof(struct container_spec));
-		if (pod->spec->containers == NULL) {
-			free(pod->spec);
-			pod->spec = NULL;
-			return (-1);
-		}
-		memcpy(pod->spec->containers, new_spec->containers,
-		    (size_t)new_spec->ncontainers * sizeof(struct container_spec));
-		pod->spec->ncontainers = new_spec->ncontainers;
+	pod->spec = newspec;
+	if (pod->status != NULL) {
+		free(pod->status->containers);
+		pod->status->containers = newstatus;
+		pod->status->ncontainers = newspec->ncontainers;
+		pod->status->state = POD_STATE_PENDING;
+	} else {
+		free(newstatus);
 	}
 
 	/* Restart pod with new spec */

@@ -846,11 +846,13 @@ cmd_rolling_update(int argc, char **argv)
 		return (1);
 	}
 
+	/* rolling_update_get_status returns an owned snapshot; free it. */
 	struct rolling_update_state *state = rolling_update_get_status(service, namespace);
 	if (state != NULL) {
 		printf("Rolling update in progress for %s:\n", service);
 		printf("  Updated: %d/%d replicas\n", state->updated_replicas, state->total_replicas);
 		printf("  Status: %s\n", state->status);
+		free(state);
 		return (0);
 	}
 
