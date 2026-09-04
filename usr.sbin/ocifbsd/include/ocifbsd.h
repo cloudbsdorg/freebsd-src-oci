@@ -267,6 +267,18 @@ int	cmd_proxy(int argc, char **argv);
 int	state_save(const struct ocifbsd_container *c);
 int	state_delete(const char *id);
 struct ocifbsd_container *state_load(const char *id);
+/*
+ * Lifecycle metadata only -- no OCI runtime spec is parsed, so ->spec is NULL.
+ * Use for identity/status questions (list, name resolution); use state_load()
+ * when the spec is needed.
+ */
+struct ocifbsd_container *state_load_meta(const char *id);
+/*
+ * Resolve a container name to its id through the name index. Returns an
+ * allocated id (caller frees) on a verified hit, NULL otherwise -- a NULL is
+ * inconclusive, so callers fall back to scanning state_list().
+ */
+char	*state_lookup_name(const char *name);
 struct ocifbsd_container **state_list(int *n);
 int	state_lock(void);
 void	state_unlock(void);

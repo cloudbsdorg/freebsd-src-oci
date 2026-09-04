@@ -136,6 +136,86 @@ get_state_path(const char *id, char *path, size_t path_len)
 }
 
 /*
+ * Name -> id index.
+ *
+ * Resolving a human-readable name used to be a full scan of the state
+ * directory that loaded every container completely -- including parsing each
+ * one's OCI runtime spec off disk and realpath()ing its root -- purely to
+ * compare a name string. That is O(containers * spec size) work for an O(1)
+ * question, paid by every subcommand a user invokes by name.
+ *
+ * The index is one small file per name under <state>/by-name/ holding the
+ * container id. It is a CACHE, not the source of truth: a lookup verifies the
+ * id it read still exists and still carries that name, and any miss falls back
+ * to the directory scan. So a stale, missing, or hand-deleted index is a
+ * performance question only, never a correctness one, and an older state
+ * directory with no index keeps working unchanged.
+ */
+static int
+name_index_path(const char *name, char *path, size_t path_len)
+{
+	int n;
+
+	/*
+	 * The name becomes a single path component under a root-owned
+	 * directory, so it must not contain '/' or be "."/"..". Names that
+	 * cannot be indexed safely simply are not indexed; the scan still
+	 * finds them.
+	 */
+	if (!state_id_is_safe(name) || name[0] == '.')
+		return (-1);
+	n = snprintf(path, path_len, "%s/by-name/%s", state_base_dir(), name);
+	if (n < 0 || (size_t)n >= path_len)
+		return (-1);
+	return (0);
+}
+
+static void
+name_index_put(const char *name, const char *id)
+{
+	char dir[PATH_MAX], path[PATH_MAX], tmp[PATH_MAX];
+	int fd, n;
+
+	if (name == NULL || id == NULL || name_index_path(name, path,
+	    sizeof(path)) != 0)
+		return;
+	n = snprintf(dir, sizeof(dir), "%s/by-name", state_base_dir());
+	if (n < 0 || (size_t)n >= sizeof(dir))
+		return;
+	if (mkdir(dir, OCIFBSD_STATE_DIR_MODE) != 0 && errno != EEXIST)
+		return;
+	ocifbsd_secure_path(dir, OCIFBSD_STATE_DIR_MODE);
+
+	n = snprintf(tmp, sizeof(tmp), "%s.tmp.%d", path, (int)getpid());
+	if (n < 0 || (size_t)n >= sizeof(tmp))
+		return;
+	fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, OCIFBSD_STATE_FILE_MODE);
+	if (fd < 0)
+		return;
+	if (safe_write(fd, id, strlen(id)) != 0) {
+		close(fd);
+		unlink(tmp);
+		return;
+	}
+	close(fd);
+	if (rename(tmp, path) != 0) {
+		unlink(tmp);
+		return;
+	}
+	ocifbsd_secure_path(path, OCIFBSD_STATE_FILE_MODE);
+}
+
+static void
+name_index_remove(const char *name)
+{
+	char path[PATH_MAX];
+
+	if (name == NULL || name_index_path(name, path, sizeof(path)) != 0)
+		return;
+	(void)unlink(path);
+}
+
+/*
  * Cross-process advisory lock for a single container's lifecycle.
  *
  * The in-process state_mutex above only serializes threads within one
@@ -243,8 +323,17 @@ state_save(const struct ocifbsd_container *c)
 	json_object_object_add(obj, "config_path", json_object_new_string(
 	    c->config_path ? c->config_path : ""));
 
-	json_str = strdup(json_object_to_json_string_ext(obj,
-	    JSON_C_TO_STRING_PRETTY));
+	/*
+	 * json_object_to_json_string_ext() returns NULL if it cannot allocate
+	 * its print buffer. Passing that straight to strdup() dereferences
+	 * NULL; capture and check it first.
+	 */
+	{
+		const char *rendered = json_object_to_json_string_ext(obj,
+		    JSON_C_TO_STRING_PRETTY);
+
+		json_str = (rendered != NULL) ? strdup(rendered) : NULL;
+	}
 	json_object_put(obj);
 
 	if (json_str == NULL) {
@@ -298,20 +387,38 @@ state_save(const struct ocifbsd_container *c)
 		ocifbsd_secure_path(path, OCIFBSD_STATE_FILE_MODE);
 	}
 
+	/*
+	 * Refresh the name index. Best effort by design: the index is a cache
+	 * and every lookup falls back to the scan, so a failure here must not
+	 * fail the save of the authoritative state file.
+	 */
+	if (c->name != NULL && c->name[0] != '\0' &&
+	    strcmp(c->name, c->id) != 0)
+		name_index_put(c->name, c->id);
+
 	return (0);
 }
 
 /*
- * Load container state from disk
+ * Load a container's lifecycle METADATA from disk: everything the state file
+ * itself records (id, name, state, jid, pids, paths), with the persisted state
+ * reconciled against jail liveness -- but WITHOUT reloading the OCI runtime
+ * spec from config.json.
+ *
+ * Callers that only ask about identity or status (list, ps, stats, name
+ * resolution) pay a single small JSON parse per container instead of also
+ * parsing a full runtime spec and realpath()ing its root. state_load() is this
+ * plus the spec, for the lifecycle paths that genuinely need it.
  */
 struct ocifbsd_container *
-state_load(const char *id)
+state_load_meta(const char *id)
 {
 	char path[PATH_MAX];
 	char *json_str;
 	size_t json_len;
 	struct json_object *root;
 	struct ocifbsd_container *c;
+	bool oom;
 
 	/*
 	 * Reject an unsafe id before it becomes a path opened as root: without
@@ -348,11 +455,21 @@ state_load(const char *id)
 		return (NULL);
 	}
 
-	/* Parse fields */
+	/*
+	 * Parse fields.
+	 *
+	 * A strdup() failure on a field that IS present must fail the whole
+	 * load: returning a container whose id or config_path is NULL looks
+	 * like a successful parse to every caller, and c->id then reaches
+	 * snprintf("%.12s")/strcmp as a NULL pointer. Track it and bail.
+	 */
+	oom = false;
 #define GET_STRING(field, json_key) do { \
 	struct json_object *_v = json_object_object_get(root, json_key); \
 	if (_v && json_object_get_type(_v) == json_type_string) { \
 		c->field = strdup(json_object_get_string(_v)); \
+		if (c->field == NULL) \
+			oom = true; \
 	} \
 } while (0)
 
@@ -363,10 +480,16 @@ state_load(const char *id)
 	} \
 } while (0)
 
+/*
+ * Timestamps are written with json_object_new_int64 and time_t is 64-bit on
+ * FreeBSD, so they must be read back with json_object_get_int64: the 32-bit
+ * accessor saturates at INT32_MAX, which silently corrupts every timestamp
+ * past 2038-01-19 into the same value and breaks any age/uptime arithmetic.
+ */
 #define GET_INT64(field, json_key) do { \
 	struct json_object *_v = json_object_object_get(root, json_key); \
 	if (_v && json_object_get_type(_v) == json_type_int) { \
-		c->field = (int64_t)json_object_get_int(_v); \
+		c->field = (int64_t)json_object_get_int64(_v); \
 	} \
 } while (0)
 
@@ -381,6 +504,13 @@ state_load(const char *id)
 	GET_INT64(started_at, "started_at");
 	GET_INT64(finished_at, "finished_at");
 	GET_INT(exit_code, "exit_code");
+
+	if (oom) {
+		json_object_put(root);
+		container_free(c);
+		errno = ENOMEM;
+		return (NULL);
+	}
 
 	/* Parse state string -> enum */
 	{
@@ -412,11 +542,25 @@ state_load(const char *id)
 	c->state = ocifbsd_reconcile_state(c->state,
 	    pid_in_jail(c->init_pid, c->jid));
 
-	/*
-	 * State files store lifecycle metadata only. Reload the full OCI
-	 * runtime spec from config.json so start/exec work after process
-	 * restart (CLI is multi-invocation).
-	 */
+	return (c);
+}
+
+/*
+ * Load container state from disk, including the OCI runtime spec.
+ *
+ * State files store lifecycle metadata only, so the full spec is reloaded from
+ * config.json here -- start/exec need it and the CLI is multi-invocation, so
+ * nothing carries it over in memory.
+ */
+struct ocifbsd_container *
+state_load(const char *id)
+{
+	struct ocifbsd_container *c;
+
+	c = state_load_meta(id);
+	if (c == NULL)
+		return (NULL);
+
 	if (c->config_path != NULL) {
 		c->spec = oci_parse_config(c->config_path);
 		if (c->spec != NULL && c->rootfs != NULL &&
@@ -425,9 +569,22 @@ state_load(const char *id)
 		    c->bundle_path != NULL) {
 			char abspath[PATH_MAX];
 			char *resolved;
+			int n;
 
-			snprintf(abspath, sizeof(abspath), "%s/%s",
+			/*
+			 * A truncated join must NOT be resolved: the prefix
+			 * that survives truncation can name a completely
+			 * different, existing directory, and this value
+			 * becomes the jail root that mount/jail_set later use
+			 * as root. Leave root.path as-is on overflow rather
+			 * than pointing the jail somewhere the spec never
+			 * named. (container_create makes the same check at
+			 * create time; this is the reload path.)
+			 */
+			n = snprintf(abspath, sizeof(abspath), "%s/%s",
 			    c->bundle_path, c->spec->root.path);
+			if (n < 0 || (size_t)n >= sizeof(abspath))
+				return (c);
 			resolved = realpath(abspath, NULL);
 			if (resolved == NULL)
 				resolved = strdup(abspath);
@@ -448,10 +605,27 @@ int
 state_delete(const char *id)
 {
 	char path[PATH_MAX];
+	struct ocifbsd_container *c;
 
 	if (!state_id_is_safe(id)) {
 		errno = EINVAL;
 		return (-1);
+	}
+
+	/*
+	 * Drop this container's name-index entry before removing the state
+	 * file. The name lives in the state file, so it has to be read first;
+	 * a metadata-only load is enough (no spec parse needed to learn a
+	 * name). A stale entry left behind would still resolve correctly --
+	 * lookups verify the target -- but removing it keeps the index tidy
+	 * and lets a later container reuse the name.
+	 */
+	c = state_load_meta(id);
+	if (c != NULL) {
+		if (c->name != NULL && c->id != NULL &&
+		    strcmp(c->name, c->id) != 0)
+			name_index_remove(c->name);
+		container_free(c);
 	}
 
 	get_state_path(id, path, sizeof(path));
@@ -461,6 +635,57 @@ state_delete(const char *id)
 	}
 
 	return (0);
+}
+
+/*
+ * Resolve a container name to its id via the index.
+ *
+ * Returns a newly allocated id string (caller frees) on a verified hit, or
+ * NULL when the name is not indexed, the index is stale, or the name is not a
+ * safe path component. NULL is never conclusive: the caller falls back to the
+ * directory scan, which remains the source of truth.
+ */
+char *
+state_lookup_name(const char *name)
+{
+	char path[PATH_MAX];
+	char *id;
+	size_t len;
+	struct ocifbsd_container *c;
+	bool ok;
+
+	if (name == NULL || name_index_path(name, path, sizeof(path)) != 0)
+		return (NULL);
+
+	id = read_file(path, &len);
+	if (id == NULL)
+		return (NULL);
+	/* Trim any trailing newline a human may have added. */
+	while (len > 0 && (id[len - 1] == '\n' || id[len - 1] == '\r'))
+		id[--len] = '\0';
+	if (len == 0 || !state_id_is_safe(id)) {
+		free(id);
+		return (NULL);
+	}
+
+	/*
+	 * Verify: the indexed container must still exist AND still carry this
+	 * name. Without this check a stale entry (state file removed behind
+	 * our back, or the name reused) would silently resolve to the wrong
+	 * container, which is far worse than a slow lookup.
+	 */
+	c = state_load_meta(id);
+	if (c == NULL) {
+		free(id);
+		return (NULL);
+	}
+	ok = (c->name != NULL && strcmp(c->name, name) == 0);
+	container_free(c);
+	if (!ok) {
+		free(id);
+		return (NULL);
+	}
+	return (id);
 }
 
 /*
@@ -506,9 +731,15 @@ state_list(int *n)
 		if (ext == NULL || strcmp(ext, ".json") != 0)
 			continue;
 
-		/* Load container state (strip the ".json" extension) */
+		/*
+		 * Load container state (strip the ".json" extension).
+		 * Metadata only: no caller of state_list() reads ->spec, and
+		 * parsing every container's runtime spec here made listing
+		 * O(containers * spec size) for information the state file
+		 * already holds.
+		 */
 		*ext = '\0';
-		c = state_load(entry->d_name);
+		c = state_load_meta(entry->d_name);
 		if (c == NULL)
 			continue;
 

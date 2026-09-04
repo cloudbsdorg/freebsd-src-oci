@@ -771,7 +771,24 @@ resolve_cid(const char *spec)
 		return (out);
 	}
 
-	/* Otherwise match by human-readable name. */
+	/*
+	 * Otherwise match by human-readable name. Try the name index first:
+	 * it answers the common case with one small read instead of loading
+	 * every container in the store. A miss is inconclusive (the index is
+	 * a cache), so fall through to the authoritative scan.
+	 */
+	{
+		char *indexed = state_lookup_name(spec);
+
+		if (indexed != NULL) {
+			if (strlcpy(buf, indexed, sizeof(buf)) < sizeof(buf))
+				out = buf;
+			free(indexed);
+			if (out != spec)
+				return (out);
+		}
+	}
+
 	list = state_list(&n);
 	if (list == NULL)
 		return (spec);
@@ -2112,6 +2129,22 @@ network_resolve(const char *ref)
 		if (match != NULL)
 			container_free(match);
 		return (NULL);
+	}
+
+	/*
+	 * The scan above matches on metadata alone (state_list no longer parses
+	 * every container's runtime spec just to compare a name). Callers of
+	 * network_resolve go on to rebuild the jail from the spec, so promote
+	 * the winner to a full load now that exactly one candidate is known:
+	 * one spec parse instead of N.
+	 */
+	if (match->id != NULL) {
+		struct ocifbsd_container *full = state_load(match->id);
+
+		if (full != NULL) {
+			container_free(match);
+			match = full;
+		}
 	}
 	return (match);
 }
