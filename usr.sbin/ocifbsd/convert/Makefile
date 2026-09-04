@@ -3,7 +3,7 @@
 # Makefile for ocifbsd config converter module
 #
 
-SRCS=	convert.c ensemble.c ensemble_services.c parser.c
+SRCS=	convert.c ensemble.c ensemble_services.c parser.c yaml.c
 
 PROG=	ocifbsd_convert
 MAN=

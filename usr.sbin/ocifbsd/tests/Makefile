@@ -9,7 +9,7 @@
 # ipam_race_test links the already-built networking library out of the object
 # tree, so build the runtime first (cd .. && make).
 #
-PROGS=	json_escape_test ipam_race_test
+PROGS=	json_escape_test ipam_race_test yaml_test
 MAN=
 
 SRCS.json_escape_test=	json_escape_test.c
@@ -18,9 +18,12 @@ SRCS.json_escape_test=	json_escape_test.c
 .PATH:	${.CURDIR:H}/src
 SRCS.ipam_race_test=	ipam_race_test.c utils.c
 
+.PATH:	${.CURDIR:H}/convert
+SRCS.yaml_test=	yaml_test.c yaml.c
+
 NETOBJ?=	${.OBJDIR:H}/network
 
-CFLAGS+=	-I${.CURDIR:H}/include -I${.CURDIR:H}/network
+CFLAGS+=	-I${.CURDIR:H}/include -I${.CURDIR:H}/network -I${.CURDIR:H}/convert
 LIBADD.ipam_race_test=	md
 LDADD.ipam_race_test=	${NETOBJ}/libocifbsd_network.a
 DPADD.ipam_race_test=	${NETOBJ}/libocifbsd_network.a

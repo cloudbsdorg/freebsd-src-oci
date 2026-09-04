@@ -35,8 +35,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 #include "convert.h"
+#include "yaml.h"
+
+#ifndef nitems
+#define	nitems(x)	(sizeof((x)) / sizeof((x)[0]))
+#endif
 
 /*
  * Ensemble resource types
@@ -120,72 +126,178 @@ ensemble_detect_kind(const char *yaml)
 	return (ENSEMBLE_UNKNOWN);
 }
 
-/*
- * Extract field from YAML (simple parser)
- */
-static char *
-yaml_get_field(const char *yaml, const char *field)
+/* Human-readable manifest kind, for diagnostics. */
+static const char *
+ensemble_kind_str(ensemble_kind_t k)
 {
-	char *result = NULL;
-	const char *p;
-	char search[64];
-	size_t field_len;
 
-	field_len = strlen(field);
-	snprintf(search, sizeof(search), "%s:", field);
-
-	/*
-	 * Anchor the match to a token boundary: an unanchored strstr matches
-	 * "name:" inside "hostname:" (and "port:" inside "targetPort:"), so the
-	 * converter would extract the wrong value. Require the key to be preceded
-	 * by start-of-document, a newline, or whitespace.
-	 */
-	p = yaml;
-	for (;;) {
-		p = strstr(p, search);
-		if (p == NULL)
-			return (NULL);
-		if (p == yaml || p[-1] == '\n' || p[-1] == ' ' || p[-1] == '\t')
-			break;
-		p += 1;
+	switch (k) {
+	case ENSEMBLE_DEPLOYMENT:	return ("Deployment");
+	case ENSEMBLE_SERVICE:		return ("Service");
+	case ENSEMBLE_CONFIGMAP:	return ("ConfigMap");
+	case ENSEMBLE_SECRET:		return ("Secret");
+	case ENSEMBLE_INGRESS:		return ("Ingress");
+	case ENSEMBLE_PVC:		return ("PersistentVolumeClaim");
+	case ENSEMBLE_NAMESPACE:	return ("Namespace");
+	case ENSEMBLE_POD:		return ("Pod");
+	case ENSEMBLE_STATEFULSET:	return ("StatefulSet");
+	case ENSEMBLE_DAEMONSET:	return ("DaemonSet");
+	case ENSEMBLE_JOB:		return ("Job");
+	case ENSEMBLE_CRONJOB:		return ("CronJob");
+	default:			return ("unknown kind");
 	}
-
-	p += field_len + 1;
-	while (isspace((unsigned char)*p))
-		p++;
-
-	/* Check for quoted string */
-	if (*p == '"' || *p == '\'') {
-		char quote = *p++;
-		const char *end = strchr(p, quote);
-		if (end != NULL) {
-			result = malloc(end - p + 1);
-			if (result != NULL) {
-				memcpy(result, p, end - p);
-				result[end - p] = '\0';
-			}
-		}
-	} else {
-		/* Unquoted - until end of line */
-		const char *end = p;
-		while (*end && *end != '\n' && *end != '#')
-			end++;
-
-		/* Trim trailing whitespace */
-		while (end > p && isspace((unsigned char)end[-1]))
-			end--;
-
-		if (end > p) {
-			result = malloc(end - p + 1);
-			if (result != NULL) {
-				memcpy(result, p, end - p);
-				result[end - p] = '\0';
-			}
-		}
-	}
-
-	return (result);
 }
+
+/*
+ * Field extraction, backed by the real indent-aware parser (convert/yaml.c).
+ *
+ * The previous implementation scanned the raw document for the substring
+ * "<key>:". That cannot say WHERE a key lives, so `metadata.name` and a
+ * container's `name` were the same query and whichever appeared first in the
+ * file won; it also matched a key inside a comment or inside a quoted value.
+ *
+ * ens_open() parses once per conversion and the lookups below address the
+ * document by path. ens_field() remains for the handful of fields whose
+ * location the manifest schema genuinely does not pin -- but it now matches a
+ * whole key in the parsed tree rather than a substring of the file.
+ */
+struct ens_doc {
+	struct yaml_node	*root;
+};
+
+static int
+ens_open(struct ens_doc *doc, const char *yaml)
+{
+
+	doc->root = yaml_parse(yaml);
+	if (doc->root == NULL) {
+		fprintf(stderr, "error: manifest is not valid YAML "
+		    "(or uses constructs this converter does not support)\n");
+		return (-1);
+	}
+	return (0);
+}
+
+static void
+ens_close(struct ens_doc *doc)
+{
+
+	yaml_free(doc->root);
+	doc->root = NULL;
+}
+
+/* Value at an exact path, else NULL. Owned by the document. */
+static const char *
+ens_path(struct ens_doc *doc, const char *path)
+{
+
+	return (yaml_get_scalar(doc->root, path));
+}
+
+/*
+ * Value at the first of several candidate paths that exists. Manifest kinds
+ * put the same logical field in different places, and naming each candidate
+ * explicitly is honest about that, where a document-wide substring search
+ * merely hid it.
+ */
+static const char *
+ens_first(struct ens_doc *doc, const char *const *paths, size_t n)
+{
+	size_t i;
+	const char *v;
+
+	for (i = 0; i < n; i++) {
+		v = yaml_get_scalar(doc->root, paths[i]);
+		if (v != NULL)
+			return (v);
+	}
+	return (NULL);
+}
+
+/* First node anywhere with this key, for genuinely unpinned fields. */
+static const char *
+ens_field(struct ens_doc *doc, const char *key)
+{
+
+	return (yaml_find_scalar(doc->root, key));
+}
+
+/*
+ * Read a field that must be an integer, enforcing its real range.
+ *
+ * A field that is supposed to be a number has to BE a number: the old code
+ * ran the raw scalar through atoi(), which turns "abc", "", "3.5" and
+ * "99999999999999" into a plausible-looking value and substitutes it
+ * silently, so a manifest typo became "zero replicas" or a nonsense port
+ * instead of a visible error. Absent means "use the default"; present but
+ * malformed means the conversion fails.
+ */
+static int
+ens_int(struct ens_doc *doc, const char *const *paths, size_t npaths,
+    const char *what, long min, long max, long dfl, long *out)
+{
+	const char *raw;
+	const char *why = NULL;
+
+	raw = ens_first(doc, paths, npaths);
+	if (raw == NULL) {
+		*out = dfl;
+		return (0);
+	}
+	if (yaml_parse_int(raw, min, max, out, &why) != 0) {
+		fprintf(stderr, "error: %s: %s (got \"%s\"; expected an "
+		    "integer between %ld and %ld)\n", what,
+		    why != NULL ? why : "invalid value", raw, min, max);
+		return (-1);
+	}
+	return (0);
+}
+
+/*
+ * Is this a valid resource quantity?
+ *
+ * The accepted grammar is the one the manifests actually use: an optional
+ * sign, digits with an optional decimal fraction, then an optional suffix --
+ * binary (Ki, Mi, Gi, Ti, Pi, Ei) or decimal SI (m, k, M, G, T, P, E). This
+ * validates the SHAPE against the real specification rather than against a
+ * guess: rejecting "10Gi" or accepting "ten gigs" would both be wrong.
+ */
+static bool
+quantity_is_valid(const char *s)
+{
+	static const char *const suffixes[] = {
+		"", "m", "k", "M", "G", "T", "P", "E",
+		"Ki", "Mi", "Gi", "Ti", "Pi", "Ei"
+	};
+	const char *p = s;
+	bool digits = false;
+	size_t i;
+
+	if (s == NULL || *s == '\0')
+		return (false);
+	if (*p == '+' || *p == '-')
+		p++;
+	while (isdigit((unsigned char)*p)) {
+		p++;
+		digits = true;
+	}
+	if (*p == '.') {
+		p++;
+		while (isdigit((unsigned char)*p)) {
+			p++;
+			digits = true;
+		}
+	}
+	if (!digits)
+		return (false);
+	for (i = 0; i < nitems(suffixes); i++)
+		if (strcmp(p, suffixes[i]) == 0)
+			return (true);
+	return (false);
+}
+
+/* Quote a manifest value for safe emission into the generated document. */
+#define	ENS_Q(buf, v)	yaml_quote((v), (buf), sizeof(buf))
 
 /*
  * Resolve the effective namespace for a converted object: the object's own
@@ -210,35 +322,83 @@ int
 ensemble_convert_deployment(const char *yaml, char **output,
 	struct convert_options *opts)
 {
-	char *name = yaml_get_field(yaml, "name");
-	char *namespace = yaml_get_field(yaml, "namespace");
-	char *app = yaml_get_field(yaml, "app");
-	char *image = yaml_get_field(yaml, "image");
-	char *replicas_str = yaml_get_field(yaml, "replicas");
-	char *container_port_str = yaml_get_field(yaml, "containerPort");
-
-	int replicas = replicas_str ? atoi(replicas_str) : 1;
-	const char *svc_name = name ? name : (app ? app : "unknown");
+	/*
+	 * Address each field where the Deployment schema actually puts it. The
+	 * old code asked the document for "name" and got whichever `name:`
+	 * appeared first -- which for a Deployment whose metadata block came
+	 * after its pod template was a CONTAINER's name, silently converting
+	 * the wrong object.
+	 */
+	static const char *const name_paths[] = { "metadata.name", "name" };
+	static const char *const ns_paths[] = {
+		"metadata.namespace", "namespace"
+	};
+	static const char *const app_paths[] = {
+		"metadata.labels.app", "spec.selector.matchLabels.app", "app"
+	};
+	static const char *const image_paths[] = {
+		"spec.template.spec.containers.0.image", "image"
+	};
+	static const char *const replica_paths[] = {
+		"spec.replicas", "replicas"
+	};
+	static const char *const port_paths[] = {
+		"spec.template.spec.containers.0.ports.0.containerPort",
+		"containerPort"
+	};
+	struct ens_doc doc;
+	const char *name, *namespace, *app, *image, *svc_name;
+	long replicas, port;
 	char portbuf[160] = "";
+	char qname[512], qns[512], qimage[1024], qorigns[512];
+	const char *qsvc;
+	char portnum[16];
+	char *result;
+
+	if (ens_open(&doc, yaml) != 0)
+		return (CONVERT_SYNTAX_ERROR);
+
+	name = ens_first(&doc, name_paths, nitems(name_paths));
+	namespace = ens_first(&doc, ns_paths, nitems(ns_paths));
+	app = ens_first(&doc, app_paths, nitems(app_paths));
+	image = ens_first(&doc, image_paths, nitems(image_paths));
+
+	/* Numbers must be numbers, and a port must be a legal port. */
+	if (ens_int(&doc, replica_paths, nitems(replica_paths),
+	    "Deployment spec.replicas", 0, 100000, 1, &replicas) != 0) {
+		ens_close(&doc);
+		return (CONVERT_VALIDATION_ERROR);
+	}
+	port = -1;
+	if (ens_first(&doc, port_paths, nitems(port_paths)) != NULL &&
+	    ens_int(&doc, port_paths, nitems(port_paths),
+	    "Deployment containerPort", YAML_PORT_MIN, YAML_PORT_MAX, 0,
+	    &port) != 0) {
+		ens_close(&doc);
+		return (CONVERT_VALIDATION_ERROR);
+	}
+
+	svc_name = name ? name : (app ? app : "unknown");
+	qsvc = ENS_Q(qname, svc_name);
 
 	/*
-	 * Emit only fields the manifest actually declares — do not invent a
-	 * default port or image. A ports block is written only when the
-	 * Deployment names a containerPort; a missing image is flagged rather
-	 * than replaced with a plausible-but-wrong value.
+	 * Emit only fields the manifest actually declares -- do not invent a
+	 * default port or image. Every value that came from the manifest is
+	 * quoted on the way out, so a value containing a newline or a colon
+	 * cannot inject structure into the document we generate.
 	 */
-	if (container_port_str != NULL)
+	if (port > 0) {
+		snprintf(portnum, sizeof(portnum), "%ld", port);
 		snprintf(portbuf, sizeof(portbuf),
 		    "    ports:\n"
 		    "      - container: %s\n"
 		    "        protocol: tcp\n",
-		    container_port_str);
+		    portnum);
+	}
 	if (image == NULL)
 		fprintf(stderr, "warning: Deployment '%s': no container image "
 		    "found; set 'image' in the native config\n", svc_name);
 
-	/* Build simplified output */
-	char *result;
 	asprintf(&result,
 	    "# Converted from Ensemble Deployment\n"
 	    "# Original: %s/%s\n"
@@ -248,23 +408,16 @@ ensemble_convert_deployment(const char *yaml, char **output,
 	    "services:\n"
 	    "  - name: %s\n"
 	    "    image: %s\n"
-	    "    replicas: %d\n"
+	    "    replicas: %ld\n"
 	    "%s",
-	    namespace ? namespace : "default",
-	    svc_name,
-	    svc_name,
-	    namespace ? namespace : opts->namespace,
-	    svc_name,
-	    image ? image : "# TODO: set image",
+	    ENS_Q(qorigns, namespace ? namespace : "default"),
+	    qsvc,
+	    qsvc, ENS_Q(qns, namespace ? namespace : opts->namespace), qsvc,
+	    image ? ENS_Q(qimage, image) : "# TODO: set image",
 	    replicas,
 	    portbuf);
 
-	free(name);
-	free(namespace);
-	free(app);
-	free(image);
-	free(replicas_str);
-	free(container_port_str);
+	ens_close(&doc);
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -279,31 +432,72 @@ int
 ensemble_convert_service(const char *yaml, char **output,
 	struct convert_options *opts)
 {
-	char *name = yaml_get_field(yaml, "name");
-	char *namespace = yaml_get_field(yaml, "namespace");
-	char *selector = yaml_get_field(yaml, "selector");
-	char *port_name = yaml_get_field(yaml, "port");
-	char *target_port_str = yaml_get_field(yaml, "targetPort");
-	char *type = yaml_get_field(yaml, "type");
-
-	const char *svc_name = name ? name : "unknown";
-	char selbuf[160] = "";
+	static const char *const name_paths[] = { "metadata.name", "name" };
+	static const char *const ns_paths[] = {
+		"metadata.namespace", "namespace"
+	};
+	static const char *const sel_paths[] = {
+		"spec.selector.app", "spec.selector", "selector"
+	};
+	static const char *const tport_paths[] = {
+		"spec.ports.0.targetPort", "targetPort"
+	};
+	static const char *const port_paths[] = {
+		"spec.ports.0.port", "port"
+	};
+	struct ens_doc doc;
+	const char *name, *namespace, *selector, *svc_name;
+	long port;
+	char selbuf[256] = "";
 	char portbuf[200] = "";
+	char qname[512], qns[512], qsel[512], qorigns[512], portnum[16];
+	const char *qsvc;
 	char *result;
 
+	if (ens_open(&doc, yaml) != 0)
+		return (CONVERT_SYNTAX_ERROR);
+
+	name = ens_first(&doc, name_paths, nitems(name_paths));
+	namespace = ens_first(&doc, ns_paths, nitems(ns_paths));
+	selector = ens_first(&doc, sel_paths, nitems(sel_paths));
+
 	/*
-	 * Emit only what the Service declares — no invented selector, port
-	 * name, or port number. A Service maps a published port to a target
-	 * (container) port; emit the target port when present.
+	 * A Service maps a published port to a target (container) port. Prefer
+	 * targetPort, fall back to port, and require whichever is present to be
+	 * a real port number rather than trusting it downstream.
 	 */
+	port = -1;
+	if (ens_first(&doc, tport_paths, nitems(tport_paths)) != NULL) {
+		if (ens_int(&doc, tport_paths, nitems(tport_paths),
+		    "Service spec.ports[0].targetPort", YAML_PORT_MIN,
+		    YAML_PORT_MAX, 0, &port) != 0) {
+			ens_close(&doc);
+			return (CONVERT_VALIDATION_ERROR);
+		}
+	} else if (ens_first(&doc, port_paths, nitems(port_paths)) != NULL) {
+		if (ens_int(&doc, port_paths, nitems(port_paths),
+		    "Service spec.ports[0].port", YAML_PORT_MIN,
+		    YAML_PORT_MAX, 0, &port) != 0) {
+			ens_close(&doc);
+			return (CONVERT_VALIDATION_ERROR);
+		}
+	}
+
+	svc_name = name ? name : "unknown";
+	qsvc = ENS_Q(qname, svc_name);
+
+	/* Emit only what the Service declares -- nothing invented. */
 	if (selector != NULL)
-		snprintf(selbuf, sizeof(selbuf), "    selector: %s\n", selector);
-	if (target_port_str != NULL || port_name != NULL)
+		snprintf(selbuf, sizeof(selbuf), "    selector: %s\n",
+		    ENS_Q(qsel, selector));
+	if (port > 0) {
+		snprintf(portnum, sizeof(portnum), "%ld", port);
 		snprintf(portbuf, sizeof(portbuf),
 		    "    ports:\n"
 		    "      - container: %s\n"
 		    "        protocol: tcp\n",
-		    target_port_str ? target_port_str : port_name);
+		    portnum);
+	}
 
 	asprintf(&result,
 	    "# Converted from Ensemble Service\n"
@@ -315,20 +509,13 @@ ensemble_convert_service(const char *yaml, char **output,
 	    "services:\n"
 	    "  - name: %s\n"
 	    "%s%s",
-	    namespace ? namespace : "default",
-	    svc_name,
-	    svc_name,
-	    namespace ? namespace : opts->namespace,
-	    svc_name,
+	    ENS_Q(qorigns, namespace ? namespace : "default"),
+	    qsvc,
+	    qsvc, ENS_Q(qns, namespace ? namespace : opts->namespace), qsvc,
 	    selbuf,
 	    portbuf);
 
-	free(name);
-	free(namespace);
-	free(selector);
-	free(port_name);
-	free(target_port_str);
-	free(type);
+	ens_close(&doc);
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -343,9 +530,23 @@ int
 ensemble_convert_configmap(const char *yaml, char **output,
 	struct convert_options *opts)
 {
-	char *name = yaml_get_field(yaml, "name");
-	char *namespace = yaml_get_field(yaml, "namespace");
+	struct ens_doc doc;
+	const char *name, *namespace;
+	char qname[512], qns[512];
+	const char *qname_s, *qns_s;
+
+	if (ens_open(&doc, yaml) != 0)
+		return (CONVERT_SYNTAX_ERROR);
+	name = ens_path(&doc, "metadata.name");
+	if (name == NULL)
+		name = ens_path(&doc, "name");	/* flat Ensemble dialect */
+	namespace = ens_path(&doc, "metadata.namespace");
+	if (namespace == NULL)
+		namespace = ens_path(&doc, "namespace");
+	qname_s = ENS_Q(qname, name ? name : "unknown");
 	const char *ns = ensemble_resolve_namespace(namespace, opts);
+
+	qns_s = ENS_Q(qns, ns);
 
 	if (strstr(yaml, "data:") != NULL)
 		fprintf(stderr, "warning: ConfigMap '%s': 'data' was not "
@@ -363,13 +564,9 @@ ensemble_convert_configmap(const char *yaml, char **output,
 	    "  # Note: Add config data below\n"
 	    "  # data:\n"
 	    "  #   key: value\n",
-	    ns,
-	    name ? name : "unknown",
-	    name ? name : "unknown",
-	    ns);
+	    qns_s, qname_s, qname_s, qns_s);
 
-	free(name);
-	free(namespace);
+	ens_close(&doc);
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -384,9 +581,23 @@ int
 ensemble_convert_secret(const char *yaml, char **output,
 	struct convert_options *opts)
 {
-	char *name = yaml_get_field(yaml, "name");
-	char *namespace = yaml_get_field(yaml, "namespace");
+	struct ens_doc doc;
+	const char *name, *namespace;
+	char qname[512], qns[512];
+	const char *qname_s, *qns_s;
+
+	if (ens_open(&doc, yaml) != 0)
+		return (CONVERT_SYNTAX_ERROR);
+	name = ens_path(&doc, "metadata.name");
+	if (name == NULL)
+		name = ens_path(&doc, "name");	/* flat Ensemble dialect */
+	namespace = ens_path(&doc, "metadata.namespace");
+	if (namespace == NULL)
+		namespace = ens_path(&doc, "namespace");
+	qname_s = ENS_Q(qname, name ? name : "unknown");
 	const char *ns = ensemble_resolve_namespace(namespace, opts);
+
+	qns_s = ENS_Q(qns, ns);
 
 	if (strstr(yaml, "data:") != NULL)
 		fprintf(stderr, "warning: Secret '%s': 'data' was not "
@@ -405,13 +616,9 @@ ensemble_convert_secret(const char *yaml, char **output,
 	    "  # type: opaque | ensemble.io/tls | etc.\n"
 	    "  # data:\n"
 	    "  #   key: <base64-encoded-value>\n",
-	    ns,
-	    name ? name : "unknown",
-	    name ? name : "unknown",
-	    ns);
+	    qns_s, qname_s, qname_s, qns_s);
 
-	free(name);
-	free(namespace);
+	ens_close(&doc);
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -426,9 +633,26 @@ int
 ensemble_convert_ingress(const char *yaml, char **output,
 	struct convert_options *opts)
 {
-	char *name = yaml_get_field(yaml, "name");
-	char *namespace = yaml_get_field(yaml, "namespace");
+	struct ens_doc doc;
+	const char *name, *namespace;
+	char qname[512], qns[512];
+	const char *qname_s, *qns_s, *qnet_s;
+	char netname[600], qnet[1300];
+
+	if (ens_open(&doc, yaml) != 0)
+		return (CONVERT_SYNTAX_ERROR);
+	name = ens_path(&doc, "metadata.name");
+	if (name == NULL)
+		name = ens_path(&doc, "name");	/* flat Ensemble dialect */
+	namespace = ens_path(&doc, "metadata.namespace");
+	if (namespace == NULL)
+		namespace = ens_path(&doc, "namespace");
+	qname_s = ENS_Q(qname, name ? name : "unknown");
 	const char *ns = ensemble_resolve_namespace(namespace, opts);
+
+	qns_s = ENS_Q(qns, ns);
+	snprintf(netname, sizeof(netname), "%s-net", name ? name : "unknown");
+	qnet_s = ENS_Q(qnet, netname);
 
 	if (strstr(yaml, "rules:") != NULL || strstr(yaml, "host:") != NULL)
 		fprintf(stderr, "warning: Ingress '%s': routing rules were not "
@@ -443,7 +667,7 @@ ensemble_convert_ingress(const char *yaml, char **output,
 	    "name: %s\n"
 	    "namespace: %s\n"
 	    "networks:\n"
-	    "  - name: %s-net\n"
+	    "  - name: %s\n"
 	    "    driver: bridge\n"
 	    "    ingress: true\n"
 	    "    # Configure ingress rules in network config\n"
@@ -453,14 +677,10 @@ ensemble_convert_ingress(const char *yaml, char **output,
 	    "    #       - path: /\n"
 	    "    #         service: myservice\n"
 	    "    #         port: 80\n",
-	    ns,
-	    name ? name : "unknown",
-	    name ? name : "unknown",
-	    ns,
-	    name ? name : "unknown");
+	    qns_s, qname_s, qname_s, qns_s,
+	    qnet_s);
 
-	free(name);
-	free(namespace);
+	ens_close(&doc);
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -475,19 +695,50 @@ int
 ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
 	struct convert_options *opts)
 {
-	char *name = yaml_get_field(yaml, "name");
-	char *namespace = yaml_get_field(yaml, "namespace");
-	char *storage_str = yaml_get_field(yaml, "storage");
-	const char *ns = ensemble_resolve_namespace(namespace, opts);
-	const char *vol_name = name ? name : "data";
-	char sizebuf[128];
+	struct ens_doc doc;
+	const char *name, *namespace, *storage_str, *ns, *vol_name;
+	char sizebuf[192];
+	char qname[512], qns[512], qvol[512], qsize[256];
+	const char *qname_s, *qns_s;
+
+	if (ens_open(&doc, yaml) != 0)
+		return (CONVERT_SYNTAX_ERROR);
+	name = ens_path(&doc, "metadata.name");
+	if (name == NULL)
+		name = ens_path(&doc, "name");	/* flat Ensemble dialect */
+	namespace = ens_path(&doc, "metadata.namespace");
+	if (namespace == NULL)
+		namespace = ens_path(&doc, "namespace");
+	qname_s = ENS_Q(qname, name ? name : "unknown");
+	storage_str = ens_path(&doc, "spec.resources.requests.storage");
+	if (storage_str == NULL)
+		storage_str = ens_path(&doc, "storage");
+	ns = ensemble_resolve_namespace(namespace, opts);
+	qns_s = ENS_Q(qns, ns);
+	vol_name = name ? name : "data";
+
+	/*
+	 * A storage request is a quantity, not free text: a number followed by
+	 * an optional binary (Ki/Mi/Gi/Ti/Pi) or decimal (k/M/G/T/P) suffix.
+	 * Copying an unvalidated string through would put something like
+	 * "ten gigs" -- or an injected newline -- into the emitted config,
+	 * where it fails much later and much less clearly.
+	 */
+	if (storage_str != NULL && !quantity_is_valid(storage_str)) {
+		fprintf(stderr, "error: PersistentVolumeClaim '%s': storage "
+		    "request \"%s\" is not a valid quantity (expected e.g. "
+		    "512Mi, 10Gi, 1T)\n", name ? name : "unknown", storage_str);
+		ens_close(&doc);
+		return (CONVERT_VALIDATION_ERROR);
+	}
 
 	/*
 	 * Emit the declared storage request. If the claim omits it, do not
 	 * invent a size — leave a TODO the operator must fill in, and say so.
 	 */
 	if (storage_str != NULL) {
-		snprintf(sizebuf, sizeof(sizebuf), "    size: %s\n", storage_str);
+		snprintf(sizebuf, sizeof(sizebuf), "    size: %s\n",
+		    ENS_Q(qsize, storage_str));
 	} else {
 		fprintf(stderr, "warning: PersistentVolumeClaim '%s': no "
 		    "storage size declared; set 'size:' in the native config\n",
@@ -509,16 +760,11 @@ ensemble_convert_persistentvolumeclaim(const char *yaml, char **output,
 	    "%s"
 	    "    # access_mode: ReadWriteOnce | ReadOnlyMany | ReadWriteMany\n"
 	    "    access_mode: ReadWriteOnce\n",
-	    ns,
-	    name ? name : "unknown",
-	    name ? name : "unknown",
-	    ns,
-	    vol_name,
+	    qns_s, qname_s, qname_s, qns_s,
+	    ENS_Q(qvol, vol_name),
 	    sizebuf);
 
-	free(name);
-	free(namespace);
-	free(storage_str);
+	ens_close(&doc);
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -533,17 +779,23 @@ int
 ensemble_convert_namespace(const char *yaml, char **output,
 	struct convert_options *opts)
 {
-	char *name = yaml_get_field(yaml, "name");
-
+	struct ens_doc doc;
+	const char *name;
+	char qname[512];
 	char *result;
+
+	if (ens_open(&doc, yaml) != 0)
+		return (CONVERT_SYNTAX_ERROR);
+	name = ens_path(&doc, "metadata.name");
+
 	asprintf(&result,
 	    "# Converted from Ensemble Namespace\n"
 	    "\n"
 	    "# Namespace definition\n"
 	    "name: %s\n",
-	    name ? name : "default");
+	    ENS_Q(qname, name ? name : "default"));
 
-	free(name);
+	ens_close(&doc);
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
@@ -563,6 +815,8 @@ ensemble_convert_multi(const char *yaml, char **output,
 	size_t result_len = 0;
 	const char *p;
 	int docs = 0;
+	int failed = 0;
+	int first_error = CONVERT_SUCCESS;
 
 	/* Add header */
 	asprintf(&result,
@@ -601,7 +855,26 @@ ensemble_convert_multi(const char *yaml, char **output,
 			break;
 
 		doc_start = p;
-		doc_end = strstr(doc_start, "---");
+		/*
+		 * A document separator is a "---" that BEGINS a line. Matching
+		 * it anywhere chopped documents apart at prose: this project's
+		 * own example manifest contains the comment
+		 * "# --- Stateless web tier ---", and splitting there handed
+		 * the converter fragments of a Stack that it then converted as
+		 * though each were a standalone Deployment.
+		 */
+		doc_end = NULL;
+		{
+			const char *q = doc_start;
+
+			while ((q = strstr(q, "---")) != NULL) {
+				if (q == yaml || q[-1] == '\n') {
+					doc_end = q;
+					break;
+				}
+				q += 3;
+			}
+		}
 		if (doc_end == NULL)
 			doc_end = doc_start + strlen(doc_start);
 
@@ -638,7 +911,32 @@ ensemble_convert_multi(const char *yaml, char **output,
 			ret = ensemble_convert_namespace(doc, &converted, opts);
 			break;
 		default:
-			asprintf(&converted, "# Skipped unknown kind\n");
+			/*
+			 * Name the kind that was skipped. "unknown kind" told
+			 * the author nothing about which document was dropped
+			 * or why -- and a `kind: Stack` manifest is not a
+			 * migration input at all, it is deployed directly.
+			 */
+			{
+				const char *ks = ensemble_kind_str(kind);
+
+				if (kind == ENSEMBLE_UNKNOWN)
+					fprintf(stderr, "warning: document %d "
+					    "has no recognised 'kind'; "
+					    "skipped\n", docs + failed + 1);
+				else
+					fprintf(stderr, "warning: document %d: "
+					    "'%s' is not a supported conversion "
+					    "source; skipped\n",
+					    docs + failed + 1, ks);
+				if (kind == ENSEMBLE_UNKNOWN)
+					asprintf(&converted, "# Skipped: no "
+					    "recognised 'kind' in this "
+					    "document\n");
+				else
+					asprintf(&converted, "# Skipped "
+					    "unsupported kind: %s\n", ks);
+			}
 			ret = CONVERT_SUCCESS;
 		}
 
@@ -677,6 +975,24 @@ ensemble_convert_multi(const char *yaml, char **output,
 			docs++;
 		}
 
+		else if (ret != CONVERT_SUCCESS) {
+			/*
+			 * Record the first failure and keep going, so one run
+			 * reports every bad document rather than making the
+			 * author fix them one at a time. The conversion as a
+			 * whole still FAILS: silently dropping a document
+			 * would hand back a partial config that looks
+			 * complete, and a partial config is the one outcome
+			 * worse than an error.
+			 */
+			fprintf(stderr, "error: document %d (%s) was not "
+			    "converted\n", docs + failed + 1,
+			    ensemble_kind_str(kind));
+			if (first_error == CONVERT_SUCCESS)
+				first_error = ret;
+			failed++;
+		}
+
 		free(converted);
 		free(doc);
 		/* Advance to the separator (or end); the top of the loop
@@ -686,6 +1002,12 @@ ensemble_convert_multi(const char *yaml, char **output,
 
 	if (result == NULL)
 		return (CONVERT_MEMORY_ERROR);
+	if (first_error != CONVERT_SUCCESS) {
+		fprintf(stderr, "error: %d of %d document(s) failed to "
+		    "convert; no output written\n", failed, docs + failed);
+		free(result);
+		return (first_error);
+	}
 	*output = result;
 	return (CONVERT_SUCCESS);
 }
