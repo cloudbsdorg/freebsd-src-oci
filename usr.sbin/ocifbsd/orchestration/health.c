@@ -48,6 +48,7 @@
 #include <sys/wait.h>
 
 #include "orchestration.h"
+#include "loadbalancer.h"	/* service_lb_apply: re-drive pf on health change */
 
 #define MAX_HEALTH_CHECKS 1024
 
@@ -136,6 +137,9 @@ struct health_check_state {
 	char			namespace[128];
 	health_check_type_t	type;
 	int			jid;	/* jail to confine EXEC probes to; 0 = none */
+	int			period;			/* seconds between checks */
+	int			success_threshold;	/* successes to become healthy */
+	int			failure_threshold;	/* failures to become unhealthy */
 	time_t			next_check;
 	int			consecutive_failures;
 	int			consecutive_successes;
@@ -324,19 +328,37 @@ process_health_result(struct health_check_state *state, int result)
 		state->consecutive_failures = 0;
 
 		if (!state->healthy &&
-		    state->consecutive_successes >= 1) {
+		    state->consecutive_successes >= state->success_threshold) {
 			state->healthy = true;
 
 			orch_event_publish("Normal", "HealthCheckPassed",
 			    state->namespace,
 			    "Health check passed for %s", state->replica_name);
+
+			/*
+			 * Reflect recovery in replica state so the load balancer
+			 * (which selects REPLICA_STATE_RUNNING backends) starts
+			 * routing to it again.
+			 */
+			svc = service_get(state->service_name, state->namespace);
+			if (svc != NULL) {
+				for (int i = 0; i < svc->nreplicas; i++) {
+					if (strcmp(svc->replicas[i].name,
+					    state->replica_name) == 0) {
+						svc->replicas[i].state =
+						    REPLICA_STATE_RUNNING;
+						break;
+					}
+				}
+				(void)service_lb_apply(svc);
+			}
 		}
 	} else {
 		state->consecutive_failures++;
 		state->consecutive_successes = 0;
 
 		if (state->healthy &&
-		    state->consecutive_failures >= 3) {
+		    state->consecutive_failures >= state->failure_threshold) {
 			state->healthy = false;
 
 			orch_event_publish("Warning", "HealthCheckFailed",
@@ -344,13 +366,18 @@ process_health_result(struct health_check_state *state, int result)
 			    "Health check failed for %s (%d failures)",
 			    state->replica_name, state->consecutive_failures);
 
-			/* Get service and mark replica unhealthy */
+			/*
+			 * Mark the replica FAILED and re-apply the load balancer
+			 * so pf stops round-robining to a dead backend — the
+			 * whole point of a health check.
+			 */
 			svc = service_get(state->service_name, state->namespace);
 			if (svc != NULL) {
 				for (int i = 0; i < svc->nreplicas; i++) {
 					if (strcmp(svc->replicas[i].name,
 					    state->replica_name) == 0) {
-						/* Trigger failure handling */
+						svc->replicas[i].state =
+						    REPLICA_STATE_FAILED;
 						orch_event_publish("Warning",
 						    "ReplicaUnhealthy",
 						    state->namespace,
@@ -359,6 +386,7 @@ process_health_result(struct health_check_state *state, int result)
 						break;
 					}
 				}
+				(void)service_lb_apply(svc);
 			}
 		}
 	}
@@ -383,8 +411,8 @@ health_check_thread_func(void *arg)
 			int result = execute_health_check(state);
 			process_health_result(state, result);
 
-			/* Schedule next check */
-			state->next_check = ts.tv_sec + 10;  /* Default period */
+			/* Schedule next check at the configured period. */
+			state->next_check = ts.tv_sec + state->period;
 		}
 		pthread_mutex_unlock(&state->lock);
 
@@ -478,6 +506,12 @@ health_check_start(struct service *service)
 		state->type = hc->type;
 		state->healthy = true;
 		state->active = true;
+		/* Honor the spec's tunables, with sane defaults when unset (0). */
+		state->period = hc->period > 0 ? hc->period : 10;
+		state->success_threshold =
+		    hc->success_threshold > 0 ? hc->success_threshold : 1;
+		state->failure_threshold =
+		    hc->failure_threshold > 0 ? hc->failure_threshold : 3;
 		state->next_check = time(NULL) + hc->initial_delay;
 		pthread_mutex_init(&state->lock, NULL);
 
