@@ -31,6 +31,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/sysctl.h>
@@ -650,16 +651,32 @@ epair_exists(const char *epair)
  */
 /*
  * Allocation bitmap indexed by an address's offset within its range (one bit
- * per address, unsigned shifts — the old code overloaded one uint32_t as both
+ * per address, unsigned shifts -- the old code overloaded one uint32_t as both
  * the cursor AND a 32-bit mask keyed by addr%32, aliasing every 32 addresses
  * with a 1<<31 UB). The bitmap is PERSISTED to one file per range under the
- * network state dir, so allocations survive across ocifbsd invocations — each
+ * network state dir, so allocations survive across ocifbsd invocations: each
  * CLI process is short-lived, and an in-memory-only bitmap would hand out
- * duplicate addresses to successive `network connect` calls. (A concurrent-
- * allocation lock across the read-modify-write is a further refinement.)
+ * duplicate addresses to successive `network connect` calls.
+ *
+ * Allocation is a read-modify-write, so it runs under an exclusive advisory
+ * lock held on the bitmap file itself for the whole transaction: open+lock,
+ * read, scan, flip, write back the ONE changed byte, unlock. Two concurrent
+ * `network connect` calls would otherwise both observe the same free bit and
+ * hand out the same address -- the classic lost update. The acquire/release
+ * pair is scope-bound in ipam_open()/ipam_close() so no exit path can leave a
+ * range locked.
+ *
+ * Complexity: the scan is O(range) bit tests worst case but starts at the low
+ * end and stops at the first clear bit; the commit is a single-byte pwrite(2)
+ * rather than a rewrite of the whole 8 KiB map.
  */
 #define IPAM_MAX_BITS	65536
 #define IPAM_BYTES	(IPAM_MAX_BITS / 8)
+
+struct ipam_map {
+	int	fd;			/* held open AND flock(2)ed */
+	uint8_t	bits[IPAM_BYTES];
+};
 
 static void
 ipam_bitmap_path(uint32_t start, char *buf, size_t buflen)
@@ -668,49 +685,66 @@ ipam_bitmap_path(uint32_t start, char *buf, size_t buflen)
 	    OCIFBSD_NETWORK_STATE_DIR, start);
 }
 
-static void
-ipam_load(uint32_t start, uint8_t *bitmap)
+/*
+ * Open the bitmap for the range starting at `start`, take the exclusive lock,
+ * and read the current bits. On success the caller owns the lock until it
+ * calls ipam_close(). Returns 0 on success, -1 on failure (nothing locked).
+ */
+static int
+ipam_open(uint32_t start, struct ipam_map *m)
 {
 	char path[PATH_MAX];
-	FILE *f;
+	ssize_t n;
 
-	memset(bitmap, 0, IPAM_BYTES);
+	memset(m->bits, 0, IPAM_BYTES);
+	m->fd = -1;
 	ipam_bitmap_path(start, path, sizeof(path));
-	f = fopen(path, "rb");
-	if (f != NULL) {
-		(void)fread(bitmap, 1, IPAM_BYTES, f);
-		fclose(f);
-	}
-}
 
-static int
-ipam_save(uint32_t start, const uint8_t *bitmap)
-{
-	char path[PATH_MAX], tmp[PATH_MAX];
-	FILE *f;
-
-	ipam_bitmap_path(start, path, sizeof(path));
-	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-	f = fopen(tmp, "wb");
-	if (f == NULL)
+	if (mkdir(OCIFBSD_NETWORK_STATE_DIR, 0755) != 0 && errno != EEXIST)
 		return (-1);
-	if (fwrite(bitmap, 1, IPAM_BYTES, f) != IPAM_BYTES) {
-		fclose(f);
-		unlink(tmp);
+	m->fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+	if (m->fd < 0)
+		return (-1);
+	if (flock(m->fd, LOCK_EX) != 0) {
+		close(m->fd);
+		m->fd = -1;
 		return (-1);
 	}
-	fclose(f);
-	if (rename(tmp, path) != 0) {	/* atomic replace */
-		unlink(tmp);
+	/* A short (or freshly created, empty) map reads as all-free. */
+	n = pread(m->fd, m->bits, IPAM_BYTES, 0);
+	if (n < 0) {
+		close(m->fd);		/* closing releases the lock */
+		m->fd = -1;
 		return (-1);
 	}
 	return (0);
 }
 
+/* Write back the single byte holding bit `idx`. The lock is still held. */
+static int
+ipam_commit_bit(struct ipam_map *m, uint32_t idx)
+{
+	off_t off = (off_t)(idx / 8);
+
+	if (pwrite(m->fd, &m->bits[idx / 8], 1, off) != 1)
+		return (-1);
+	return (0);
+}
+
+static void
+ipam_close(struct ipam_map *m)
+{
+
+	if (m->fd >= 0) {
+		close(m->fd);		/* implicitly releases the flock */
+		m->fd = -1;
+	}
+}
+
 int
 ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 {
-	uint8_t bitmap[IPAM_BYTES];
+	struct ipam_map m;
 	uint32_t start, end, current;
 
 	if (range == NULL || addr == NULL)
@@ -718,7 +752,8 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 
 	start = ntohl(range->start.s_addr);
 	end = ntohl(range->end.s_addr);
-	ipam_load(start, bitmap);
+	if (ipam_open(start, &m) != 0)
+		return (-1);
 
 	/* Skip the gateway (first usable address in the range). */
 	for (current = start + 1; current <= end; current++) {
@@ -726,15 +761,19 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 
 		if (idx >= IPAM_MAX_BITS)
 			break;
-		if ((bitmap[idx / 8] & (1u << (idx % 8))) == 0) {
-			bitmap[idx / 8] |= (uint8_t)(1u << (idx % 8));
-			if (ipam_save(start, bitmap) != 0)
-				return (-1);
-			addr->s_addr = htonl(current);
-			return (0);
+		if ((m.bits[idx / 8] & (1u << (idx % 8))) != 0)
+			continue;
+		m.bits[idx / 8] |= (uint8_t)(1u << (idx % 8));
+		if (ipam_commit_bit(&m, idx) != 0) {
+			ipam_close(&m);
+			return (-1);
 		}
+		ipam_close(&m);
+		addr->s_addr = htonl(current);
+		return (0);
 	}
 
+	ipam_close(&m);
 	errno = ENOSPC;
 	return (-1);
 }
@@ -742,8 +781,9 @@ ipam_alloc(struct ipam_range *range, struct in_addr *addr)
 int
 ipam_release(struct ipam_range *range, struct in_addr *addr)
 {
-	uint8_t bitmap[IPAM_BYTES];
+	struct ipam_map m;
 	uint32_t start, ip, idx;
+	int error;
 
 	if (range == NULL || addr == NULL)
 		return (-1);
@@ -755,9 +795,12 @@ ipam_release(struct ipam_range *range, struct in_addr *addr)
 	idx = ip - start;
 	if (idx >= IPAM_MAX_BITS)
 		return (0);
-	ipam_load(start, bitmap);
-	bitmap[idx / 8] &= (uint8_t)~(1u << (idx % 8));
-	return (ipam_save(start, bitmap));
+	if (ipam_open(start, &m) != 0)
+		return (-1);
+	m.bits[idx / 8] &= (uint8_t)~(1u << (idx % 8));
+	error = ipam_commit_bit(&m, idx);
+	ipam_close(&m);
+	return (error);
 }
 
 /*
