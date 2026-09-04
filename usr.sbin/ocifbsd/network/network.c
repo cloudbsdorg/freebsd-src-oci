@@ -71,6 +71,10 @@ extern int mkdirp(const char *path, mode_t mode);
  * is arbitrary root file read/overwrite/unlink (path traversal) in
  * network_get/network_delete/network_connect/etc.
  */
+/* Extract the value of "key":"..." from one JSON line (defined below). */
+static bool json_str_field(const char *line, const char *key, char *out,
+    size_t outlen);
+
 static bool
 net_id_is_valid(const char *id)
 {
@@ -813,23 +817,15 @@ network_delete(const char *network_id)
 	snprintf(state_file, sizeof(state_file), "%s/%s.json",
 	    OCIFBSD_NETWORK_STATE_DIR, network_id);
 
-	/* Get bridge name from state file */
+	/* Get bridge name from state file (parse the "bridge" value, not the key,
+	 * via the shared json_str_field helper — matching network_get). */
 	FILE *f = fopen(state_file, "r");
 	if (f) {
 		char buf[256];
 		while (fgets(buf, sizeof(buf), f)) {
-			if (strstr(buf, "bridge")) {
-				char *p = strchr(buf, ':');
-				if (p) {
-					p++;
-					while (*p == ' ' || *p == '"')
-						p++;
-					char *end = strchr(p, '"');
-					if (end)
-						*end = '\0';
-					strlcpy(bridge_name, p, sizeof(bridge_name));
-				}
-			}
+			if (json_str_field(buf, "bridge", bridge_name,
+			    sizeof(bridge_name)))
+				break;
 		}
 		fclose(f);
 	}
@@ -869,18 +865,9 @@ network_connect(const char *network_id, const char *container_id,
 	if (f) {
 		char buf[256];
 		while (fgets(buf, sizeof(buf), f)) {
-			if (strstr(buf, "bridge")) {
-				char *p = strchr(buf, ':');
-				if (p) {
-					p++;
-					while (*p == ' ' || *p == '"')
-						p++;
-					char *end = strchr(p, '"');
-					if (end)
-						*end = '\0';
-					strlcpy(bridge_name, p, sizeof(bridge_name));
-				}
-			}
+			if (json_str_field(buf, "bridge", bridge_name,
+			    sizeof(bridge_name)))
+				break;
 		}
 		fclose(f);
 	}
@@ -1668,23 +1655,15 @@ network_stats(const char *network_id, uint64_t *rx_bytes, uint64_t *tx_bytes)
 		return (-1);
 
 	char buf[4096];
+	/*
+	 * Extract the "bridge" VALUE. The old strstr("\"bridge\":") + first-quote
+	 * walk landed on the opening quote of the key itself and copied "bridge"
+	 * (the key name), so stats always ran against a nonexistent interface.
+	 * json_str_field skips the key's quotes and returns the value.
+	 */
 	while ((fgets_ret = fgets(buf, sizeof(buf), f)) != NULL) {
-		char *p = strstr(buf, "\"bridge\":");
-		if (p != NULL) {
-			p = strchr(p, '"');
-			if (p != NULL) {
-				p++;
-				char *end = strchr(p, '"');
-				if (end != NULL) {
-					size_t len = (size_t)(end - p);
-					if (len >= sizeof(bridge))
-						len = sizeof(bridge) - 1;
-					memcpy(bridge, p, len);
-					bridge[len] = '\0';
-				}
-			}
+		if (json_str_field(buf, "bridge", bridge, sizeof(bridge)))
 			break;
-		}
 	}
 	fclose(f);
 
