@@ -970,22 +970,30 @@ network_connect(const char *network_id, const char *container_id,
 		endpoint->interface_name = side_b;  /* jail will use this */
 
 		/*
-		 * Proper IPAM (IP Address Management) is not yet implemented.
-		 * The current code does not assign an IP from a pool; the
-		 * caller is expected to configure it externally. A real
-		 * implementation needs to:
-		 *
-		 *   1. Track which IP ranges are in use per network
-		 *      (e.g., 10.0.0.0/24 split into /30 subnets)
-		 *   2. Allocate a free /30 (2 usable addresses) on request
-		 *   3. Persist the allocation in the network state JSON
-		 *   4. Free the allocation when the endpoint is deleted
-		 *
-		 * This is a NETWORK CORRECTNESS issue: without IPAM, two
-		 * endpoints can be assigned the same IP, breaking
-		 * connectivity. See MIGRATION.md for the full plan.
+		 * Persist the host-side epair name (and bridge) so
+		 * network_disconnect can actually tear the interface down. Without
+		 * this record the host epair leaked on every connect — disconnect
+		 * had nothing to act on.
 		 */
-		(void)0;
+		if (net_id_is_valid(container_id)) {
+			char epfile[PATH_MAX];
+			FILE *ef;
+
+			snprintf(epfile, sizeof(epfile),
+			    "%s/endpoint_%s_%s.json",
+			    OCIFBSD_NETWORK_STATE_DIR, network_id, container_id);
+			ef = fopen(epfile, "w");
+			if (ef != NULL) {
+				char e_a[128], e_br[128];
+
+				ocifbsd_json_escape(side_a, e_a, sizeof(e_a));
+				ocifbsd_json_escape(bridge_name, e_br,
+				    sizeof(e_br));
+				fprintf(ef, "{\n  \"host_epair\": \"%s\",\n"
+				    "  \"bridge\": \"%s\"\n}\n", e_a, e_br);
+				fclose(ef);
+			}
+		}
 
 		free(side_a);
 	}
@@ -1020,6 +1028,29 @@ network_disconnect(const char *network_id, const char *container_id)
 	snprintf(state_file, sizeof(state_file),
 	    "%s/endpoint_%s_%s.json",
 	    OCIFBSD_NETWORK_STATE_DIR, network_id, container_id);
+
+	/*
+	 * Read the recorded host-side epair and destroy it (this also removes it
+	 * from the bridge), so the interface network_connect created is actually
+	 * reaped instead of leaking, then remove the endpoint record.
+	 */
+	{
+		FILE *f = fopen(state_file, "r");
+
+		if (f != NULL) {
+			char buf[256], host_epair[128] = "";
+
+			while (fgets(buf, sizeof(buf), f)) {
+				if (json_str_field(buf, "host_epair", host_epair,
+				    sizeof(host_epair)))
+					break;
+			}
+			fclose(f);
+			if (host_epair[0] != '\0')
+				(void)epair_delete(host_epair);
+		}
+	}
+
 	if (unlink(state_file) == -1 && errno != ENOENT) {
 		/* State file doesn't exist (or can't be removed) - not fatal */
 		return (0);
